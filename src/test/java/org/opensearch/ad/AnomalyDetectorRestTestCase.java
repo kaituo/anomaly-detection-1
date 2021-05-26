@@ -440,7 +440,7 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
                 toHttpEntity(
                     "{\n"
                         + "  \"persistent\": {\n"
-                        + "       \"opendistro.anomaly_detection.filter_by_backend_roles\" : \"true\"\n"
+                        + "       \"plugins.anomaly_detection.filter_by_backend_roles\" : \"true\"\n"
                         + "   }\n"
                         + "}"
                 ),
@@ -458,7 +458,7 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
                 toHttpEntity(
                     "{\n"
                         + "  \"persistent\": {\n"
-                        + "       \"opendistro.anomaly_detection.filter_by_backend_roles\" : \"false\"\n"
+                        + "       \"plugins.anomaly_detection.filter_by_backend_roles\" : \"false\"\n"
                         + "   }\n"
                         + "}"
                 ),

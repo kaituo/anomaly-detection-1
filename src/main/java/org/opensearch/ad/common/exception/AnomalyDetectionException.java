@@ -31,7 +31,7 @@ package org.opensearch.ad.common.exception;
  */
 public class AnomalyDetectionException extends RuntimeException {
 
-    private String anomalyDetectorId;
+    protected String anomalyDetectorId;
     // countedInStats will be used to tell whether the exception should be
     // counted in failure stats.
     private boolean countedInStats = true;
