@@ -36,6 +36,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.opensearch.ad.ml.CheckpointDao.FIELD_MODEL;
@@ -54,6 +55,8 @@ import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BiConsumer;
 
 import org.apache.logging.log4j.LogManager;
@@ -69,6 +72,7 @@ import org.mockito.MockitoAnnotations;
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
+import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.get.GetRequest;
@@ -480,5 +484,72 @@ public class CheckpointDaoTests {
         logger.info(model.getRcf());
         assertEquals(modelToSave.getRcf().getTotalUpdates(), model.getRcf().getTotalUpdates());
         assertTrue(model.getThreshold() != null);
+    }
+
+    @Test
+    public void batch_write_no_index() {
+        when(indexUtil.doesCheckpointIndexExist()).thenReturn(false);
+        checkpointDao.batchWrite(new BulkRequest(), null);
+        verify(indexUtil, times(1)).initCheckpointIndex(any());
+
+        doAnswer(invocation -> {
+            ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
+            listener.onResponse(new CreateIndexResponse(true, true, CommonName.CHECKPOINT_INDEX_NAME));
+            return null;
+        }).when(indexUtil).initCheckpointIndex(any());
+        checkpointDao.batchWrite(new BulkRequest(), null);
+        verify(clientUtil, times(1)).execute(any(), any(), any());
+    }
+
+    @Test
+    public void batch_write_index_init_no_ack() throws InterruptedException {
+        when(indexUtil.doesCheckpointIndexExist()).thenReturn(false);
+
+        doAnswer(invocation -> {
+            ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
+            listener.onResponse(new CreateIndexResponse(false, false, CommonName.CHECKPOINT_INDEX_NAME));
+            return null;
+        }).when(indexUtil).initCheckpointIndex(any());
+
+        final CountDownLatch processingLatch = new CountDownLatch(1);
+        checkpointDao.batchWrite(new BulkRequest(), ActionListener.wrap(response -> assertTrue(false), e -> {
+            assertTrue(e.getMessage(), e != null);
+            processingLatch.countDown();
+        }));
+
+        processingLatch.await(100, TimeUnit.SECONDS);
+    }
+
+    @Test
+    public void batch_write_index_already_exists() {
+        when(indexUtil.doesCheckpointIndexExist()).thenReturn(false);
+
+        doAnswer(invocation -> {
+            ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
+            listener.onFailure(new ResourceAlreadyExistsException("blah"));
+            return null;
+        }).when(indexUtil).initCheckpointIndex(any());
+
+        checkpointDao.batchWrite(new BulkRequest(), null);
+        verify(clientUtil, times(1)).execute(any(), any(), any());
+    }
+
+    @Test
+    public void batch_write_init_exception() throws InterruptedException {
+        when(indexUtil.doesCheckpointIndexExist()).thenReturn(false);
+
+        doAnswer(invocation -> {
+            ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
+            listener.onFailure(new RuntimeException("blah"));
+            return null;
+        }).when(indexUtil).initCheckpointIndex(any());
+
+        final CountDownLatch processingLatch = new CountDownLatch(1);
+        checkpointDao.batchWrite(new BulkRequest(), ActionListener.wrap(response -> assertTrue(false), e -> {
+            assertTrue(e.getMessage(), e != null);
+            processingLatch.countDown();
+        }));
+
+        processingLatch.await(100, TimeUnit.SECONDS);
     }
 }

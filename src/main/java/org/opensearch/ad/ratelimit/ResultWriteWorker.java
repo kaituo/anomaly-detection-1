@@ -127,20 +127,18 @@ public class ResultWriteWorker extends BatchWorker<ResultWriteRequest, ADResultB
 
             enqueueRetryRequestIteration(adResultBulkResponse.getRetryRequests().get(), 0);
         }, exception -> {
-            if (ExceptionUtil.isOverloaded(exception)) {
+            if (ExceptionUtil.isRetryAble(exception)) {
+                // retry all of them
+                super.putAll(toProcess);
+            } else if (ExceptionUtil.isOverloaded(exception)) {
                 LOG.error("too many get AD model checkpoint requests or shard not avialble");
                 setCoolDownStart();
             }
 
-            if (ExceptionUtil.isRetryAble(exception)) {
-                // retry all of them
-                super.putAll(toProcess);
-            } else {
-                for (ResultWriteRequest request : toProcess) {
-                    nodeStateManager.setException(request.getDetectorId(), exception);
-                }
-                LOG.error("Fail to save results", exception);
+            for (ResultWriteRequest request : toProcess) {
+                nodeStateManager.setException(request.getDetectorId(), exception);
             }
+            LOG.error("Fail to save results", exception);
         });
     }
 
@@ -173,13 +171,12 @@ public class ResultWriteWorker extends BatchWorker<ResultWriteRequest, ADResultB
             }
 
             AnomalyDetector detector = detectorOptional.get();
-
             super.put(
                 new ResultWriteRequest(
                     // expire based on execute start time
                     resultToRetry.getExecutionStartTime().toEpochMilli() + detector.getDetectorIntervalInMilliseconds(),
                     detectorId,
-                    resultToRetry.getAnomalyGrade() > 0 ? RequestPriority.HIGH : RequestPriority.MEDIUM,
+                    resultToRetry.isHighPriority() ? RequestPriority.HIGH : RequestPriority.MEDIUM,
                     resultToRetry
                 )
             );

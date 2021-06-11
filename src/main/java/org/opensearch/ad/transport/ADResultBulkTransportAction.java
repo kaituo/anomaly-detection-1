@@ -116,14 +116,14 @@ public class ADResultBulkTransportAction extends HandledTransportAction<ADResult
             // exceed soft limit (60%) but smaller than hard limit (90%)
             float acceptProbability = 1 - indexingPressurePercent;
             for (AnomalyResult result : results) {
-                if (isHighPriorityRequest(result) || random.nextFloat() < acceptProbability) {
+                if (result.isHighPriority() || random.nextFloat() < acceptProbability) {
                     addResult(bulkRequest, result);
                 }
             }
         } else {
             // if exceeding hard limit, only index non-zero grade or error result
             for (AnomalyResult result : results) {
-                if (isHighPriorityRequest(result)) {
+                if (result.isHighPriority()) {
                     addResult(bulkRequest, result);
                 }
             }
@@ -137,10 +137,6 @@ public class ADResultBulkTransportAction extends HandledTransportAction<ADResult
         } else {
             listener.onResponse(new ADResultBulkResponse());
         }
-    }
-
-    private boolean isHighPriorityRequest(AnomalyResult result) {
-        return result.getAnomalyGrade() > 0 || result.getError() != null;
     }
 
     private void addResult(BulkRequest bulkRequest, AnomalyResult result) {

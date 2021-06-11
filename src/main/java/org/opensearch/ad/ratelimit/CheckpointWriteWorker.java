@@ -34,7 +34,6 @@ import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.ad.NodeStateManager;
 import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
 import org.opensearch.ad.ml.CheckpointDao;
 import org.opensearch.ad.ml.EntityModel;
 import org.opensearch.ad.ml.ModelState;
@@ -49,7 +48,6 @@ import org.opensearch.threadpool.ThreadPool;
 public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, BulkRequest, BulkResponse> {
     private static final Logger LOG = LogManager.getLogger(CheckpointWriteWorker.class);
 
-    private final AnomalyDetectionIndices indexUtil;
     private final CheckpointDao checkpoint;
     private final String indexName;
     private final Duration checkpointInterval;
@@ -69,7 +67,6 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
         float lowSegmentPruneRatio,
         int maintenanceFreqConstant,
         Duration executionTtl,
-        AnomalyDetectionIndices indexUtil,
         CheckpointDao checkpoint,
         String indexName,
         Duration checkpointInterval,
@@ -97,7 +94,6 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
             stateTtl,
             stateManager
         );
-        this.indexUtil = indexUtil;
         this.checkpoint = checkpoint;
         this.indexName = indexName;
         this.checkpointInterval = checkpointInterval;
@@ -124,7 +120,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
                 if (r.getFailureMessage() != null) {
                     // maybe indicating a bug
                     // don't retry failed requests since checkpoints are too large (250KB+)
-                    // Later maintenance window or cold start will retry saving
+                    // Later maintenance window or cold start or cache remove will retry saving
                     LOG.error(r.getFailureMessage());
                 }
             }
@@ -139,7 +135,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
             }
 
             // don't retry failed requests since checkpoints are too large (250KB+)
-            // Later maintenance window or cold start will retry saving
+            // Later maintenance window or cold start or cache remove will retry saving
             LOG.error("Fail to save models", exception);
         });
     }

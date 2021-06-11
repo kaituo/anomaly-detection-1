@@ -480,7 +480,8 @@ public class CheckpointDao {
                 if (initResponse.isAcknowledged()) {
                     clientUtil.<BulkRequest, BulkResponse>execute(BulkAction.INSTANCE, request, listener);
                 } else {
-                    throw new RuntimeException("Creating checkpoint with mappings call not acknowledged.");
+                    // create index failure. Notify callers using listener.
+                    listener.onFailure(new RuntimeException("Creating checkpoint with mappings call not acknowledged."));
                 }
             }, exception -> {
                 if (ExceptionsHelper.unwrapCause(exception) instanceof ResourceAlreadyExistsException) {
