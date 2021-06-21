@@ -17,7 +17,6 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.CHECKPOINT_READ
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -31,7 +30,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.action.ActionListener;
-import org.opensearch.action.get.MultiGetAction;
 import org.opensearch.action.get.MultiGetItemResponse;
 import org.opensearch.action.get.MultiGetRequest;
 import org.opensearch.action.get.MultiGetResponse;
@@ -42,16 +40,13 @@ import org.opensearch.ad.constant.CommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
 import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityColdStarter;
 import org.opensearch.ad.ml.EntityModel;
 import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.ml.ModelManager.ModelType;
 import org.opensearch.ad.ml.ModelState;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.util.ClientUtil;
 import org.opensearch.ad.util.ExceptionUtil;
 import org.opensearch.ad.util.ParseUtils;
 import org.opensearch.cluster.service.ClusterService;
@@ -81,7 +76,6 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
     private final AnomalyDetectionIndices indexUtil;
     private final CacheProvider cacheProvider;
     private final CheckpointWriteWorker checkpointWriteQueue;
-    private final EntityColdStarter entityColdStarter;
 
     public CheckpointReadWorker(
         long heapSizeInBytes,
@@ -97,7 +91,6 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
         float mediumSegmentPruneRatio,
         float lowSegmentPruneRatio,
         int maintenanceFreqConstant,
-        ClientUtil clientUtil,
         Duration executionTtl,
         ModelManager modelManager,
         CheckpointDao checkpointDao,
@@ -107,8 +100,7 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
         AnomalyDetectionIndices indexUtil,
         CacheProvider cacheProvider,
         Duration stateTtl,
-        CheckpointWriteWorker checkpointWriteQueue,
-        EntityColdStarter entityColdStarter
+        CheckpointWriteWorker checkpointWriteQueue
     ) {
         super(
             "checkpoint-read",
@@ -125,7 +117,6 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
             mediumSegmentPruneRatio,
             lowSegmentPruneRatio,
             maintenanceFreqConstant,
-            clientUtil,
             CHECKPOINT_READ_QUEUE_CONCURRENCY,
             executionTtl,
             CHECKPOINT_READ_QUEUE_BATCH_SIZE,
@@ -140,12 +131,11 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
         this.indexUtil = indexUtil;
         this.cacheProvider = cacheProvider;
         this.checkpointWriteQueue = checkpointWriteQueue;
-        this.entityColdStarter = entityColdStarter;
     }
 
     @Override
     protected void executeBatchRequest(MultiGetRequest request, ActionListener<MultiGetResponse> listener) {
-        clientUtil.<MultiGetRequest, MultiGetResponse>execute(MultiGetAction.INSTANCE, request, listener);
+        checkpointDao.batchRead(request, listener);
     }
 
     /**
@@ -183,26 +173,29 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
                     final Exception failure = itemResponse.getFailure().getFailure();
                     if (failure instanceof IndexNotFoundException) {
                         for (EntityRequest origRequest : toProcess) {
-                            // submit to cold start queue
+                            // If it is checkpoint index not found exception, I don't
+                            // need to retry as checkpoint read is bound to fail. Just
+                            // send everything to the cold start queue and return.
                             entityColdStartQueue.put(origRequest);
                         }
-                        // If it is checkpoint index not found exception, I don't
-                        // need to retry as checkpoint read is bound to fail. Just
-                        // send everything to the cold start queue and return.
                         return;
-                    } else if (ExceptionUtil.isNotFound(failure)) {
-                        if (notFoundModels == null) {
-                            notFoundModels = new HashSet<>();
-                        }
-                        notFoundModels.add(modelId);
                     } else if (ExceptionUtil.isRetryAble(failure)) {
                         if (retryableRequests == null) {
                             retryableRequests = new HashSet<>();
                         }
                         retryableRequests.add(modelId);
+                    } else if (ExceptionUtil.isOverloaded(failure)) {
+                        LOG.error("too many get AD model checkpoint requests or shard not available");
+                        setCoolDownStart();
                     } else {
                         LOG.info("Unexpected failure", failure);
                     }
+                } else if (!itemResponse.getResponse().isExists()) {
+                    // lazy init as we don't expect retrying happens often
+                    if (notFoundModels == null) {
+                        notFoundModels = new HashSet<>();
+                    }
+                    notFoundModels.add(modelId);
                 } else {
                     successfulRequests.put(modelId, itemResponse);
                 }
@@ -217,6 +210,11 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
                         entityColdStartQueue.put(origRequest);
                     }
                 }
+            }
+
+            if (successfulRequests.isEmpty() && (retryableRequests == null || retryableRequests.isEmpty())) {
+                // don't need to proceed further since no checkpoint is available
+                return;
             }
 
             processCheckpointIteration(0, toProcess, successfulRequests, retryableRequests);
@@ -263,52 +261,31 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
 
             if (checkpointResponse != null) {
                 // successful requests
-                Optional<Map<String, Object>> checkpointString = checkpointDao.processRawCheckpoint(checkpointResponse.getResponse());
-                if (checkpointString.isPresent()) {
-                    // checkpoint exists
-                    Optional<Entry<EntityModel, Instant>> checkpoint = checkpointDao
-                        .fromEntityModelCheckpoint(checkpointString.get(), modelId);
+                Optional<Entry<EntityModel, Instant>> checkpoint = checkpointDao
+                    .processGetResponse(checkpointResponse.getResponse(), modelId);
 
-                    if (false == checkpoint.isPresent()) {
-                        // checkpoint is too big
-                        return;
-                    }
-
-                    ModelState<EntityModel> modelState = new ModelState<>(
-                        new EntityModel(entity, new ArrayDeque<>(), null, null),
-                        modelId,
-                        detectorId,
-                        ModelType.ENTITY.getName(),
-                        clock,
-                        0
-                    );
-
-                    modelState = modelManager.processEntityCheckpoint(checkpoint, modelState);
-
-                    EntityModel entityModel = modelState.getModel();
-
-                    if (entityModel.getRcf() == null || entityModel.getThreshold() == null) {
-                        entityColdStarter.trainModelFromExistingSamples(modelState);
-                    }
-
-                    ThresholdingResult result = null;
-                    if (entityModel.getRcf() != null && entityModel.getThreshold() != null) {
-                        result = modelManager.score(origRequest.getCurrentFeature(), modelId, modelState);
-                    } else {
-                        entityModel.addSample(origRequest.getCurrentFeature());
-                    }
-
-                    nodeStateManager
-                        .getAnomalyDetector(
-                            detectorId,
-                            onGetDetector(origRequest, i, detectorId, result, toProcess, successfulRequests, retryableRequests, modelState)
-                        );
-                    processNextInCallBack = true;
-                } else {
-                    // checkpoint does not exist
-                    // submit to cold start queue
-                    entityColdStartQueue.put(origRequest);
+                if (false == checkpoint.isPresent()) {
+                    // checkpoint is too big
+                    return;
                 }
+
+                ModelState<EntityModel> modelState = modelManager.processEntityCheckpoint(checkpoint, entity, modelId, detectorId);
+
+                EntityModel entityModel = modelState.getModel();
+
+                ThresholdingResult result = null;
+                if (entityModel.getRcf() != null && entityModel.getThreshold() != null) {
+                    result = modelManager.score(origRequest.getCurrentFeature(), modelId, modelState);
+                } else {
+                    entityModel.addSample(origRequest.getCurrentFeature());
+                }
+
+                nodeStateManager
+                    .getAnomalyDetector(
+                        detectorId,
+                        onGetDetector(origRequest, i, detectorId, result, toProcess, successfulRequests, retryableRequests, modelState)
+                    );
+                processNextInCallBack = true;
             } else if (retryableRequests != null && retryableRequests.contains(modelId)) {
                 // failed requests
                 super.put(origRequest);
