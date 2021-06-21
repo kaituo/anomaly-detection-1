@@ -428,17 +428,30 @@ public class CheckpointDao {
     /**
      * Read a checkpoint from the index and return the EntityModel object
      * @param modelId Model Id
-     * @param listener Listener to return the EntityModel object
+     * @param listener Listener to return a pair of entity model and its last checkpoint time
      */
     public void restoreModelCheckpoint(String modelId, ActionListener<Optional<Entry<EntityModel, Instant>>> listener) {
-        clientUtil.<GetRequest, GetResponse>asyncRequest(new GetRequest(indexName, modelId), client::get, ActionListener.wrap(response -> {
-            Optional<Map<String, Object>> checkpointString = processRawCheckpoint(response);
-            if (checkpointString.isPresent()) {
-                listener.onResponse(fromEntityModelCheckpoint(checkpointString.get(), modelId));
-            } else {
-                listener.onResponse(Optional.empty());
-            }
-        }, listener::onFailure));
+        clientUtil
+            .<GetRequest, GetResponse>asyncRequest(
+                new GetRequest(indexName, modelId),
+                client::get,
+                ActionListener.wrap(response -> { listener.onResponse(processGetResponse(response, modelId)); }, listener::onFailure)
+            );
+    }
+
+    /**
+     * Process a checkpoint GetResponse and return the EntityMOdel object
+     * @param response Checkpoint Index GetResponse
+     * @param modelId  Model Id
+     * @return a pair of entity model and its last checkpoint time
+     */
+    public Optional<Entry<EntityModel, Instant>> processGetResponse(GetResponse response, String modelId) {
+        Optional<Map<String, Object>> checkpointString = processRawCheckpoint(response);
+        if (checkpointString.isPresent()) {
+            return fromEntityModelCheckpoint(checkpointString.get(), modelId);
+        } else {
+            return Optional.empty();
+        }
     }
 
     /**
@@ -464,7 +477,7 @@ public class CheckpointDao {
             .map(source -> (String) source.get(FIELD_MODEL));
     }
 
-    public Optional<Map<String, Object>> processRawCheckpoint(GetResponse response) {
+    private Optional<Map<String, Object>> processRawCheckpoint(GetResponse response) {
         return Optional.ofNullable(response).filter(GetResponse::isExists).map(GetResponse::getSource);
     }
 
