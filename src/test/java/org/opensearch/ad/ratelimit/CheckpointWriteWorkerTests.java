@@ -12,24 +12,35 @@
 package org.opensearch.ad.ratelimit;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_BATCH_SIZE;
 
+import java.io.IOException;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.ConcurrentModificationException;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.ActionListener;
+import org.opensearch.action.DocWriteRequest;
+import org.opensearch.action.bulk.BulkItemResponse;
+import org.opensearch.action.bulk.BulkItemResponse.Failure;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.breaker.ADCircuitBreakerService;
@@ -37,10 +48,16 @@ import org.opensearch.ad.constant.CommonName;
 import org.opensearch.ad.ml.CheckpointDao;
 import org.opensearch.ad.ml.EntityModel;
 import org.opensearch.ad.ml.ModelState;
+import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.util.concurrent.OpenSearchRejectedExecutionException;
+import org.opensearch.index.Index;
+import org.opensearch.index.engine.VersionConflictEngineException;
+import org.opensearch.index.shard.ShardId;
+import org.opensearch.rest.RestStatus;
 import org.opensearch.threadpool.ThreadPool;
 
 import test.org.opensearch.ad.util.MLUtil;
@@ -51,6 +68,8 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
     CheckpointDao checkpoint;
     ClusterService clusterService;
+
+    ModelState<EntityModel> state;
 
     @Override
     @SuppressWarnings("unchecked")
@@ -100,10 +119,11 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             nodeStateManager,
             AnomalyDetectorSettings.HOURLY_MAINTENANCE
         );
+
+        state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().build());
     }
 
     public void testTriggerSave() {
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().build());
         worker.write(state, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, times(1)).batchWrite(any(), any());
@@ -191,5 +211,148 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         assertTrue(worker.isQueueEmpty());
         // of requests cause at least one batch.
         verify(checkpoint, times(3)).batchWrite(any(), any());
+    }
+
+    public void testOverloaded() {
+        doAnswer(invocation -> {
+            ActionListener<BulkResponse> listener = invocation.getArgument(1);
+            listener.onFailure(new OpenSearchRejectedExecutionException("blah", true));
+
+            return null;
+        }).when(checkpoint).batchWrite(any(), any());
+
+        worker.write(state, true, RequestPriority.MEDIUM);
+
+        verify(checkpoint, times(1)).batchWrite(any(), any());
+        verify(nodeStateManager, times(1)).setException(eq(state.getDetectorId()), any(OpenSearchRejectedExecutionException.class));
+    }
+
+    public void testRetryException() {
+        doAnswer(invocation -> {
+            ActionListener<BulkResponse> listener = invocation.getArgument(1);
+            listener.onFailure(new OpenSearchStatusException("blah", RestStatus.REQUEST_TIMEOUT));
+
+            return null;
+        }).when(checkpoint).batchWrite(any(), any());
+
+        worker.write(state, true, RequestPriority.MEDIUM);
+        // we don't retry checkpoint write
+        verify(checkpoint, times(1)).batchWrite(any(), any());
+        verify(nodeStateManager, times(1)).setException(eq(state.getDetectorId()), any(OpenSearchStatusException.class));
+    }
+
+    /**
+     * Test that we don'd retry failed request
+     */
+    public void testFailedRequest() {
+        doAnswer(invocation -> {
+            ActionListener<BulkResponse> listener = invocation.getArgument(1);
+            BulkItemResponse[] responses = new BulkItemResponse[1];
+            ShardId shardId = new ShardId(new Index("index_name", "uuid"), 0);
+            responses[0] = new BulkItemResponse(
+                0,
+                randomFrom(DocWriteRequest.OpType.values()),
+                new Failure(shardId.getIndexName(), "_doc", "id1", new VersionConflictEngineException(shardId, "id1", "blah"))
+            );
+            listener.onResponse(new BulkResponse(responses, 1));
+
+            return null;
+        }).when(checkpoint).batchWrite(any(), any());
+
+        worker.write(state, true, RequestPriority.MEDIUM);
+        // we don't retry checkpoint write
+        verify(checkpoint, times(1)).batchWrite(any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testEmptyTimeStamp() {
+        ModelState<EntityModel> state = mock(ModelState.class);
+        when(state.getLastCheckpointTime()).thenReturn(Instant.MIN);
+        worker.write(state, false, RequestPriority.MEDIUM);
+
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testTooSoonToSave() {
+        ModelState<EntityModel> state = mock(ModelState.class);
+        when(state.getLastCheckpointTime()).thenReturn(Instant.now());
+        worker.write(state, false, RequestPriority.MEDIUM);
+
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testEmptyModel() {
+        ModelState<EntityModel> state = mock(ModelState.class);
+        when(state.getLastCheckpointTime()).thenReturn(Instant.now());
+        when(state.getModel()).thenReturn(null);
+        worker.write(state, true, RequestPriority.MEDIUM);
+
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testEmptyModelId() {
+        ModelState<EntityModel> state = mock(ModelState.class);
+        when(state.getLastCheckpointTime()).thenReturn(Instant.now());
+        EntityModel model = mock(EntityModel.class);
+        when(state.getModel()).thenReturn(model);
+        when(state.getModelId()).thenReturn(null);
+        worker.write(state, true, RequestPriority.MEDIUM);
+
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testEmptyDetectorId() {
+        ModelState<EntityModel> state = mock(ModelState.class);
+        when(state.getLastCheckpointTime()).thenReturn(Instant.now());
+        EntityModel model = mock(EntityModel.class);
+        when(state.getModel()).thenReturn(model);
+        when(state.getDetectorId()).thenReturn(null);
+        worker.write(state, true, RequestPriority.MEDIUM);
+
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testDetectorNotAvailable() {
+        doAnswer(invocation -> {
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
+            listener.onResponse(Optional.empty());
+            return null;
+        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+
+        worker.write(state, true, RequestPriority.MEDIUM);
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testDetectorFetchException() {
+        doAnswer(invocation -> {
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
+            listener.onFailure(new RuntimeException());
+            return null;
+        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+
+        worker.write(state, true, RequestPriority.MEDIUM);
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    public void testCheckpointNullSource() throws IOException {
+        when(checkpoint.toIndexSource(any())).thenReturn(null);
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    public void testCheckpointEmptySource() throws IOException {
+        Map<String, Object> checkpointMap = new HashMap<>();
+        when(checkpoint.toIndexSource(any())).thenReturn(checkpointMap);
+        verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    public void testConcurrentModificationException() throws IOException {
+        doThrow(ConcurrentModificationException.class).when(checkpoint).toIndexSource(any());
+        verify(checkpoint, never()).batchWrite(any(), any());
     }
 }

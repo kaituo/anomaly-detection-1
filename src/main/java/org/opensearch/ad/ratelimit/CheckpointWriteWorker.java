@@ -18,7 +18,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -152,22 +151,18 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
      */
     public void write(ModelState<EntityModel> modelState, boolean forceWrite, RequestPriority priority) {
         Instant instant = modelState.getLastCheckpointTime();
-        if ((instant == Instant.MIN || instant.plus(checkpointInterval).isAfter(clock.instant())) && !forceWrite) {
+        if (!shoulSave(instant, forceWrite)) {
             return;
         }
 
         if (modelState.getModel() != null) {
-            try {
-                String detectorId = modelState.getDetectorId();
-                String modelId = modelState.getModelId();
-                if (modelId == null || detectorId == null) {
-                    return;
-                }
-
-                nodeStateManager.getAnomalyDetector(detectorId, onGetDetector(detectorId, modelId, modelState, priority));
-            } catch (ConcurrentModificationException e) {
-                LOG.info(new ParameterizedMessage("Concurrent modification while serializing models for [{}]", modelState), e);
+            String detectorId = modelState.getDetectorId();
+            String modelId = modelState.getModelId();
+            if (modelId == null || detectorId == null) {
+                return;
             }
+
+            nodeStateManager.getAnomalyDetector(detectorId, onGetDetector(detectorId, modelId, modelState, priority));
         }
     }
 
@@ -209,7 +204,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
                 // As we are gonna retry serializing either when the entity is
                 // evicted out of cache or during the next maintenance period,
                 // don't do anything when the exception happens.
-                LOG.info(new ParameterizedMessage("Exception while serializing models for [{}]", modelId), e);
+                LOG.error(new ParameterizedMessage("Exception while serializing models for [{}]", modelId), e);
             }
 
         }, exception -> { LOG.error(new ParameterizedMessage("fail to get detector [{}]", detectorId), exception); });
@@ -227,7 +222,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
                 List<CheckpointWriteRequest> allRequests = new ArrayList<>();
                 for (ModelState<EntityModel> state : modelStates) {
                     Instant instant = state.getLastCheckpointTime();
-                    if ((instant == Instant.MIN || instant.plus(checkpointInterval).isAfter(clock.instant())) && !forceWrite) {
+                    if (!shoulSave(instant, forceWrite)) {
                         continue;
                     }
 
@@ -266,5 +261,16 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
         }, exception -> { LOG.error(new ParameterizedMessage("fail to get detector [{}]", detectorId), exception); });
 
         nodeStateManager.getAnomalyDetector(detectorId, onGetForAll);
+    }
+
+    /**
+     * Should we save the checkpoint or not
+     * @param lastCheckpointTIme Last checkpoint time
+     * @param forceWrite Save no matter what
+     * @return true when forceWrite is true or we haven't saved checkpoint in the
+     *  last checkpoint interval; false otherwise
+     */
+    private boolean shoulSave(Instant lastCheckpointTIme, boolean forceWrite) {
+        return (lastCheckpointTIme != Instant.MIN && lastCheckpointTIme.plus(checkpointInterval).isBefore(clock.instant())) || forceWrite;
     }
 }
