@@ -151,7 +151,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
      */
     public void write(ModelState<EntityModel> modelState, boolean forceWrite, RequestPriority priority) {
         Instant instant = modelState.getLastCheckpointTime();
-        if (!shoulSave(instant, forceWrite)) {
+        if (!shouldSave(instant, forceWrite)) {
             return;
         }
 
@@ -222,7 +222,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
                 List<CheckpointWriteRequest> allRequests = new ArrayList<>();
                 for (ModelState<EntityModel> state : modelStates) {
                     Instant instant = state.getLastCheckpointTime();
-                    if (!shoulSave(instant, forceWrite)) {
+                    if (!shouldSave(instant, forceWrite)) {
                         continue;
                     }
 
@@ -270,7 +270,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
      * @return true when forceWrite is true or we haven't saved checkpoint in the
      *  last checkpoint interval; false otherwise
      */
-    private boolean shoulSave(Instant lastCheckpointTIme, boolean forceWrite) {
+    private boolean shouldSave(Instant lastCheckpointTIme, boolean forceWrite) {
         return (lastCheckpointTIme != Instant.MIN && lastCheckpointTIme.plus(checkpointInterval).isBefore(clock.instant())) || forceWrite;
     }
 }
