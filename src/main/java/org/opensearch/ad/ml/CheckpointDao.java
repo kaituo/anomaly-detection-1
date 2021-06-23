@@ -440,7 +440,7 @@ public class CheckpointDao {
     }
 
     /**
-     * Process a checkpoint GetResponse and return the EntityMOdel object
+     * Process a checkpoint GetResponse and return the EntityModel object
      * @param response Checkpoint Index GetResponse
      * @param modelId  Model Id
      * @return a pair of entity model and its last checkpoint time
