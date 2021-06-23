@@ -188,7 +188,7 @@ public class CheckpointReadWorker extends BatchWorker<EntityFeatureRequest, Mult
                         LOG.error("too many get AD model checkpoint requests or shard not available");
                         setCoolDownStart();
                     } else {
-                        LOG.info("Unexpected failure", failure);
+                        LOG.error("Unexpected failure", failure);
                     }
                 } else if (!itemResponse.getResponse().isExists()) {
                     // lazy init as we don't expect retrying happens often
