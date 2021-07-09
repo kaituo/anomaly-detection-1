@@ -46,6 +46,9 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.AnomalyDetectorRunner;
+import org.opensearch.ad.breaker.ADCircuitBreakerService;
+import org.opensearch.ad.common.exception.LimitExceededException;
+import org.opensearch.ad.constant.CommonErrorMessages;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
@@ -72,6 +75,7 @@ public class PreviewAnomalyDetectorTransportAction extends
     private final NamedXContentRegistry xContentRegistry;
     private volatile Integer maxAnomalyFeatures;
     private volatile Boolean filterByEnabled;
+    private final ADCircuitBreakerService adCircuitBreakerService;
 
     @Inject
     public PreviewAnomalyDetectorTransportAction(
@@ -81,7 +85,8 @@ public class PreviewAnomalyDetectorTransportAction extends
         ActionFilters actionFilters,
         Client client,
         AnomalyDetectorRunner anomalyDetectorRunner,
-        NamedXContentRegistry xContentRegistry
+        NamedXContentRegistry xContentRegistry,
+        ADCircuitBreakerService adCircuitBreakerService
     ) {
         super(PreviewAnomalyDetectorAction.NAME, transportService, actionFilters, PreviewAnomalyDetectorRequest::new);
         this.clusterService = clusterService;
@@ -92,6 +97,7 @@ public class PreviewAnomalyDetectorTransportAction extends
         clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_ANOMALY_FEATURES, it -> maxAnomalyFeatures = it);
         filterByEnabled = AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
+        this.adCircuitBreakerService = adCircuitBreakerService;
     }
 
     @Override
@@ -120,6 +126,10 @@ public class PreviewAnomalyDetectorTransportAction extends
         ThreadContext.StoredContext context,
         ActionListener<PreviewAnomalyDetectorResponse> listener
     ) {
+        if (adCircuitBreakerService.isOpen()) {
+            listener.onFailure(new LimitExceededException(request.getDetectorId(), CommonErrorMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
+            return;
+        }
         try {
             AnomalyDetector detector = request.getDetector();
             String detectorId = request.getDetectorId();
