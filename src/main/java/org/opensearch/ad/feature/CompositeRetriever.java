@@ -35,7 +35,6 @@ import org.opensearch.common.xcontent.NamedXContentRegistry;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.RangeQueryBuilder;
 import org.opensearch.search.aggregations.Aggregation;
-import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregationBuilders;
 import org.opensearch.search.aggregations.AggregatorFactories;
 import org.opensearch.search.aggregations.bucket.composite.CompositeAggregation;
@@ -54,7 +53,7 @@ import org.opensearch.search.builder.SearchSourceBuilder;
  *
  */
 public class CompositeRetriever extends AbstractRetriever {
-    private static final String AGG_NAME_COMP = "comp_agg";
+    public static final String AGG_NAME_COMP = "comp_agg";
     private static final Logger LOG = LogManager.getLogger(CompositeRetriever.class);
 
     private final long dataStartEpoch;
@@ -271,19 +270,6 @@ public class CompositeRetriever extends AbstractRetriever {
             }
 
             updateSourceAfterKey(composite.get().afterKey(), search);
-        }
-
-        private void updateSourceAfterKey(Map<String, Object> afterKey, SearchSourceBuilder search) {
-            AggregationBuilder aggBuilder = search.aggregations().getAggregatorFactories().iterator().next();
-            // update after-key with the new value
-            if (aggBuilder instanceof CompositeAggregationBuilder) {
-                CompositeAggregationBuilder comp = (CompositeAggregationBuilder) aggBuilder;
-                comp.aggregateAfter(afterKey);
-            } else {
-                throw new IllegalArgumentException(
-                    String.format(Locale.ROOT, "Invalid client request; expected a composite builder but instead got {}", aggBuilder)
-                );
-            }
         }
 
         private boolean shouldRetryDueToEmptyPage(SearchResponse response) {

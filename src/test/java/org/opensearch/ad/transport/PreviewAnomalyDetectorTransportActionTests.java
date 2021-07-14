@@ -26,7 +26,6 @@
 
 package org.opensearch.ad.transport;
 
-import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyObject;
@@ -54,7 +53,6 @@ import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.AnomalyDetectorRunner;
 import org.opensearch.ad.TestHelpers;
@@ -107,7 +105,13 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
             Collections
                 .unmodifiableSet(
                     new HashSet<>(
-                        Arrays.asList(AnomalyDetectorSettings.MAX_ANOMALY_FEATURES, AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES)
+                        Arrays
+                            .asList(
+                                AnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
+                                AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
+                                AnomalyDetectorSettings.PAGE_SIZE,
+                                AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW
+                            )
                     )
                 )
         );
