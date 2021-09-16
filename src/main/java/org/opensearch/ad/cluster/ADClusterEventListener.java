@@ -34,6 +34,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.ActionListener;
 import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.SingleStreamModelIdMapper;
 import org.opensearch.ad.util.DiscoveryNodeFilterer;
 import org.opensearch.cluster.ClusterChangedEvent;
 import org.opensearch.cluster.ClusterStateListener;
@@ -143,7 +144,7 @@ public class ADClusterEventListener implements ClusterStateListener {
                                     LOG.info(REMOVE_MODEL_MSG + " {}", modelId);
                                     modelManager
                                         .stopModel(
-                                            modelManager.getDetectorIdForModelId(modelId),
+                                            SingleStreamModelIdMapper.getDetectorIdForModelId(modelId),
                                             modelId,
                                             ActionListener
                                                 .wrap(

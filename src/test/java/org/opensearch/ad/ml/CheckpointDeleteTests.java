@@ -51,8 +51,8 @@ import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.ScrollableHitSource;
 
-import com.amazon.randomcutforest.parkservices.threshold.ThresholdedRandomCutForestMapper;
-import com.amazon.randomcutforest.parkservices.threshold.ThresholdedRandomCutForestState;
+import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestMapper;
+import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestState;
 import com.amazon.randomcutforest.serialize.json.v1.V1JsonToV2StateConverter;
 import com.amazon.randomcutforest.state.RandomCutForestMapper;
 import com.amazon.randomcutforest.state.RandomCutForestState;
@@ -90,6 +90,8 @@ public class CheckpointDeleteTests extends AbstractADTest {
     @Mock
     private Schema<ThresholdedRandomCutForestState> ercfSchema;
 
+    double anomalyRate;
+
     @SuppressWarnings("unchecked")
     @Override
     @Before
@@ -110,6 +112,7 @@ public class CheckpointDeleteTests extends AbstractADTest {
 
         objectPool = mock(GenericObjectPool.class);
         int deserializeRCFBufferSize = 512;
+        anomalyRate = 0.005;
         checkpointDao = new CheckpointDao(
             client,
             clientUtil,
@@ -124,7 +127,8 @@ public class CheckpointDeleteTests extends AbstractADTest {
             indexUtil,
             maxCheckpointBytes,
             objectPool,
-            deserializeRCFBufferSize
+            deserializeRCFBufferSize,
+            anomalyRate
         );
     }
 

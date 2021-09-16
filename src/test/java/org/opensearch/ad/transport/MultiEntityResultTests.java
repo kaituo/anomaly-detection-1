@@ -99,7 +99,6 @@ import org.opensearch.ad.feature.CompositeRetriever;
 import org.opensearch.ad.feature.FeatureManager;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
 import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.ml.ModelPartitioner;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.Entity;
@@ -160,7 +159,6 @@ public class MultiEntityResultTests extends AbstractADTest {
     private Client client;
     private FeatureManager featureQuery;
     private ModelManager normalModelManager;
-    private ModelPartitioner normalModelPartitioner;
     private HashRing hashRing;
     private ClusterService clusterService;
     private IndexNameExpressionResolver indexNameResolver;
@@ -233,8 +231,6 @@ public class MultiEntityResultTests extends AbstractADTest {
 
         normalModelManager = mock(ModelManager.class);
 
-        normalModelPartitioner = mock(ModelPartitioner.class);
-
         hashRing = mock(HashRing.class);
 
         Set<Setting<?>> anomalyResultSetting = new HashSet<>(ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
@@ -277,7 +273,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             stateManager,
             featureQuery,
             normalModelManager,
-            normalModelPartitioner,
             hashRing,
             clusterService,
             indexNameResolver,
@@ -428,7 +423,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             return null;
         }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
 
-        ModelPartitioner modelPartitioner = mock(ModelPartitioner.class);
         stateManager = new NodeStateManager(
             client,
             xContentRegistry(),
@@ -436,7 +430,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             clientUtil,
             clock,
             AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            modelPartitioner,
             clusterService
         );
 
@@ -448,7 +441,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             stateManager,
             featureQuery,
             normalModelManager,
-            normalModelPartitioner,
             hashRing,
             clusterService,
             indexNameResolver,
@@ -687,7 +679,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             stateManager,
             featureQuery,
             normalModelManager,
-            normalModelPartitioner,
             hashRing,
             realClusterService,
             indexNameResolver,
@@ -728,7 +719,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             return null;
         }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
 
-        ModelPartitioner modelPartitioner = mock(ModelPartitioner.class);
         stateManager = new NodeStateManager(
             client,
             xContentRegistry(),
@@ -736,7 +726,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             clientUtil,
             clock,
             AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            modelPartitioner,
             clusterService
         );
 
@@ -748,7 +737,6 @@ public class MultiEntityResultTests extends AbstractADTest {
             stateManager,
             featureQuery,
             normalModelManager,
-            normalModelPartitioner,
             hashRing,
             clusterService,
             indexNameResolver,

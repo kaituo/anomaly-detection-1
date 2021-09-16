@@ -2530,7 +2530,7 @@ public class ADTaskManager {
                 tasksOfDetector.forEach(taskId -> {
                     ADEntityTaskProfile entityTaskProfile = new ADEntityTaskProfile(
                         adTaskCacheManager.getShingle(taskId).size(),
-                        adTaskCacheManager.getRcfModel(taskId).getTotalUpdates(),
+                        adTaskCacheManager.getTRcfModel(taskId).getForest().getTotalUpdates(),
                         adTaskCacheManager.isThresholdModelTrained(taskId),
                         adTaskCacheManager.getThresholdModelTrainingDataSize(taskId),
                         adTaskCacheManager.getModelSize(taskId),
@@ -2556,7 +2556,7 @@ public class ADTaskManager {
                 detectorTaskProfile = new ADTaskProfile(
                     adTaskCacheManager.getDetectorTaskId(detectorId),
                     adTaskCacheManager.getShingle(taskId).size(),
-                    adTaskCacheManager.getRcfModel(taskId).getTotalUpdates(),
+                    adTaskCacheManager.getTRcfModel(taskId).getForest().getTotalUpdates(),
                     adTaskCacheManager.isThresholdModelTrained(taskId),
                     adTaskCacheManager.getThresholdModelTrainingDataSize(taskId),
                     adTaskCacheManager.getModelSize(taskId),
