@@ -208,7 +208,6 @@ import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestM
 import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestState;
 import com.amazon.randomcutforest.serialize.json.v1.V1JsonToV2StateConverter;
 import com.amazon.randomcutforest.state.RandomCutForestMapper;
-import com.amazon.randomcutforest.state.RandomCutForestState;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.gson.Gson;
@@ -375,8 +374,6 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         mapper.setSaveExecutorContextEnabled(true);
         mapper.setSaveTreeStateEnabled(true);
         mapper.setPartialTreeStateEnabled(true);
-        Schema<RandomCutForestState> schema = AccessController
-            .doPrivileged((PrivilegedAction<Schema<RandomCutForestState>>) () -> RuntimeSchema.getSchema(RandomCutForestState.class));
         V1JsonToV2StateConverter converter = new V1JsonToV2StateConverter();
 
         double modelMaxSizePercent = AnomalyDetectorSettings.MODEL_MAX_SIZE_PERCENTAGE.get(settings);
@@ -448,7 +445,6 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
             CommonName.CHECKPOINT_INDEX_NAME,
             gson,
             mapper,
-            schema,
             converter,
             new ThresholdedRandomCutForestMapper(),
             AccessController

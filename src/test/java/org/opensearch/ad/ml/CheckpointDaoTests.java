@@ -26,8 +26,6 @@
 
 package org.opensearch.ad.ml;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Matchers.any;
 import static org.mockito.Mockito.doAnswer;
@@ -40,8 +38,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.opensearch.action.DocWriteResponse.Result.UPDATED;
-import static org.opensearch.ad.ml.CheckpointDao.FIELD_MODELV2;
 import static org.opensearch.ad.ml.CheckpointDao.FIELD_MODEL;
+import static org.opensearch.ad.ml.CheckpointDao.FIELD_MODELV2;
 import static org.opensearch.ad.ml.CheckpointDao.TIMESTAMP;
 
 import java.io.BufferedReader;
@@ -127,7 +125,6 @@ import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestM
 import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestState;
 import com.amazon.randomcutforest.serialize.json.v1.V1JsonToV2StateConverter;
 import com.amazon.randomcutforest.state.RandomCutForestMapper;
-import com.amazon.randomcutforest.state.RandomCutForestState;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 
@@ -171,7 +168,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
     private GenericObjectPool<LinkedBuffer> serializeRCFBufferPool;
     private RandomCutForestMapper mapper;
     private ThresholdedRandomCutForestMapper trcfMapper;
-    private Schema<RandomCutForestState> schema;
     private V1JsonToV2StateConverter converter;
     double anomalyRate;
 
@@ -190,8 +186,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
 
         mapper = new RandomCutForestMapper();
         mapper.setSaveExecutorContextEnabled(true);
-        schema = AccessController
-            .doPrivileged((PrivilegedAction<Schema<RandomCutForestState>>) () -> RuntimeSchema.getSchema(RandomCutForestState.class));
 
         trcfMapper = new ThresholdedRandomCutForestMapper();
         trcfSchema = AccessController
@@ -231,7 +225,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             indexName,
             gson,
             mapper,
-            schema,
             converter,
             trcfMapper,
             trcfSchema,
@@ -377,7 +370,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
                 listener.onResponse(updateResponse);
             }
             return null;
-            // }).when(clientUtil).asyncRequest(requestCaptor.capture(), any(BiConsumer.class), any(ActionListener.class));
         }).when(clientUtil).asyncRequest(any(), any(BiConsumer.class), any(ActionListener.class));
         when(getResponse.isExists()).thenReturn(true);
 
@@ -389,8 +381,60 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             inProgressLatch.countDown();
         }));
 
-        // docSource = new HashMap<>();
-        // docSource.put(FIELD_MODELV2, checkpointDao.toCheckpoint(rcf));
+        ActionListener<Optional<ThresholdedRandomCutForest>> listener = mock(ActionListener.class);
+        checkpointDao.getTRCFModel(modelId, listener);
+
+        GetRequest capturedGetRequest = getRequest.get();
+        assertEquals(indexName, capturedGetRequest.index());
+        assertEquals(modelId, capturedGetRequest.id());
+        ArgumentCaptor<Optional<ThresholdedRandomCutForest>> responseCaptor = ArgumentCaptor.forClass(Optional.class);
+        verify(listener).onResponse(responseCaptor.capture());
+        Optional<ThresholdedRandomCutForest> result = responseCaptor.getValue();
+        assertTrue(result.isPresent());
+        RandomCutForest deserializedForest = result.get().getForest();
+        RandomCutForest serializedForest = trcf.getForest();
+        assertEquals(deserializedForest.getDimensions(), serializedForest.getDimensions());
+        assertEquals(deserializedForest.getNumberOfTrees(), serializedForest.getNumberOfTrees());
+        assertEquals(deserializedForest.getSampleSize(), serializedForest.getSampleSize());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void test_getModelCheckpoint_Bwc() {
+        // ArgumentCaptor<GetRequest> requestCaptor = ArgumentCaptor.forClass(GetRequest.class);
+        UpdateResponse updateResponse = new UpdateResponse(
+            new ReplicationResponse.ShardInfo(3, 2),
+            new ShardId(CommonName.CHECKPOINT_INDEX_NAME, "uuid", 2),
+            CommonName.CHECKPOINT_INDEX_NAME,
+            "1",
+            7,
+            17,
+            2,
+            UPDATED
+        );
+        AtomicReference<GetRequest> getRequest = new AtomicReference<>();
+        doAnswer(invocation -> {
+            ActionRequest request = invocation.getArgument(0);
+            if (request instanceof GetRequest) {
+                getRequest.set((GetRequest) request);
+                ActionListener<GetResponse> listener = invocation.getArgument(2);
+                listener.onResponse(getResponse);
+            } else {
+                UpdateRequest updateRequest = (UpdateRequest) request;
+                when(getResponse.getSource()).thenReturn(updateRequest.doc().sourceAsMap());
+                ActionListener<UpdateResponse> listener = invocation.getArgument(2);
+                listener.onResponse(updateResponse);
+            }
+            return null;
+        }).when(clientUtil).asyncRequest(any(), any(BiConsumer.class), any(ActionListener.class));
+        when(getResponse.isExists()).thenReturn(true);
+
+        ThresholdedRandomCutForest trcf = createTRCF();
+
+        final CountDownLatch inProgressLatch = new CountDownLatch(1);
+        checkpointDao.putTRCFCheckpoint(modelId, trcf, ActionListener.wrap(response -> { inProgressLatch.countDown(); }, exception -> {
+            assertTrue("Should not reach here ", false);
+            inProgressLatch.countDown();
+        }));
 
         ActionListener<Optional<ThresholdedRandomCutForest>> listener = mock(ActionListener.class);
         checkpointDao.getTRCFModel(modelId, listener);
@@ -649,7 +693,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             indexName,
             gson,
             mapper,
-            schema,
             converter,
             trcfMapper,
             trcfSchema,
@@ -687,7 +730,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             indexName,
             gson,
             mapper,
-            schema,
             converter,
             trcfMapper,
             trcfSchema,
@@ -713,7 +755,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             indexName,
             gson,
             mapper,
-            schema,
             converter,
             mockMapper,
             trcfSchema,
@@ -761,7 +802,6 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             indexName,
             gson,
             mapper,
-            schema,
             converter,
             trcfMapper,
             trcfSchema,
@@ -838,9 +878,14 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         assertFalse(entityModel.getTrcf().isPresent());
     }
 
-    private Pair<Map<String, Object>, Instant> setUp1_0Model() throws FileNotFoundException, IOException, URISyntaxException {
+    private Pair<Map<String, Object>, Instant> setUp1_0Model(String checkpointFileName) throws FileNotFoundException,
+        IOException,
+        URISyntaxException {
         String model = null;
-        try(FileReader v1CheckpointFile = new FileReader(new File(getClass().getResource("checkpoint_1.json").toURI())); BufferedReader rr = new BufferedReader(v1CheckpointFile)) {
+        try (
+            FileReader v1CheckpointFile = new FileReader(new File(getClass().getResource(checkpointFileName).toURI()));
+            BufferedReader rr = new BufferedReader(v1CheckpointFile)
+        ) {
             model = rr.readLine();
         }
 
@@ -848,30 +893,11 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         Map<String, Object> entity = new HashMap<>();
         entity.put(FIELD_MODEL, model);
         entity.put(TIMESTAMP, now.toString());
-
-        checkpointDao = new CheckpointDao(
-            client,
-            clientUtil,
-            indexName,
-            gson,
-            mapper,
-            schema,
-            converter,
-            trcfMapper,
-            trcfSchema,
-            thresholdingModelClass,
-            indexUtil,
-            2_000_000, // checkpoint_1.json is of 1408047 bytes.
-            serializeRCFBufferPool,
-            AnomalyDetectorSettings.SERIALIZATION_BUFFER_BYTES,
-            anomalyRate
-        );
-
         return Pair.of(entity, now);
     }
 
     public void testFromEntityModelCheckpointBWC() throws FileNotFoundException, IOException, URISyntaxException {
-        Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model();
+        Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_2.json");
         Instant now = modelPair.getRight();
 
         Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
@@ -879,10 +905,18 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         Entry<EntityModel, Instant> pair = result.get();
         assertEquals(now, pair.getValue());
 
-        ThresholdedRandomCutForest trcf = pair.getKey().getTrcf().get();
+        EntityModel entityModel = pair.getKey();
+
+        Queue<double[]> samples = entityModel.getSamples();
+        assertEquals(6, samples.size());
+        double[] firstSample = samples.peek();
+        assertEquals(1, firstSample.length);
+        assertEquals(0.6832234717598454, firstSample[0], 1e-10);
+
+        ThresholdedRandomCutForest trcf = entityModel.getTrcf().get();
         RandomCutForest forest = trcf.getForest();
-        assertEquals(4, forest.getDimensions());
-        assertEquals(40, forest.getNumberOfTrees());
+        assertEquals(1, forest.getDimensions());
+        assertEquals(10, forest.getNumberOfTrees());
         assertEquals(256, forest.getSampleSize());
         // there are at least 10 scores in the checkpoint
         assertTrue(trcf.getThresholder().getCount() > 10);
@@ -897,10 +931,80 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
     }
 
     public void testFromEntityModelCheckpointModelTooLarge() throws FileNotFoundException, IOException, URISyntaxException {
-        Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model();
+        Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_2.json");
+        checkpointDao = new CheckpointDao(
+            client,
+            clientUtil,
+            indexName,
+            gson,
+            mapper,
+            converter,
+            trcfMapper,
+            trcfSchema,
+            thresholdingModelClass,
+            indexUtil,
+            100_000, // checkpoint_2.json is of 224603 bytes.
+            serializeRCFBufferPool,
+            AnomalyDetectorSettings.SERIALIZATION_BUFFER_BYTES,
+            anomalyRate
+        );
         Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
         // checkpoint is only configured to take in 1 MB checkpoint at most. But the checkpoint here is of 1408047 bytes.
         assertTrue(!result.isPresent());
+    }
+
+    // test no model is present in checkpoint
+    public void testFromEntityModelCheckpointEmptyModel() throws FileNotFoundException, IOException, URISyntaxException {
+        Map<String, Object> entity = new HashMap<>();
+        entity.put(TIMESTAMP, Instant.now().toString());
+
+        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(entity, this.modelId);
+        assertTrue(!result.isPresent());
+    }
+
+    public void testFromEntityModelCheckpointEmptySamples() throws FileNotFoundException, IOException, URISyntaxException {
+        Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_1.json");
+        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        assertTrue(result.isPresent());
+        Queue<double[]> samples = result.get().getKey().getSamples();
+        assertEquals(0, samples.size());
+    }
+
+    public void testFromEntityModelCheckpointNoRCF() throws FileNotFoundException, IOException, URISyntaxException {
+        Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_3.json");
+        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        assertTrue(result.isPresent());
+        assertTrue(!result.get().getKey().getTrcf().isPresent());
+    }
+
+    public void testFromEntityModelCheckpointNoThreshold() throws FileNotFoundException, IOException, URISyntaxException {
+        Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_4.json");
+        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        assertTrue(result.isPresent());
+
+        ThresholdedRandomCutForest trcf = result.get().getKey().getTrcf().get();
+        RandomCutForest forest = trcf.getForest();
+        assertEquals(1, forest.getDimensions());
+        assertEquals(10, forest.getNumberOfTrees());
+        assertEquals(256, forest.getSampleSize());
+        // there are no scores in the checkpoint
+        assertEquals(0, trcf.getThresholder().getCount());
+    }
+
+    public void testFromEntityModelCheckpointWithEntity() throws Exception {
+        ModelState<EntityModel> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).entityAttributes(true).build());
+        Map<String, Object> content = checkpointDao.toIndexSource(state);
+        // Opensearch will convert from java.time.ZonedDateTime to String. Here I am converting to simulate that
+        content.put(TIMESTAMP, "2021-09-23T05:00:37.93195Z");
+
+        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(content, this.modelId);
+
+        assertTrue(result.isPresent());
+        Entry<EntityModel, Instant> pair = result.get();
+        EntityModel entityModel = pair.getKey();
+        assertTrue(entityModel.getEntity().isPresent());
+        assertEquals(state.getModel().getEntity().get(), entityModel.getEntity().get());
     }
 
     private double[] getPoint(int dimensions, Random random) {

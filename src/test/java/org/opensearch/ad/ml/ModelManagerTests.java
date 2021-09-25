@@ -331,12 +331,15 @@ public class ModelManagerTests {
     @Test
     public void getRcfResult_returnExpectedToListener() {
         double[] point = new double[0];
-        ThresholdedRandomCutForest forest = mock(ThresholdedRandomCutForest.class);
+        ThresholdedRandomCutForest rForest = mock(ThresholdedRandomCutForest.class);
+        RandomCutForest rcf = mock(RandomCutForest.class);
+        when(rForest.getForest()).thenReturn(rcf);
+        when(rcf.getDimensions()).thenReturn(8);
         double score = 11.;
 
         doAnswer(invocation -> {
             ActionListener<Optional<ThresholdedRandomCutForest>> listener = invocation.getArgument(1);
-            listener.onResponse(Optional.of(forest));
+            listener.onResponse(Optional.of(rForest));
             return null;
         }).when(checkpointDao).getTRCFModel(eq(rcfModelId), any(ActionListener.class));
 
@@ -349,7 +352,7 @@ public class ModelManagerTests {
         descriptor.setAnomalyGrade(grade);
         descriptor.setAttribution(attributionVec);
         descriptor.setTotalUpdates(numSamples);
-        when(forest.process(any(), anyLong())).thenReturn(descriptor);
+        when(rForest.process(any(), anyLong())).thenReturn(descriptor);
 
         ActionListener<RcfResult> listener = mock(ActionListener.class);
         modelManager.getRcfResult(detectorId, rcfModelId, point, listener);

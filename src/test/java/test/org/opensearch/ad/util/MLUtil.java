@@ -30,6 +30,8 @@ import static java.lang.Math.PI;
 
 import java.time.Clock;
 import java.util.ArrayDeque;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Queue;
 import java.util.Random;
 import java.util.stream.IntStream;
@@ -78,11 +80,20 @@ public class MLUtil {
         int sampleSize = config.getSampleSize() != null ? config.getSampleSize() : random.nextInt(minSampleSize);
         Clock clock = config.getClock() != null ? config.getClock() : Clock.systemUTC();
 
+        Entity entity = null;
+        if (config.hasEntityAttributes()) {
+            Map<String, Object> attributes = new HashMap<>();
+            attributes.put("a", "a1");
+            attributes.put("b", "b1");
+            entity = Entity.createEntityByReordering(attributes);
+        } else {
+            entity = Entity.createSingleAttributeEntity("", "");
+        }
         EntityModel model = null;
         if (fullModel) {
-            model = createNonEmptyModel(detectorId, sampleSize);
+            model = createNonEmptyModel(detectorId, sampleSize, entity);
         } else {
-            model = createEmptyModel(Entity.createSingleAttributeEntity("", ""), sampleSize);
+            model = createEmptyModel(entity, sampleSize);
         }
 
         return new ModelState<>(model, detectorId, detectorId, ModelType.ENTITY.getName(), clock, priority);
@@ -97,7 +108,7 @@ public class MLUtil {
         return createEmptyModel(entity, random.nextInt(minSampleSize));
     }
 
-    public static EntityModel createNonEmptyModel(String detectorId, int sampleSize) {
+    public static EntityModel createNonEmptyModel(String detectorId, int sampleSize, Entity entity) {
         Queue<double[]> samples = createQueueSamples(sampleSize);
         int numDataPoints = random.nextInt(1000) + AnomalyDetectorSettings.NUM_MIN_SAMPLES;
         ThresholdedRandomCutForest trcf = new ThresholdedRandomCutForest(
@@ -115,12 +126,12 @@ public class MLUtil {
         for (int i = 0; i < numDataPoints; i++) {
             trcf.process(new double[] { random.nextDouble() }, i);
         }
-        EntityModel entityModel = new EntityModel(Entity.createSingleAttributeEntity("", ""), samples, trcf);
+        EntityModel entityModel = new EntityModel(entity, samples, trcf);
         return entityModel;
     }
 
     public static EntityModel createNonEmptyModel(String detectorId) {
-        return createNonEmptyModel(detectorId, random.nextInt(minSampleSize));
+        return createNonEmptyModel(detectorId, random.nextInt(minSampleSize), Entity.createSingleAttributeEntity("", ""));
     }
 
     /**

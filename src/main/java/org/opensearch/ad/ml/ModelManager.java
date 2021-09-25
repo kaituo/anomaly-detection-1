@@ -197,7 +197,9 @@ public class ModelManager implements DetectorModelSize {
         double grade = result.getAnomalyGrade();
 
         // result.getAttribution() is null when anomaly grade is less than or equals to 0
-        double[] attribution = null;
+        // need to create an empty array for bwc because the old node expects an non-empty array
+        int dimension = rcf.getForest().getDimensions();
+        double[] attribution = new double[dimension];
         if (result.getAttribution() != null) {
             attribution = getAnomalyAttribution(result.getAttribution());
         }

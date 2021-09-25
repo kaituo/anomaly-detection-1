@@ -55,7 +55,6 @@ import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestM
 import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestState;
 import com.amazon.randomcutforest.serialize.json.v1.V1JsonToV2StateConverter;
 import com.amazon.randomcutforest.state.RandomCutForestMapper;
-import com.amazon.randomcutforest.state.RandomCutForestState;
 import com.google.gson.Gson;
 
 import io.protostuff.LinkedBuffer;
@@ -107,7 +106,6 @@ public class CheckpointDeleteTests extends AbstractADTest {
         maxCheckpointBytes = 1_000_000;
 
         RandomCutForestMapper mapper = mock(RandomCutForestMapper.class);
-        Schema<RandomCutForestState> schema = mock(Schema.class);
         V1JsonToV2StateConverter converter = mock(V1JsonToV2StateConverter.class);
 
         objectPool = mock(GenericObjectPool.class);
@@ -119,7 +117,6 @@ public class CheckpointDeleteTests extends AbstractADTest {
             CommonName.CHECKPOINT_INDEX_NAME,
             gson,
             mapper,
-            schema,
             converter,
             ercfMapper,
             ercfSchema,

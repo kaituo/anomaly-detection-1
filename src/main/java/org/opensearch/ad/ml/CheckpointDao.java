@@ -132,7 +132,6 @@ public class CheckpointDao {
 
     private Gson gson;
     private RandomCutForestMapper mapper;
-    private Schema<RandomCutForestState> schema;
     private V1JsonToV2StateConverter converter;
     private ThresholdedRandomCutForestMapper trcfMapper;
     private Schema<ThresholdedRandomCutForestState> trcfSchema;
@@ -157,7 +156,6 @@ public class CheckpointDao {
      * @param indexName name of the index for model checkpoints
      * @param gson accessor to Gson functionality
      * @param mapper RCF model serialization utility
-     * @param schema RandomCutForestState schema used by ProtoStuff
      * @param converter converter from rcf v1 serde to protostuff based format
      * @param trcfMapper TRCF serialization mapper
      * @param trcfSchema TRCF serialization schema
@@ -174,7 +172,6 @@ public class CheckpointDao {
         String indexName,
         Gson gson,
         RandomCutForestMapper mapper,
-        Schema<RandomCutForestState> schema,
         V1JsonToV2StateConverter converter,
         ThresholdedRandomCutForestMapper trcfMapper,
         Schema<ThresholdedRandomCutForestState> trcfSchema,
@@ -190,7 +187,6 @@ public class CheckpointDao {
         this.indexName = indexName;
         this.gson = gson;
         this.mapper = mapper;
-        this.schema = schema;
         this.converter = converter;
         this.trcfMapper = trcfMapper;
         this.trcfSchema = trcfSchema;
@@ -412,9 +408,10 @@ public class CheckpointDao {
 
     private String toCheckpoint(ThresholdedRandomCutForest trcf, LinkedBuffer buffer) {
         try {
-            ThresholdedRandomCutForestState trcfState = trcfMapper.toState(trcf);
-            byte[] bytes = AccessController
-                .doPrivileged((PrivilegedAction<byte[]>) () -> ProtostuffIOUtil.toByteArray(trcfState, trcfSchema, buffer));
+            byte[] bytes = AccessController.doPrivileged((PrivilegedAction<byte[]>) () -> {
+                ThresholdedRandomCutForestState trcfState = trcfMapper.toState(trcf);
+                return ProtostuffIOUtil.toByteArray(trcfState, trcfSchema, buffer);
+            });
             return Base64.getEncoder().encodeToString(bytes);
         } finally {
             buffer.clear();
@@ -529,8 +526,8 @@ public class CheckpointDao {
                 if (json.has(ENTITY_TRCF)) {
                     trcf = toTrcf(json.getAsJsonPrimitive(ENTITY_TRCF).getAsString());
                 } else {
-                    Optional<RandomCutForest> rcf = null;
-                    Optional<ThresholdingModel> threshold = null;
+                    Optional<RandomCutForest> rcf = Optional.empty();
+                    Optional<ThresholdingModel> threshold = Optional.empty();
                     if (json.has(ENTITY_RCF)) {
                         String serializedRCF = json.getAsJsonPrimitive(ENTITY_RCF).getAsString();
                         rcf = deserializeRCFModel(serializedRCF, modelId);
@@ -593,13 +590,15 @@ public class CheckpointDao {
         if (checkpoint == null || checkpoint.isEmpty()) {
             return Optional.empty();
         }
-        try {
-            RandomCutForestState state = converter.convert(checkpoint, Precision.FLOAT_32);
-            return Optional.ofNullable(AccessController.doPrivileged((PrivilegedAction<RandomCutForest>) () -> mapper.toModel(state)));
-        } catch (Exception e) {
-            logger.error("Unexpected error when deserializing " + modelId, e);
-            return Optional.empty();
-        }
+        return Optional.ofNullable(AccessController.doPrivileged((PrivilegedAction<RandomCutForest>) () -> {
+            try {
+                RandomCutForestState state = converter.convert(checkpoint, Precision.FLOAT_32);
+                return mapper.toModel(state);
+            } catch (Exception e) {
+                logger.error("Unexpected error when deserializing " + modelId, e);
+                return null;
+            }
+        }));
     }
 
     private void deserializeTRCFModel(
