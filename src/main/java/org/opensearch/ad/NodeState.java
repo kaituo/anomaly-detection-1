@@ -44,8 +44,13 @@ public class NodeState implements ExpiringState {
     private boolean coldStartRunning;
     // detector job
     private AnomalyDetectorJob detectorJob;
+    // for single-stream detector, it means current total updates of the rcf model;
+    // for hcad, it is the maximum total updates. This value does not decrease.
+    private long maxTotalUpdates;
+    // time-to-live of the state
+    private Duration stateTtl;
 
-    public NodeState(String detectorId, Clock clock) {
+    public NodeState(String detectorId, Clock clock, Duration stateTtl) {
         this.detectorId = detectorId;
         this.detectorDef = null;
         this.partitonNumber = -1;
@@ -56,6 +61,8 @@ public class NodeState implements ExpiringState {
         this.clock = clock;
         this.coldStartRunning = false;
         this.detectorJob = null;
+        this.maxTotalUpdates = -1;
+        this.stateTtl = stateTtl;
     }
 
     public String getDetectorId() {
@@ -188,6 +195,16 @@ public class NodeState implements ExpiringState {
         refreshLastUpdateTime();
     }
 
+    public long getMaxTotalUpdates() {
+        refreshLastUpdateTime();
+        return maxTotalUpdates;
+    }
+
+    public void setMaxTotalUpdates(long maxTotalUpdates) {
+        this.maxTotalUpdates = maxTotalUpdates;
+        refreshLastUpdateTime();
+    }
+
     /**
      * refresh last access time.
      */
@@ -196,11 +213,10 @@ public class NodeState implements ExpiringState {
     }
 
     /**
-     * @param stateTtl time to leave for the state
      * @return whether the transport state is expired
      */
     @Override
-    public boolean expired(Duration stateTtl) {
+    public boolean expired() {
         return expired(lastAccessTime, stateTtl, clock.instant());
     }
 }

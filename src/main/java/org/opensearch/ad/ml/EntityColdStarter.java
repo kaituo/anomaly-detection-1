@@ -235,7 +235,7 @@ public class EntityColdStarter implements MaintenanceState {
                         return new DoorKeeper(
                             AnomalyDetectorSettings.DOOR_KEEPER_FOR_COLD_STARTER_MAX_INSERTION,
                             AnomalyDetectorSettings.DOOR_KEEPER_FAULSE_POSITIVE_RATE,
-                            detector.getDetectionIntervalDuration().multipliedBy(AnomalyDetectorSettings.DOOR_KEEPER_MAINTENANCE_FREQ),
+                            detector.getDetectionIntervalDuration().multipliedBy(AnomalyDetectorSettings.MAINTENANCE_FREQ),
                             clock
                         );
                     }

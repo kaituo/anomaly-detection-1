@@ -76,18 +76,24 @@ public class CacheBuffer implements ExpiringState {
     private final Clock clock;
     private final CheckpointWriteWorker checkpointWriteQueue;
     private final Random random;
+    // how often in hours that a snapshot is captured
+    private volatile int checkpointSaveInterval;
+    // how long a checkpoint save request can last
+    private long checkpointSaveTtlMills;
 
     public CacheBuffer(
-        int minimumCapacity,
-        long intervalSecs,
-        long memoryConsumptionPerEntity,
-        MemoryTracker memoryTracker,
-        Clock clock,
-        Duration modelTtl,
-        String detectorId,
-        CheckpointWriteWorker checkpointWriteQueue,
-        Random random
-    ) {
+            int minimumCapacity,
+            long intervalSecs,
+            long memoryConsumptionPerEntity,
+            MemoryTracker memoryTracker,
+            Clock clock,
+            Duration modelTtl,
+            String detectorId,
+            CheckpointWriteWorker checkpointWriteQueue,
+            Random random,
+            int checkpointSaveInterval,
+            long checkpointSaveTtlMills
+            ) {
         this.memoryConsumptionPerEntity = memoryConsumptionPerEntity;
         setMinimumCapacity(minimumCapacity);
 
@@ -102,6 +108,8 @@ public class CacheBuffer implements ExpiringState {
         this.priorityTracker = new PriorityTracker(clock, intervalSecs, clock.instant().getEpochSecond(), MAX_TRACKING_ENTITIES);
         this.checkpointWriteQueue = checkpointWriteQueue;
         this.random = random;
+        this.checkpointSaveInterval = checkpointSaveInterval;
+        this.checkpointSaveTtlMills = checkpointSaveTtlMills;
     }
 
     /**
@@ -137,11 +145,11 @@ public class CacheBuffer implements ExpiringState {
     }
 
     /**
-    * Insert the model state associated with a model Id to the cache.  Update priority.
-    * @param entityModelId the model Id
-    * @param value the ModelState
-    * @param priority the priority
-    */
+     * Insert the model state associated with a model Id to the cache.  Update priority.
+     * @param entityModelId the model Id
+     * @param value the ModelState
+     * @param priority the priority
+     */
     private void put(String entityModelId, ModelState<EntityModel> value, float priority) {
         ModelState<EntityModel> contentNode = items.get(entityModelId);
         if (contentNode == null) {
@@ -239,7 +247,7 @@ public class CacheBuffer implements ExpiringState {
                 // regardless of last checkpoint time. whether If we don't save,
                 // we throw the new samples and might never be able to initialize the model
                 boolean isNullModel = !modelRemoved.getTrcf().isPresent();
-                checkpointWriteQueue.write(valueRemoved, isNullModel, RequestPriority.MEDIUM);
+                checkpointWriteQueue.write(valueRemoved, isNullModel, RequestPriority.MEDIUM, System.currentTimeMillis() + checkpointSaveTtlMills);
 
                 modelRemoved.clear();
             }
@@ -322,8 +330,9 @@ public class CacheBuffer implements ExpiringState {
                     // already in the cache
                     // remove method saves checkpoint as well
                     removedStates.add(remove(entityModelId));
-                } else if (random.nextInt(6) == 0) {
+                } else if (checkpointSaveInterval > 0 && random.nextInt(checkpointSaveInterval) == 0) {
                     // checkpoint is relatively big compared to other queued requests
+                    // checkpointSaveInterval = 6 by default
                     // save checkpoints with 1/6 probability as we expect to save
                     // all every 6 hours statistically
                     //
@@ -358,7 +367,7 @@ public class CacheBuffer implements ExpiringState {
             }
         });
 
-        checkpointWriteQueue.writeAll(modelsToSave, detectorId, false, RequestPriority.MEDIUM);
+        checkpointWriteQueue.writeAll(modelsToSave, detectorId, false, RequestPriority.LOW, System.currentTimeMillis() + checkpointSaveTtlMills);
         return removedStates;
     }
 
@@ -462,8 +471,8 @@ public class CacheBuffer implements ExpiringState {
     }
 
     @Override
-    public boolean expired(Duration stateTtl) {
-        return expired(lastUsedTime, stateTtl, clock.instant());
+    public boolean expired() {
+        return expired(lastUsedTime, modelTtl, clock.instant());
     }
 
     public String getDetectorId() {
@@ -484,5 +493,9 @@ public class CacheBuffer implements ExpiringState {
         }
         this.minimumCapacity = minimumCapacity;
         this.reservedBytes = memoryConsumptionPerEntity * minimumCapacity;
+    }
+
+    public void setCheckpointSaveInterval(int checkpointSaveInterval) {
+        this.checkpointSaveInterval = checkpointSaveInterval;
     }
 }

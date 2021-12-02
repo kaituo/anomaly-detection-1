@@ -25,152 +25,152 @@ public final class AnomalyDetectorSettings {
 
     public static final int MAX_DETECTOR_UPPER_LIMIT = 10000;
     public static final Setting<Integer> MAX_SINGLE_ENTITY_ANOMALY_DETECTORS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_anomaly_detectors",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_SINGLE_ENTITY_ANOMALY_DETECTORS,
-            0,
-            MAX_DETECTOR_UPPER_LIMIT,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_anomaly_detectors",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_SINGLE_ENTITY_ANOMALY_DETECTORS,
+                    0,
+                    MAX_DETECTOR_UPPER_LIMIT,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Integer> MAX_MULTI_ENTITY_ANOMALY_DETECTORS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_multi_entity_anomaly_detectors",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS,
-            0,
-            MAX_DETECTOR_UPPER_LIMIT,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_multi_entity_anomaly_detectors",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS,
+                    0,
+                    MAX_DETECTOR_UPPER_LIMIT,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Integer> MAX_ANOMALY_FEATURES = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_anomaly_features",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
-            0,
-            10,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_anomaly_features",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
+                    0,
+                    10,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> REQUEST_TIMEOUT = Setting
-        .positiveTimeSetting(
-            "plugins.anomaly_detection.request_timeout",
-            LegacyOpenDistroAnomalyDetectorSettings.REQUEST_TIMEOUT,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .positiveTimeSetting(
+                    "plugins.anomaly_detection.request_timeout",
+                    LegacyOpenDistroAnomalyDetectorSettings.REQUEST_TIMEOUT,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> DETECTION_INTERVAL = Setting
-        .positiveTimeSetting(
-            "plugins.anomaly_detection.detection_interval",
-            LegacyOpenDistroAnomalyDetectorSettings.DETECTION_INTERVAL,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .positiveTimeSetting(
+                    "plugins.anomaly_detection.detection_interval",
+                    LegacyOpenDistroAnomalyDetectorSettings.DETECTION_INTERVAL,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> DETECTION_WINDOW_DELAY = Setting
-        .timeSetting(
-            "plugins.anomaly_detection.detection_window_delay",
-            LegacyOpenDistroAnomalyDetectorSettings.DETECTION_WINDOW_DELAY,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .timeSetting(
+                    "plugins.anomaly_detection.detection_window_delay",
+                    LegacyOpenDistroAnomalyDetectorSettings.DETECTION_WINDOW_DELAY,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> AD_RESULT_HISTORY_ROLLOVER_PERIOD = Setting
-        .positiveTimeSetting(
-            "plugins.anomaly_detection.ad_result_history_rollover_period",
-            LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_ROLLOVER_PERIOD,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .positiveTimeSetting(
+                    "plugins.anomaly_detection.ad_result_history_rollover_period",
+                    LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_ROLLOVER_PERIOD,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // Opensearch-only setting. Doesn't plan to use the value of the legacy setting
     // AD_RESULT_HISTORY_MAX_DOCS as that's too low. If the master node uses opendistro code,
     // it uses the legacy setting. If the master node uses opensearch code, it uses the new setting.
     public static final Setting<Long> AD_RESULT_HISTORY_MAX_DOCS_PER_SHARD = Setting
-        .longSetting(
-            "plugins.anomaly_detection.ad_result_history_max_docs_per_shard",
-            // Total documents in the primary shards.
-            // Note the count is for Lucene docs. Lucene considers a nested
-            // doc a doc too. One result corresponding to 4 Lucene docs.
-            // A single Lucene doc is roughly 46.8 bytes (measured by experiments).
-            // 1.35 billion docs is about 65 GB. One shard can have at most 65 GB.
-            // This number in Lucene doc count is used in RolloverRequest#addMaxIndexDocsCondition
-            // for adding condition to check if the index has at least numDocs.
-            1_350_000_000L,
-            0L,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .longSetting(
+                    "plugins.anomaly_detection.ad_result_history_max_docs_per_shard",
+                    // Total documents in the primary shards.
+                    // Note the count is for Lucene docs. Lucene considers a nested
+                    // doc a doc too. One result corresponding to 4 Lucene docs.
+                    // A single Lucene doc is roughly 46.8 bytes (measured by experiments).
+                    // 1.35 billion docs is about 65 GB. One shard can have at most 65 GB.
+                    // This number in Lucene doc count is used in RolloverRequest#addMaxIndexDocsCondition
+                    // for adding condition to check if the index has at least numDocs.
+                    1_350_000_000L,
+                    0L,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> AD_RESULT_HISTORY_RETENTION_PERIOD = Setting
-        .positiveTimeSetting(
-            "plugins.anomaly_detection.ad_result_history_retention_period",
-            LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_RETENTION_PERIOD,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .positiveTimeSetting(
+                    "plugins.anomaly_detection.ad_result_history_retention_period",
+                    LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_RETENTION_PERIOD,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Integer> MAX_RETRY_FOR_UNRESPONSIVE_NODE = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_retry_for_unresponsive_node",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            0,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_retry_for_unresponsive_node",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+                    0,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> COOLDOWN_MINUTES = Setting
-        .positiveTimeSetting(
-            "plugins.anomaly_detection.cooldown_minutes",
-            LegacyOpenDistroAnomalyDetectorSettings.COOLDOWN_MINUTES,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .positiveTimeSetting(
+                    "plugins.anomaly_detection.cooldown_minutes",
+                    LegacyOpenDistroAnomalyDetectorSettings.COOLDOWN_MINUTES,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> BACKOFF_MINUTES = Setting
-        .positiveTimeSetting(
-            "plugins.anomaly_detection.backoff_minutes",
-            LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_MINUTES,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .positiveTimeSetting(
+                    "plugins.anomaly_detection.backoff_minutes",
+                    LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_MINUTES,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<TimeValue> BACKOFF_INITIAL_DELAY = Setting
-        .positiveTimeSetting(
-            "plugins.anomaly_detection.backoff_initial_delay",
-            LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_INITIAL_DELAY,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .positiveTimeSetting(
+                    "plugins.anomaly_detection.backoff_initial_delay",
+                    LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_INITIAL_DELAY,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Integer> MAX_RETRY_FOR_BACKOFF = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_retry_for_backoff",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_BACKOFF,
-            0,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_retry_for_backoff",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_BACKOFF,
+                    0,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Integer> MAX_RETRY_FOR_END_RUN_EXCEPTION = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_retry_for_end_run_exception",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_END_RUN_EXCEPTION,
-            0,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_retry_for_end_run_exception",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_END_RUN_EXCEPTION,
+                    0,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Boolean> FILTER_BY_BACKEND_ROLES = Setting
-        .boolSetting(
-            "plugins.anomaly_detection.filter_by_backend_roles",
-            LegacyOpenDistroAnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .boolSetting(
+                    "plugins.anomaly_detection.filter_by_backend_roles",
+                    LegacyOpenDistroAnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final String ANOMALY_DETECTORS_INDEX_MAPPING_FILE = "mappings/anomaly-detectors.json";
     public static final String ANOMALY_DETECTOR_JOBS_INDEX_MAPPING_FILE = "mappings/anomaly-detector-jobs.json";
@@ -180,7 +180,23 @@ public final class AnomalyDetectorSettings {
 
     public static final Duration HOURLY_MAINTENANCE = Duration.ofHours(1);
 
-    public static final Duration CHECKPOINT_TTL = Duration.ofDays(3);
+    // used to calculate model Time-to-Live (ttl) of a detector: INTERVAL_MULTIPLIER * detector interval
+    // AD has a cache to store models. The last access time is set to current timestamp each time the model
+    // is requested.  An hourly job checks if TTL reaches.  The model is evicted from the cache when the
+    // TTL reaches. Depending on the timing of the hourly check and the capacity of the cache, the actual TTL
+    // varies.  Assuming the capacity of the cache is large enough to hold all non-expired models.
+    // Worst of all, if the TTL is 6 minutes and the last access time is refreshed immediately after the hourly
+    // check, when the next hourly check happens, the model is not expired.  The model can take another hour to expire.
+    // So the actual TTL is one hour and six minutes.
+    public static final Setting<Integer> MODEL_TTL_INTERVAL_MULTIPLIER = Setting
+            .intSetting(
+                    "plugins.anomaly_detection.model_ttl_interval_multiplier",
+                    6,
+                    0,
+                    1000,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // ======================================
     // ML parameters
@@ -212,14 +228,14 @@ public final class AnomalyDetectorSettings {
     public static final double DESIRED_MODEL_SIZE_PERCENTAGE = 0.002;
 
     public static final Setting<Double> MODEL_MAX_SIZE_PERCENTAGE = Setting
-        .doubleSetting(
-            "plugins.anomaly_detection.model_max_size_percent",
-            LegacyOpenDistroAnomalyDetectorSettings.MODEL_MAX_SIZE_PERCENTAGE,
-            0,
-            0.7,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .doubleSetting(
+                    "plugins.anomaly_detection.model_max_size_percent",
+                    LegacyOpenDistroAnomalyDetectorSettings.MODEL_MAX_SIZE_PERCENTAGE,
+                    0,
+                    0.7,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // for a batch operation, we want all of the bounding box in-place for speed
     public static final double BATCH_BOUNDING_BOX_CACHE_RATIO = 1;
@@ -298,7 +314,7 @@ public final class AnomalyDetectorSettings {
      * That's why I am using 60_000 as the max limit.
      */
     public static final Setting<Integer> DEDICATED_CACHE_SIZE = Setting
-        .intSetting("plugins.anomaly_detection.dedicated_cache_size", 10, 0, 60_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
+            .intSetting("plugins.anomaly_detection.dedicated_cache_size", 10, 0, 60_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
 
     // We only keep priority (4 bytes float) in inactive cache. 1 million priorities
     // take up 4 MB.
@@ -313,19 +329,19 @@ public final class AnomalyDetectorSettings {
     public static final double DOOR_KEEPER_FAULSE_POSITIVE_RATE = 0.01;
 
     // clean up door keeper every 60 intervals
-    public static final int DOOR_KEEPER_MAINTENANCE_FREQ = 60;
+    public static final int MAINTENANCE_FREQ = 60;
 
     // Increase the value will adding pressure to indexing anomaly results and our feature query
     // OpenSearch-only setting as previous the legacy default is too low (1000)
     public static final Setting<Integer> MAX_ENTITIES_PER_QUERY = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_entities_per_query",
-            1_000_000,
-            0,
-            2_000_000,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_entities_per_query",
+                    1_000_000,
+                    0,
+                    2_000_000,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // save partial zero-anomaly grade results after indexing pressure reaching the limit
     // Opendistro version has similar setting. I lowered the value to make room
@@ -333,45 +349,39 @@ public final class AnomalyDetectorSettings {
     // and fallback values. I want users to use the new default value 0.6 instead of 0.8.
     // So do not plan to use the value of legacy setting as fallback.
     public static final Setting<Float> INDEX_PRESSURE_SOFT_LIMIT = Setting
-        .floatSetting(
-            "plugins.anomaly_detection.index_pressure_soft_limit",
-            0.6f,
-            0.0f,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .floatSetting(
+                    "plugins.anomaly_detection.index_pressure_soft_limit",
+                    0.6f,
+                    0.0f,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // save only error or larger-than-one anomaly grade results after indexing
     // pressure reaching the limit
     // opensearch-only setting
     public static final Setting<Float> INDEX_PRESSURE_HARD_LIMIT = Setting
-        .floatSetting(
-            "plugins.anomaly_detection.index_pressure_hard_limit",
-            0.9f,
-            0.0f,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .floatSetting(
+                    "plugins.anomaly_detection.index_pressure_hard_limit",
+                    0.9f,
+                    0.0f,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // max number of primary shards of an AD index
     public static final Setting<Integer> MAX_PRIMARY_SHARDS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_primary_shards",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_PRIMARY_SHARDS,
-            0,
-            200,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_primary_shards",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_PRIMARY_SHARDS,
+                    0,
+                    200,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // max entity value's length
     public static int MAX_ENTITY_LENGTH = 256;
-
-    // max number of index checkpoint requests in one bulk
-    public static int MAX_BULK_CHECKPOINT_SIZE = 1000;
-
-    // number of bulk checkpoints per second
-    public static double CHECKPOINT_BULK_PER_SECOND = 0.02;
 
     // ======================================
     // Historical analysis
@@ -379,83 +389,83 @@ public final class AnomalyDetectorSettings {
     // Maximum number of batch tasks running on one node.
     // TODO: performance test and tune the setting.
     public static final Setting<Integer> MAX_BATCH_TASK_PER_NODE = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_batch_task_per_node",
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE,
-            1,
-            100,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_batch_task_per_node",
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE,
+                    1,
+                    100,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // Maximum number of deleted tasks can keep in cache.
     public static final Setting<Integer> MAX_CACHED_DELETED_TASKS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_cached_deleted_tasks",
-            1000,
-            1,
-            10_000,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_cached_deleted_tasks",
+                    1000,
+                    1,
+                    10_000,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // Maximum number of old AD tasks we can keep.
     public static int MAX_OLD_AD_TASK_DOCS = 1000;
     public static final Setting<Integer> MAX_OLD_AD_TASK_DOCS_PER_DETECTOR = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_old_ad_task_docs_per_detector",
-            // One AD task is roughly 1.5KB for normal case. Suppose task's size
-            // is 2KB conservatively. If we store 1000 AD tasks for one detector,
-            // that will be 2GB.
-            LegacyOpenDistroAnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR,
-            1, // keep at least 1 old AD task per detector
-            MAX_OLD_AD_TASK_DOCS,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_old_ad_task_docs_per_detector",
+                    // One AD task is roughly 1.5KB for normal case. Suppose task's size
+                    // is 2KB conservatively. If we store 1000 AD tasks for one detector,
+                    // that will be 2GB.
+                    LegacyOpenDistroAnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR,
+                    1, // keep at least 1 old AD task per detector
+                    MAX_OLD_AD_TASK_DOCS,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final int MAX_BATCH_TASK_PIECE_SIZE = 10_000;
     public static final Setting<Integer> BATCH_TASK_PIECE_SIZE = Setting
-        .intSetting(
-            "plugins.anomaly_detection.batch_task_piece_size",
-            LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_SIZE,
-            1,
-            MAX_BATCH_TASK_PIECE_SIZE,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.batch_task_piece_size",
+                    LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_SIZE,
+                    1,
+                    MAX_BATCH_TASK_PIECE_SIZE,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Integer> BATCH_TASK_PIECE_INTERVAL_SECONDS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.batch_task_piece_interval_seconds",
-            LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS,
-            1,
-            600,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.batch_task_piece_interval_seconds",
+                    LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS,
+                    1,
+                    600,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // Maximum number of entities we support for historical analysis.
     public static final int MAX_TOP_ENTITIES_LIMIT_FOR_HISTORICAL_ANALYSIS = 10_000;
     public static final Setting<Integer> MAX_TOP_ENTITIES_FOR_HISTORICAL_ANALYSIS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_top_entities_for_historical_analysis",
-            1000,
-            1,
-            MAX_TOP_ENTITIES_LIMIT_FOR_HISTORICAL_ANALYSIS,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_top_entities_for_historical_analysis",
+                    1000,
+                    1,
+                    MAX_TOP_ENTITIES_LIMIT_FOR_HISTORICAL_ANALYSIS,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Integer> MAX_RUNNING_ENTITIES_PER_DETECTOR_FOR_HISTORICAL_ANALYSIS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_running_entities_per_detector_for_historical_analysis",
-            10,
-            1,
-            1000,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_running_entities_per_detector_for_historical_analysis",
+                    10,
+                    1,
+                    1000,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // ======================================
     // rate-limiting queue parameters
@@ -463,64 +473,64 @@ public final class AnomalyDetectorSettings {
     // the percentage of heap usage allowed for queues holding small requests
     // set it to 0 to disable the queue
     public static final Setting<Float> COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT = Setting
-        .floatSetting(
-            "plugins.anomaly_detection.cold_entity_queue_max_heap_percent",
-            0.001f,
-            0.0f,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .floatSetting(
+                    "plugins.anomaly_detection.cold_entity_queue_max_heap_percent",
+                    0.001f,
+                    0.0f,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Float> CHECKPOINT_READ_QUEUE_MAX_HEAP_PERCENT = Setting
-        .floatSetting(
-            "plugins.anomaly_detection.checkpoint_read_queue_max_heap_percent",
-            0.001f,
-            0.0f,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .floatSetting(
+                    "plugins.anomaly_detection.checkpoint_read_queue_max_heap_percent",
+                    0.001f,
+                    0.0f,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Float> ENTITY_COLD_START_QUEUE_MAX_HEAP_PERCENT = Setting
-        .floatSetting(
-            "plugins.anomaly_detection.entity_cold_start_queue_max_heap_percent",
-            0.001f,
-            0.0f,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .floatSetting(
+                    "plugins.anomaly_detection.entity_cold_start_queue_max_heap_percent",
+                    0.001f,
+                    0.0f,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // the percentage of heap usage allowed for queues holding large requests
     // set it to 0 to disable the queue
     public static final Setting<Float> CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT = Setting
-        .floatSetting(
-            "plugins.anomaly_detection.checkpoint_write_queue_max_heap_percent",
-            0.01f,
-            0.0f,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .floatSetting(
+                    "plugins.anomaly_detection.checkpoint_write_queue_max_heap_percent",
+                    0.01f,
+                    0.0f,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Setting<Float> RESULT_WRITE_QUEUE_MAX_HEAP_PERCENT = Setting
-        .floatSetting(
-            "plugins.anomaly_detection.result_write_queue_max_heap_percent",
-            0.01f,
-            0.0f,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .floatSetting(
+                    "plugins.anomaly_detection.result_write_queue_max_heap_percent",
+                    0.01f,
+                    0.0f,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // expected execution time per cold entity request. This setting controls
     // the speed of cold entity requests execution. The larger, the faster, and
     // the more performance impact to customers' workload.
     public static final Setting<Integer> EXPECTED_COLD_ENTITY_EXECUTION_TIME_IN_SECS = Setting
-        .intSetting(
-            "plugins.anomaly_detection.expected_cold_entity_execution_time_in_secs",
-            3,
-            0,
-            3600,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.expected_cold_entity_execution_time_in_secs",
+                    3,
+                    0,
+                    3600,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     /**
      * EntityRequest has entityName (# category fields * 256, the recommended limit
@@ -577,67 +587,67 @@ public final class AnomalyDetectorSettings {
      * Max concurrent entity cold starts per node
      */
     public static final Setting<Integer> ENTITY_COLD_START_QUEUE_CONCURRENCY = Setting
-        .intSetting(
-            "plugins.anomaly_detection.entity_cold_start_queue_concurrency",
-            1,
-            1,
-            10,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.entity_cold_start_queue_concurrency",
+                    1,
+                    1,
+                    10,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     /**
      * Max concurrent checkpoint reads per node
      */
     public static final Setting<Integer> CHECKPOINT_READ_QUEUE_CONCURRENCY = Setting
-        .intSetting(
-            "plugins.anomaly_detection.checkpoint_read_queue_concurrency",
-            1,
-            1,
-            10,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.checkpoint_read_queue_concurrency",
+                    1,
+                    1,
+                    10,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     /**
      * Max concurrent checkpoint writes per node
      */
     public static final Setting<Integer> CHECKPOINT_WRITE_QUEUE_CONCURRENCY = Setting
-        .intSetting(
-            "plugins.anomaly_detection.checkpoint_write_queue_concurrency",
-            2,
-            1,
-            10,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.checkpoint_write_queue_concurrency",
+                    2,
+                    1,
+                    10,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     /**
      * Max concurrent result writes per node.  Since checkpoint is relatively large
      * (250KB), we have 2 concurrent threads processing the queue.
      */
     public static final Setting<Integer> RESULT_WRITE_QUEUE_CONCURRENCY = Setting
-        .intSetting(
-            "plugins.anomaly_detection.result_write_queue_concurrency",
-            2,
-            1,
-            10,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.result_write_queue_concurrency",
+                    2,
+                    1,
+                    10,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     /**
      * Assume each checkpoint takes roughly 200KB.  25 requests are of 5 MB.
      */
     public static final Setting<Integer> CHECKPOINT_READ_QUEUE_BATCH_SIZE = Setting
-        .intSetting(
-            "plugins.anomaly_detection.checkpoint_read_queue_batch_size",
-            25,
-            1,
-            60,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.checkpoint_read_queue_batch_size",
+                    25,
+                    1,
+                    60,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     /**
      * ES recommends bulk size to be 5~15 MB.
@@ -645,14 +655,14 @@ public final class AnomalyDetectorSettings {
      * Assume each checkpoint takes roughly 200KB.  25 requests are of 5 MB.
      */
     public static final Setting<Integer> CHECKPOINT_WRITE_QUEUE_BATCH_SIZE = Setting
-        .intSetting(
-            "plugins.anomaly_detection.checkpoint_write_queue_batch_size",
-            25,
-            1,
-            60,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.checkpoint_write_queue_batch_size",
+                    25,
+                    1,
+                    60,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     /**
      * ES recommends bulk size to be 5~15 MB.
@@ -660,14 +670,14 @@ public final class AnomalyDetectorSettings {
      * Assume each result takes roughly 1KB.  5000 requests are of 5 MB.
      */
     public static final Setting<Integer> RESULT_WRITE_QUEUE_BATCH_SIZE = Setting
-        .intSetting(
-            "plugins.anomaly_detection.result_write_queue_batch_size",
-            5000,
-            1,
-            15000,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.result_write_queue_batch_size",
+                    5000,
+                    1,
+                    15000,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     public static final Duration QUEUE_MAINTENANCE = Duration.ofMinutes(10);
 
@@ -700,12 +710,19 @@ public final class AnomalyDetectorSettings {
     // the size of the buffer used for rcf deserialization
     public static final int SERIALIZATION_BUFFER_BYTES = 512;
 
+    public static final Duration CHECKPOINT_TTL = Duration.ofDays(3);
+
+    // Save checkpoints every 6 hours by default. Can change via the setting.
+    // set the value to -1 disables checkpoint saving
+    public static final Setting<Integer> CHECKPOINT_SAVE_FREQ = Setting
+            .intSetting("plugins.anomaly_detection.checkpoint_save_freq", 6, -1, 1000, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
     // ======================================
     // pagination setting
     // ======================================
     // pagination size
     public static final Setting<Integer> PAGE_SIZE = Setting
-        .intSetting("plugins.anomaly_detection.page_size", 1_000, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
+            .intSetting("plugins.anomaly_detection.page_size", 1_000, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
 
     // within an interval, how many percents are used to process requests.
     // 1.0 means we use all of the detection interval to process requests.
@@ -731,11 +748,11 @@ public final class AnomalyDetectorSettings {
     // Default value 5 won't cause heavy GC on an 1-GB heap JVM.
     // Since every entity is likely to give some anomalies, 5 entities are enough.
     public static final Setting<Integer> MAX_ENTITIES_FOR_PREVIEW = Setting
-        .intSetting("plugins.anomaly_detection.max_entities_for_preview", 5, 1, 30, Setting.Property.NodeScope, Setting.Property.Dynamic);
+            .intSetting("plugins.anomaly_detection.max_entities_for_preview", 5, 1, 30, Setting.Property.NodeScope, Setting.Property.Dynamic);
 
     // max concurrent preview to limit resource usage
     public static final Setting<Integer> MAX_CONCURRENT_PREVIEW = Setting
-        .intSetting("plugins.anomaly_detection.max_concurrent_preview", 2, 1, 20, Setting.Property.NodeScope, Setting.Property.Dynamic);
+            .intSetting("plugins.anomaly_detection.max_concurrent_preview", 2, 1, 20, Setting.Property.NodeScope, Setting.Property.Dynamic);
 
     // preview timeout in terms of milliseconds
     public static final long PREVIEW_TIMEOUT_IN_MILLIS = 60_000;
@@ -749,12 +766,12 @@ public final class AnomalyDetectorSettings {
     // cleanup resouce setting
     // ======================================
     public static final Setting<Boolean> DELETE_AD_RESULT_WHEN_DELETE_DETECTOR = Setting
-        .boolSetting(
-            "plugins.anomaly_detection.delete_anomaly_result_when_delete_detector",
-            false,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .boolSetting(
+                    "plugins.anomaly_detection.delete_anomaly_result_when_delete_detector",
+                    false,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // ======================================
     // stats/profile API setting
@@ -762,14 +779,14 @@ public final class AnomalyDetectorSettings {
     // the max number of models to return per node.
     // the setting is used to limit resource usage due to showing models
     public static final Setting<Integer> MAX_MODEL_SIZE_PER_NODE = Setting
-        .intSetting(
-            "plugins.anomaly_detection.max_model_size_per_node",
-            100,
-            1,
-            10_000,
-            Setting.Property.NodeScope,
-            Setting.Property.Dynamic
-        );
+            .intSetting(
+                    "plugins.anomaly_detection.max_model_size_per_node",
+                    100,
+                    1,
+                    10_000,
+                    Setting.Property.NodeScope,
+                    Setting.Property.Dynamic
+                    );
 
     // profile API needs to report total entities. We can use cardinality aggregation for a single-category field.
     // But we cannot do that for multi-category fields as it requires scripting to generate run time fields,

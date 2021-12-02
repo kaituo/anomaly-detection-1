@@ -150,12 +150,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
      * @param forceWrite whether we should write no matter what
      * @param priority how urgent the write is
      */
-    public void write(ModelState<EntityModel> modelState, boolean forceWrite, RequestPriority priority) {
-        Instant instant = modelState.getLastCheckpointTime();
-        if (!shouldSave(instant, forceWrite)) {
-            return;
-        }
-
+    public void write(ModelState<EntityModel> modelState, boolean forceWrite, RequestPriority priority, long expirationEpochMs) {
         if (modelState.getModel() != null) {
             String detectorId = modelState.getDetectorId();
             String modelId = modelState.getModelId();
@@ -163,7 +158,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
                 return;
             }
 
-            nodeStateManager.getAnomalyDetector(detectorId, onGetDetector(detectorId, modelId, modelState, priority));
+            nodeStateManager.getAnomalyDetector(detectorId, onGetDetector(detectorId, modelId, modelState, priority, expirationEpochMs, forceWrite));
         }
     }
 
@@ -171,7 +166,9 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
         String detectorId,
         String modelId,
         ModelState<EntityModel> modelState,
-        RequestPriority priority
+        RequestPriority priority,
+        long expirationEpochMs,
+        boolean forceWrite
     ) {
         return ActionListener.wrap(detectorOptional -> {
             if (false == detectorOptional.isPresent()) {
@@ -180,6 +177,12 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
             }
 
             AnomalyDetector detector = detectorOptional.get();
+
+            Instant instant = modelState.getLastCheckpointTime();
+            if (!shouldSave(instant, forceWrite, detector.getDetectionIntervalDuration())) {
+                return;
+            }
+
             try {
                 Map<String, Object> source = checkpoint.toIndexSource(modelState);
 
@@ -190,7 +193,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
 
                 modelState.setLastCheckpointTime(clock.instant());
                 CheckpointWriteRequest request = new CheckpointWriteRequest(
-                    System.currentTimeMillis() + detector.getDetectorIntervalInMilliseconds(),
+                    expirationEpochMs,
                     detectorId,
                     priority,
                     // If the document does not already exist, the contents of the upsert element
@@ -215,7 +218,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
         }, exception -> { LOG.error(new ParameterizedMessage("fail to get detector [{}]", detectorId), exception); });
     }
 
-    public void writeAll(List<ModelState<EntityModel>> modelStates, String detectorId, boolean forceWrite, RequestPriority priority) {
+    public void writeAll(List<ModelState<EntityModel>> modelStates, String detectorId, boolean forceWrite, RequestPriority priority, long expirationEpochMs) {
         ActionListener<Optional<AnomalyDetector>> onGetForAll = ActionListener.wrap(detectorOptional -> {
             if (false == detectorOptional.isPresent()) {
                 LOG.warn(new ParameterizedMessage("AnomalyDetector [{}] is not available.", detectorId));
@@ -227,7 +230,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
                 List<CheckpointWriteRequest> allRequests = new ArrayList<>();
                 for (ModelState<EntityModel> state : modelStates) {
                     Instant instant = state.getLastCheckpointTime();
-                    if (!shouldSave(instant, forceWrite)) {
+                    if (!shouldSave(instant, forceWrite, detector.getDetectionIntervalDuration())) {
                         continue;
                     }
 
@@ -243,7 +246,7 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
                     allRequests
                         .add(
                             new CheckpointWriteRequest(
-                                System.currentTimeMillis() + detector.getDetectorIntervalInMilliseconds(),
+                                expirationEpochMs,
                                 detectorId,
                                 priority,
                                 // If the document does not already exist, the contents of the upsert element
@@ -276,10 +279,16 @@ public class CheckpointWriteWorker extends BatchWorker<CheckpointWriteRequest, B
      * Should we save the checkpoint or not
      * @param lastCheckpointTIme Last checkpoint time
      * @param forceWrite Save no matter what
-     * @return true when forceWrite is true or we haven't saved checkpoint in the
-     *  last checkpoint interval; false otherwise
+     * @return true when forceWrite is true or we haven't saved checkpoint in
+     *  max(last checkpoint interval, detector interval); false otherwise
      */
-    private boolean shouldSave(Instant lastCheckpointTIme, boolean forceWrite) {
-        return (lastCheckpointTIme != Instant.MIN && lastCheckpointTIme.plus(checkpointInterval).isBefore(clock.instant())) || forceWrite;
+    private boolean shouldSave(Instant lastCheckpointTIme, boolean forceWrite, Duration detectorInterval) {
+        Duration checkpointTtl = null;
+        if (checkpointInterval.compareTo(detectorInterval) < 0) {
+            checkpointTtl = detectorInterval;
+        } else {
+            checkpointTtl = checkpointInterval;
+        }
+        return (lastCheckpointTIme != Instant.MIN && lastCheckpointTIme.plus(checkpointTtl).isBefore(clock.instant())) || forceWrite;
     }
 }

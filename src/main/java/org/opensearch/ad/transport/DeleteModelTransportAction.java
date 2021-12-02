@@ -24,6 +24,11 @@ import org.opensearch.ad.NodeStateManager;
 import org.opensearch.ad.caching.CacheProvider;
 import org.opensearch.ad.feature.FeatureManager;
 import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ratelimit.CheckpointReadWorker;
+import org.opensearch.ad.ratelimit.CheckpointWriteWorker;
+import org.opensearch.ad.ratelimit.ColdEntityWorker;
+import org.opensearch.ad.ratelimit.EntityColdStartWorker;
+import org.opensearch.ad.ratelimit.ResultWriteWorker;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -39,6 +44,11 @@ public class DeleteModelTransportAction extends
     private FeatureManager featureManager;
     private CacheProvider cache;
     private ADTaskCacheManager adTaskCacheManager;
+    private CheckpointReadWorker checkpointReadWorker;
+    private CheckpointWriteWorker checkpointWriteWorker;
+    private ColdEntityWorker coldEntityWorker;
+    private EntityColdStartWorker coldStartWorker;
+    private ResultWriteWorker resultWriteWorker;
 
     @Inject
     public DeleteModelTransportAction(
@@ -50,7 +60,12 @@ public class DeleteModelTransportAction extends
         ModelManager modelManager,
         FeatureManager featureManager,
         CacheProvider cache,
-        ADTaskCacheManager adTaskCacheManager
+        ADTaskCacheManager adTaskCacheManager,
+        CheckpointReadWorker checkpointReadWorker,
+        CheckpointWriteWorker checkpointWriteWorker,
+        ColdEntityWorker coldEntityWorker,
+        EntityColdStartWorker coldStartWorker,
+        ResultWriteWorker resultWriteWorker
     ) {
         super(
             DeleteModelAction.NAME,
@@ -68,6 +83,11 @@ public class DeleteModelTransportAction extends
         this.featureManager = featureManager;
         this.cache = cache;
         this.adTaskCacheManager = adTaskCacheManager;
+        this.checkpointReadWorker = checkpointReadWorker;
+        this.checkpointWriteWorker = checkpointWriteWorker;
+        this.coldEntityWorker = coldEntityWorker;
+        this.coldStartWorker = coldStartWorker;
+        this.resultWriteWorker = resultWriteWorker;
     }
 
     @Override
@@ -123,6 +143,13 @@ public class DeleteModelTransportAction extends
 
         // delete realtime task cache
         adTaskCacheManager.removeRealtimeTaskCache(adID);
+
+        // clear request queues
+        this.checkpointReadWorker.clear(adID);
+        this.checkpointWriteWorker.clear(adID);
+        this.coldEntityWorker.clear(adID);
+        this.coldStartWorker.clear(adID);
+        this.resultWriteWorker.clear(adID);
 
         LOG.info("Finished deleting {}", adID);
         return new DeleteModelNodeResponse(clusterService.localNode());

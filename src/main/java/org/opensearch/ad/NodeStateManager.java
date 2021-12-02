@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Map.Entry;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.apache.logging.log4j.LogManager;
@@ -33,6 +34,7 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.ad.common.exception.EndRunException;
 import org.opensearch.ad.constant.CommonErrorMessages;
 import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.ml.ModelState;
 import org.opensearch.ad.ml.SingleStreamModelIdMapper;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
@@ -64,7 +66,7 @@ public class NodeStateManager implements MaintenanceState, CleanState {
     // map from detector id to the map of ES node id to the node's backpressureMuter
     private Map<String, Map<String, BackPressureRouting>> backpressureMuter;
     private final Clock clock;
-    private final Duration stateTtl;
+    private final int maintenanceFreq;
     private int maxRetryForUnresponsiveNode;
     private TimeValue mutePeriod;
 
@@ -76,25 +78,25 @@ public class NodeStateManager implements MaintenanceState, CleanState {
      * @param settings ES settings
      * @param clientUtil AD Client utility
      * @param clock A UTC clock
-     * @param stateTtl Max time to keep state in memory
+     * @param maintenanceFreq The number of intervals before an unaccessed states expire
      * @param clusterService Cluster service accessor
      */
     public NodeStateManager(
-        Client client,
-        NamedXContentRegistry xContentRegistry,
-        Settings settings,
-        ClientUtil clientUtil,
-        Clock clock,
-        Duration stateTtl,
-        ClusterService clusterService
-    ) {
+            Client client,
+            NamedXContentRegistry xContentRegistry,
+            Settings settings,
+            ClientUtil clientUtil,
+            Clock clock,
+            int maintenanceFreq,
+            ClusterService clusterService
+            ) {
         this.states = new ConcurrentHashMap<>();
         this.client = client;
         this.xContentRegistry = xContentRegistry;
         this.clientUtil = clientUtil;
         this.backpressureMuter = new ConcurrentHashMap<>();
         this.clock = clock;
-        this.stateTtl = stateTtl;
+        this.maintenanceFreq = maintenanceFreq;
         this.maxRetryForUnresponsiveNode = MAX_RETRY_FOR_UNRESPONSIVE_NODE.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_RETRY_FOR_UNRESPONSIVE_NODE, it -> {
             this.maxRetryForUnresponsiveNode = it;
@@ -146,19 +148,19 @@ public class NodeStateManager implements MaintenanceState, CleanState {
             LOG.debug("Fetched anomaly detector: {}", xc);
 
             try (
-                XContentParser parser = XContentType.JSON.xContent().createParser(xContentRegistry, LoggingDeprecationHandler.INSTANCE, xc)
-            ) {
+                    XContentParser parser = XContentType.JSON.xContent().createParser(xContentRegistry, LoggingDeprecationHandler.INSTANCE, xc)
+                    ) {
                 ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                 AnomalyDetector detector = AnomalyDetector.parse(parser, response.getId());
                 // end execution if all features are disabled
                 if (detector.getEnabledFeatureIds().isEmpty()) {
                     listener
-                        .onFailure(
+                    .onFailure(
                             new EndRunException(adID, CommonErrorMessages.ALL_FEATURES_DISABLED_ERR_MSG, true).countedInStats(false)
-                        );
+                            );
                     return;
                 }
-                NodeState state = states.computeIfAbsent(adID, id -> new NodeState(id, clock));
+                NodeState state = states.computeIfAbsent(adID, id -> new NodeState(id, clock, detector.getDetectionIntervalDuration().multipliedBy(maintenanceFreq)));
                 state.setDetectorDef(detector);
 
                 listener.onResponse(Optional.of(detector));
@@ -222,7 +224,31 @@ public class NodeStateManager implements MaintenanceState, CleanState {
      */
     @Override
     public void maintenance() {
-        maintenance(states, stateTtl);
+        maintenanceForIterator(states, states.entrySet().iterator());
+    }
+
+    private void maintenanceForIterator(Map<String, NodeState> states, Iterator<Entry<String, NodeState>> iter) {
+        if (iter.hasNext()) {
+            Entry<String, NodeState> stateEntry = iter.next();
+            String detectorId = stateEntry.getKey();
+            NodeState state = stateEntry.getValue();
+            getAnomalyDetector(detectorId, ActionListener.wrap(detectorOptional -> {
+                if (!detectorOptional.isPresent()) {
+                    LOG.error(new ParameterizedMessage("AnomalyDetector [{}] is not available.", detectorId));
+                    maintenanceForIterator(states, iter);
+                    return;
+                }
+
+                AnomalyDetector detector = detectorOptional.get();
+                if (state.expired(detector.getDetectionIntervalDuration().multipliedBy(maintenanceFreq))) {
+                    states.remove(detectorId);
+                }
+                maintenanceForIterator(states, iter);
+            }, e -> {
+                LOG.error(new ParameterizedMessage("Fail to get detector [{}].", detectorId));
+                maintenanceForIterator(states, iter);
+            }));
+        }
     }
 
     public boolean isMuted(String nodeId, String detectorId) {
@@ -241,7 +267,7 @@ public class NodeStateManager implements MaintenanceState, CleanState {
      */
     public void addPressure(String nodeId, String detectorId) {
         Map<String, BackPressureRouting> routingMap = backpressureMuter
-            .computeIfAbsent(detectorId, k -> new HashMap<String, BackPressureRouting>());
+                .computeIfAbsent(detectorId, k -> new HashMap<String, BackPressureRouting>());
         routingMap.computeIfAbsent(nodeId, k -> new BackPressureRouting(k, clock, maxRetryForUnresponsiveNode, mutePeriod)).addPressure();
     }
 
@@ -391,10 +417,10 @@ public class NodeStateManager implements MaintenanceState, CleanState {
             LOG.debug("Fetched anomaly detector: {}", xc);
 
             try (
-                XContentParser parser = XContentType.JSON
+                    XContentParser parser = XContentType.JSON
                     .xContent()
                     .createParser(xContentRegistry, LoggingDeprecationHandler.INSTANCE, response.getSourceAsString())
-            ) {
+                    ) {
                 ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                 AnomalyDetectorJob job = AnomalyDetectorJob.parse(parser);
                 NodeState state = states.computeIfAbsent(adID, id -> new NodeState(id, clock));
@@ -406,5 +432,32 @@ public class NodeStateManager implements MaintenanceState, CleanState {
                 listener.onResponse(Optional.empty());
             }
         }, listener::onFailure);
+    }
+
+    /**
+     * for single-stream detector, the number is current total updates of the rcf model;
+     * for hcad, the number is the maximum total updates. This value does not decrease.
+     * @param adID detector ID
+     * @return max total updates of a detector
+     */
+    public long getMaxTotalUpdates(String adID) {
+        NodeState state = states.get(adID);
+        if (state != null) {
+            return state.getMaxTotalUpdates();
+        }
+
+        return 0;
+    }
+
+    /**
+     * set max total updates of a detector
+     * @param adID detector ID
+     * @param totalUpdates total updates to set
+     */
+    public void setMaxTotalUpdatesIfNeeded(String adID, long totalUpdates) {
+        NodeState state = states.computeIfAbsent(adID, id -> new NodeState(id, clock));
+        if (totalUpdates > state.getMaxTotalUpdates()) {
+            state.setMaxTotalUpdates(totalUpdates);
+        }
     }
 }

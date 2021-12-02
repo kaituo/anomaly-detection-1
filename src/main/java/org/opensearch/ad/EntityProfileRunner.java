@@ -57,17 +57,19 @@ import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.search.aggregations.AggregationBuilders;
 import org.opensearch.search.builder.SearchSourceBuilder;
 
-public class EntityProfileRunner extends AbstractProfileRunner {
+public class EntityProfileRunner {
     private final Logger logger = LogManager.getLogger(EntityProfileRunner.class);
 
     static final String NOT_HC_DETECTOR_ERR_MSG = "This is not a high cardinality detector";
     static final String EMPTY_ENTITY_ATTRIBUTES = "Empty entity attributes";
     static final String NO_ENTITY = "Cannot find entity";
+
+    private long requiredSamples;
     private Client client;
     private NamedXContentRegistry xContentRegistry;
 
     public EntityProfileRunner(Client client, NamedXContentRegistry xContentRegistry, long requiredSamples) {
-        super(requiredSamples);
+        this.requiredSamples = requiredSamples;
         this.client = client;
         this.xContentRegistry = xContentRegistry;
     }
@@ -81,11 +83,11 @@ public class EntityProfileRunner extends AbstractProfileRunner {
      * @param listener action listener to handle exception and process entity profile response
      */
     public void profile(
-        String detectorId,
-        Entity entityValue,
-        Set<EntityProfileName> profilesToCollect,
-        ActionListener<EntityProfile> listener
-    ) {
+            String detectorId,
+            Entity entityValue,
+            Set<EntityProfileName> profilesToCollect,
+            ActionListener<EntityProfile> listener
+            ) {
         if (profilesToCollect == null || profilesToCollect.size() == 0) {
             listener.onFailure(new IllegalArgumentException(CommonErrorMessages.EMPTY_PROFILES_COLLECT));
             return;
@@ -95,10 +97,10 @@ public class EntityProfileRunner extends AbstractProfileRunner {
         client.get(getDetectorRequest, ActionListener.wrap(getResponse -> {
             if (getResponse != null && getResponse.isExists()) {
                 try (
-                    XContentParser parser = XContentType.JSON
+                        XContentParser parser = XContentType.JSON
                         .xContent()
                         .createParser(xContentRegistry, LoggingDeprecationHandler.INSTANCE, getResponse.getSourceAsString())
-                ) {
+                        ) {
                     ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                     AnomalyDetector detector = AnomalyDetector.parse(parser, detectorId);
                     List<String> categoryFields = detector.getCategoryField();
@@ -107,7 +109,7 @@ public class EntityProfileRunner extends AbstractProfileRunner {
                         listener.onFailure(new IllegalArgumentException(NOT_HC_DETECTOR_ERR_MSG));
                     } else if (categoryFields.size() > maxCategoryFields) {
                         listener
-                            .onFailure(new IllegalArgumentException(CommonErrorMessages.getTooManyCategoricalFieldErr(maxCategoryFields)));
+                        .onFailure(new IllegalArgumentException(CommonErrorMessages.getTooManyCategoricalFieldErr(maxCategoryFields)));
                     } else {
                         validateEntity(entityValue, categoryFields, detectorId, profilesToCollect, detector, listener);
                     }
@@ -136,13 +138,13 @@ public class EntityProfileRunner extends AbstractProfileRunner {
      * @param listener Callback to send responses.
      */
     private void validateEntity(
-        Entity entity,
-        List<String> categoryFields,
-        String detectorId,
-        Set<EntityProfileName> profilesToCollect,
-        AnomalyDetector detector,
-        ActionListener<EntityProfile> listener
-    ) {
+            Entity entity,
+            List<String> categoryFields,
+            String detectorId,
+            Set<EntityProfileName> profilesToCollect,
+            AnomalyDetector detector,
+            ActionListener<EntityProfile> listener
+            ) {
         Map<String, String> attributes = entity.getAttributes();
         if (attributes == null || attributes.size() != categoryFields.size()) {
             listener.onFailure(new IllegalArgumentException(EMPTY_ENTITY_ATTRIBUTES));
@@ -164,7 +166,7 @@ public class EntityProfileRunner extends AbstractProfileRunner {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(internalFilterQuery).size(1);
 
         SearchRequest searchRequest = new SearchRequest(detector.getIndices().toArray(new String[0]), searchSourceBuilder)
-            .preference(Preference.LOCAL.toString());
+                .preference(Preference.LOCAL.toString());
 
         client.search(searchRequest, ActionListener.wrap(searchResponse -> {
             try {
@@ -182,45 +184,45 @@ public class EntityProfileRunner extends AbstractProfileRunner {
     }
 
     private void prepareEntityProfile(
-        ActionListener<EntityProfile> listener,
-        String detectorId,
-        Entity entityValue,
-        Set<EntityProfileName> profilesToCollect,
-        AnomalyDetector detector,
-        String categoryField
-    ) {
+            ActionListener<EntityProfile> listener,
+            String detectorId,
+            Entity entityValue,
+            Set<EntityProfileName> profilesToCollect,
+            AnomalyDetector detector,
+            String categoryField
+            ) {
         EntityProfileRequest request = new EntityProfileRequest(detectorId, entityValue, profilesToCollect);
 
         client
-            .execute(
+        .execute(
                 EntityProfileAction.INSTANCE,
                 request,
                 ActionListener.wrap(r -> getJob(detectorId, entityValue, profilesToCollect, detector, r, listener), listener::onFailure)
-            );
+                );
     }
 
     private void getJob(
-        String detectorId,
-        Entity entityValue,
-        Set<EntityProfileName> profilesToCollect,
-        AnomalyDetector detector,
-        EntityProfileResponse entityProfileResponse,
-        ActionListener<EntityProfile> listener
-    ) {
+            String detectorId,
+            Entity entityValue,
+            Set<EntityProfileName> profilesToCollect,
+            AnomalyDetector detector,
+            EntityProfileResponse entityProfileResponse,
+            ActionListener<EntityProfile> listener
+            ) {
         GetRequest getRequest = new GetRequest(ANOMALY_DETECTOR_JOB_INDEX, detectorId);
         client.get(getRequest, ActionListener.wrap(getResponse -> {
             if (getResponse != null && getResponse.isExists()) {
                 try (
-                    XContentParser parser = XContentType.JSON
+                        XContentParser parser = XContentType.JSON
                         .xContent()
                         .createParser(xContentRegistry, LoggingDeprecationHandler.INSTANCE, getResponse.getSourceAsString())
-                ) {
+                        ) {
                     ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                     AnomalyDetectorJob job = AnomalyDetectorJob.parse(parser);
 
                     int totalResponsesToWait = 0;
                     if (profilesToCollect.contains(EntityProfileName.INIT_PROGRESS)
-                        || profilesToCollect.contains(EntityProfileName.STATE)) {
+                            || profilesToCollect.contains(EntityProfileName.STATE)) {
                         totalResponsesToWait++;
                     }
                     if (profilesToCollect.contains(EntityProfileName.ENTITY_INFO)) {
@@ -230,12 +232,12 @@ public class EntityProfileRunner extends AbstractProfileRunner {
                         totalResponsesToWait++;
                     }
                     MultiResponsesDelegateActionListener<EntityProfile> delegateListener =
-                        new MultiResponsesDelegateActionListener<EntityProfile>(
-                            listener,
-                            totalResponsesToWait,
-                            CommonErrorMessages.FAIL_FETCH_ERR_MSG + entityValue + " of detector " + detectorId,
-                            false
-                        );
+                            new MultiResponsesDelegateActionListener<EntityProfile>(
+                                    listener,
+                                    totalResponsesToWait,
+                                    CommonErrorMessages.FAIL_FETCH_ERR_MSG + entityValue + " of detector " + detectorId,
+                                    false
+                                    );
 
                     if (profilesToCollect.contains(EntityProfileName.MODELS)) {
                         EntityProfile.Builder builder = new EntityProfile.Builder();
@@ -247,26 +249,26 @@ public class EntityProfileRunner extends AbstractProfileRunner {
                     }
 
                     if (profilesToCollect.contains(EntityProfileName.INIT_PROGRESS)
-                        || profilesToCollect.contains(EntityProfileName.STATE)) {
+                            || profilesToCollect.contains(EntityProfileName.STATE)) {
                         profileStateRelated(
-                            entityProfileResponse.getTotalUpdates(),
-                            detectorId,
-                            entityValue,
-                            profilesToCollect,
-                            detector,
-                            job,
-                            delegateListener
-                        );
+                                entityProfileResponse.getTotalUpdates(),
+                                detectorId,
+                                entityValue,
+                                profilesToCollect,
+                                detector,
+                                job,
+                                delegateListener
+                                );
                     }
 
                     if (profilesToCollect.contains(EntityProfileName.ENTITY_INFO)) {
                         long enabledTimeMs = job.getEnabledTime().toEpochMilli();
                         SearchRequest lastSampleTimeRequest = createLastSampleTimeRequest(
-                            detectorId,
-                            enabledTimeMs,
-                            entityValue,
-                            detector.getResultIndex()
-                        );
+                                detectorId,
+                                enabledTimeMs,
+                                entityValue,
+                                detector.getResultIndex()
+                                );
 
                         EntityProfile.Builder builder = new EntityProfile.Builder();
 
@@ -314,14 +316,14 @@ public class EntityProfileRunner extends AbstractProfileRunner {
     }
 
     private void profileStateRelated(
-        long totalUpdates,
-        String detectorId,
-        Entity entityValue,
-        Set<EntityProfileName> profilesToCollect,
-        AnomalyDetector detector,
-        AnomalyDetectorJob job,
-        MultiResponsesDelegateActionListener<EntityProfile> delegateListener
-    ) {
+            long totalUpdates,
+            String detectorId,
+            Entity entityValue,
+            Set<EntityProfileName> profilesToCollect,
+            AnomalyDetector detector,
+            AnomalyDetectorJob job,
+            MultiResponsesDelegateActionListener<EntityProfile> delegateListener
+            ) {
         if (totalUpdates == 0) {
             sendUnknownState(profilesToCollect, entityValue, false, delegateListener);
         } else if (false == job.isEnabled()) {
@@ -341,11 +343,11 @@ public class EntityProfileRunner extends AbstractProfileRunner {
      * @param delegateListener Delegate listener
      */
     private void sendUnknownState(
-        Set<EntityProfileName> profilesToCollect,
-        Entity entityValue,
-        boolean immediate,
-        ActionListener<EntityProfile> delegateListener
-    ) {
+            Set<EntityProfileName> profilesToCollect,
+            Entity entityValue,
+            boolean immediate,
+            ActionListener<EntityProfile> delegateListener
+            ) {
         EntityProfile.Builder builder = new EntityProfile.Builder();
         if (profilesToCollect.contains(EntityProfileName.STATE)) {
             builder.state(EntityState.UNKNOWN);
@@ -358,10 +360,10 @@ public class EntityProfileRunner extends AbstractProfileRunner {
     }
 
     private void sendRunningState(
-        Set<EntityProfileName> profilesToCollect,
-        Entity entityValue,
-        MultiResponsesDelegateActionListener<EntityProfile> delegateListener
-    ) {
+            Set<EntityProfileName> profilesToCollect,
+            Entity entityValue,
+            MultiResponsesDelegateActionListener<EntityProfile> delegateListener
+            ) {
         EntityProfile.Builder builder = new EntityProfile.Builder();
         if (profilesToCollect.contains(EntityProfileName.STATE)) {
             builder.state(EntityState.RUNNING);
@@ -374,19 +376,19 @@ public class EntityProfileRunner extends AbstractProfileRunner {
     }
 
     private void sendInitState(
-        Set<EntityProfileName> profilesToCollect,
-        Entity entityValue,
-        AnomalyDetector detector,
-        long updates,
-        MultiResponsesDelegateActionListener<EntityProfile> delegateListener
-    ) {
+            Set<EntityProfileName> profilesToCollect,
+            Entity entityValue,
+            AnomalyDetector detector,
+            long updates,
+            MultiResponsesDelegateActionListener<EntityProfile> delegateListener
+            ) {
         EntityProfile.Builder builder = new EntityProfile.Builder();
         if (profilesToCollect.contains(EntityProfileName.STATE)) {
             builder.state(EntityState.INIT);
         }
         if (profilesToCollect.contains(EntityProfileName.INIT_PROGRESS)) {
             long intervalMins = ((IntervalTimeConfiguration) detector.getDetectionInterval()).toDuration().toMinutes();
-            InitProgressProfile initProgress = computeInitProgressProfile(updates, intervalMins);
+            InitProgressProfile initProgress = ProfileUtil.computeInitProgressProfile(updates, intervalMins, requiredSamples);
             builder.initProgress(initProgress);
         }
         delegateListener.onResponse(builder.build());
@@ -447,10 +449,10 @@ public class EntityProfileRunner extends AbstractProfileRunner {
         boolQueryBuilder.filter(QueryBuilders.rangeQuery(AnomalyResult.EXECUTION_END_TIME_FIELD).gte(enabledTime));
 
         SearchSourceBuilder source = new SearchSourceBuilder()
-            .query(boolQueryBuilder)
-            .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(AnomalyResult.EXECUTION_END_TIME_FIELD))
-            .trackTotalHits(false)
-            .size(0);
+                .query(boolQueryBuilder)
+                .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(AnomalyResult.EXECUTION_END_TIME_FIELD))
+                .trackTotalHits(false)
+                .size(0);
 
         SearchRequest request = new SearchRequest(CommonName.ANOMALY_RESULT_INDEX_ALIAS);
         request.source(source);

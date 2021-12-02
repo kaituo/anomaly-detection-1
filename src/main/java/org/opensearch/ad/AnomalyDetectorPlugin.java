@@ -237,6 +237,7 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
     private ADBatchTaskRunner adBatchTaskRunner;
     // package private for testing
     GenericObjectPool<LinkedBuffer> serializeRCFBufferPool;
+    private NodeStateManager stateManager;
 
     static {
         SpecialPermission.check();
@@ -249,24 +250,24 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
 
     @Override
     public List<RestHandler> getRestHandlers(
-        Settings settings,
-        RestController restController,
-        ClusterSettings clusterSettings,
-        IndexScopedSettings indexScopedSettings,
-        SettingsFilter settingsFilter,
-        IndexNameExpressionResolver indexNameExpressionResolver,
-        Supplier<DiscoveryNodes> nodesInCluster
-    ) {
+            Settings settings,
+            RestController restController,
+            ClusterSettings clusterSettings,
+            IndexScopedSettings indexScopedSettings,
+            SettingsFilter settingsFilter,
+            IndexNameExpressionResolver indexNameExpressionResolver,
+            Supplier<DiscoveryNodes> nodesInCluster
+            ) {
         AnomalyIndexHandler<AnomalyResult> anomalyResultHandler = new AnomalyIndexHandler<AnomalyResult>(
-            client,
-            settings,
-            threadPool,
-            CommonName.ANOMALY_RESULT_INDEX_ALIAS,
-            anomalyDetectionIndices,
-            this.clientUtil,
-            this.indexUtils,
-            clusterService
-        );
+                client,
+                settings,
+                threadPool,
+                CommonName.ANOMALY_RESULT_INDEX_ALIAS,
+                anomalyDetectionIndices,
+                this.clientUtil,
+                this.indexUtils,
+                clusterService
+                );
 
         AnomalyDetectorJobRunner jobRunner = AnomalyDetectorJobRunner.getJobRunnerInstance();
         jobRunner.setClient(client);
@@ -276,6 +277,8 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         jobRunner.setAnomalyDetectionIndices(anomalyDetectionIndices);
         jobRunner.setNodeFilter(nodeFilter);
         jobRunner.setAdTaskManager(adTaskManager);
+        jobRunner.setNodeStateManager(stateManager);
+        jobRunner.setRcfMinSamples(AnomalyDetectorSettings.NUM_MIN_SAMPLES);
 
         RestGetAnomalyDetectorAction restGetAnomalyDetectorAction = new RestGetAnomalyDetectorAction();
         RestIndexAnomalyDetectorAction restIndexAnomalyDetectorAction = new RestIndexAnomalyDetectorAction(settings, clusterService);
@@ -293,22 +296,22 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         RestValidateAnomalyDetectorAction validateAnomalyDetectorAction = new RestValidateAnomalyDetectorAction(settings, clusterService);
 
         return ImmutableList
-            .of(
-                restGetAnomalyDetectorAction,
-                restIndexAnomalyDetectorAction,
-                searchAnomalyDetectorAction,
-                searchAnomalyResultAction,
-                searchADTasksAction,
-                deleteAnomalyDetectorAction,
-                executeAnomalyDetectorAction,
-                anomalyDetectorJobAction,
-                statsAnomalyDetectorAction,
-                searchAnomalyDetectorInfoAction,
-                previewAnomalyDetectorAction,
-                deleteAnomalyResultsAction,
-                searchTopAnomalyResultAction,
-                validateAnomalyDetectorAction
-            );
+                .of(
+                        restGetAnomalyDetectorAction,
+                        restIndexAnomalyDetectorAction,
+                        searchAnomalyDetectorAction,
+                        searchAnomalyResultAction,
+                        searchADTasksAction,
+                        deleteAnomalyDetectorAction,
+                        executeAnomalyDetectorAction,
+                        anomalyDetectorJobAction,
+                        statsAnomalyDetectorAction,
+                        searchAnomalyDetectorInfoAction,
+                        previewAnomalyDetectorAction,
+                        deleteAnomalyResultsAction,
+                        searchTopAnomalyResultAction,
+                        validateAnomalyDetectorAction
+                        );
     }
 
     private static Void initGson() {
@@ -318,18 +321,18 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
 
     @Override
     public Collection<Object> createComponents(
-        Client client,
-        ClusterService clusterService,
-        ThreadPool threadPool,
-        ResourceWatcherService resourceWatcherService,
-        ScriptService scriptService,
-        NamedXContentRegistry xContentRegistry,
-        Environment environment,
-        NodeEnvironment nodeEnvironment,
-        NamedWriteableRegistry namedWriteableRegistry,
-        IndexNameExpressionResolver indexNameExpressionResolver,
-        Supplier<RepositoriesService> repositoriesServiceSupplier
-    ) {
+            Client client,
+            ClusterService clusterService,
+            ThreadPool threadPool,
+            ResourceWatcherService resourceWatcherService,
+            ScriptService scriptService,
+            NamedXContentRegistry xContentRegistry,
+            Environment environment,
+            NodeEnvironment nodeEnvironment,
+            NamedWriteableRegistry namedWriteableRegistry,
+            IndexNameExpressionResolver indexNameExpressionResolver,
+            Supplier<RepositoriesService> repositoriesServiceSupplier
+            ) {
         EnabledSetting.getInstance().init(clusterService);
         NumericSetting.getInstance().init(clusterService);
         this.client = client;
@@ -340,27 +343,27 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         this.indexUtils = new IndexUtils(client, clientUtil, clusterService, indexNameExpressionResolver);
         this.nodeFilter = new DiscoveryNodeFilterer(clusterService);
         this.anomalyDetectionIndices = new AnomalyDetectionIndices(
-            client,
-            clusterService,
-            threadPool,
-            settings,
-            nodeFilter,
-            AnomalyDetectorSettings.MAX_UPDATE_RETRY_TIMES
-        );
+                client,
+                clusterService,
+                threadPool,
+                settings,
+                nodeFilter,
+                AnomalyDetectorSettings.MAX_UPDATE_RETRY_TIMES
+                );
         this.clusterService = clusterService;
 
         SingleFeatureLinearUniformInterpolator singleFeatureLinearUniformInterpolator =
-            new IntegerSensitiveSingleFeatureLinearUniformInterpolator();
+                new IntegerSensitiveSingleFeatureLinearUniformInterpolator();
         Interpolator interpolator = new LinearUniformInterpolator(singleFeatureLinearUniformInterpolator);
         SearchFeatureDao searchFeatureDao = new SearchFeatureDao(
-            client,
-            xContentRegistry,
-            interpolator,
-            clientUtil,
-            settings,
-            clusterService,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE
-        );
+                client,
+                xContentRegistry,
+                interpolator,
+                clientUtil,
+                settings,
+                clusterService,
+                AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE
+                );
 
         JvmService jvmService = new JvmService(environment.settings());
         RandomCutForestMapper mapper = new RandomCutForestMapper();
@@ -374,39 +377,39 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         ADCircuitBreakerService adCircuitBreakerService = new ADCircuitBreakerService(jvmService).init();
 
         MemoryTracker memoryTracker = new MemoryTracker(
-            jvmService,
-            modelMaxSizePercent,
-            AnomalyDetectorSettings.DESIRED_MODEL_SIZE_PERCENTAGE,
-            clusterService,
-            adCircuitBreakerService
-        );
+                jvmService,
+                modelMaxSizePercent,
+                AnomalyDetectorSettings.DESIRED_MODEL_SIZE_PERCENTAGE,
+                clusterService,
+                adCircuitBreakerService
+                );
 
-        NodeStateManager stateManager = new NodeStateManager(
-            client,
-            xContentRegistry,
-            settings,
-            clientUtil,
-            getClock(),
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            clusterService
-        );
+        stateManager = new NodeStateManager(
+                client,
+                xContentRegistry,
+                settings,
+                clientUtil,
+                getClock(),
+                AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
+                clusterService
+                );
 
         FeatureManager featureManager = new FeatureManager(
-            searchFeatureDao,
-            interpolator,
-            getClock(),
-            AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
-            AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
-            AnomalyDetectorSettings.TRAIN_SAMPLE_TIME_RANGE_IN_HOURS,
-            AnomalyDetectorSettings.MIN_TRAIN_SAMPLES,
-            AnomalyDetectorSettings.MAX_SHINGLE_PROPORTION_MISSING,
-            AnomalyDetectorSettings.MAX_IMPUTATION_NEIGHBOR_DISTANCE,
-            AnomalyDetectorSettings.PREVIEW_SAMPLE_RATE,
-            AnomalyDetectorSettings.MAX_PREVIEW_SAMPLES,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            threadPool,
-            AD_THREAD_POOL_NAME
-        );
+                searchFeatureDao,
+                interpolator,
+                getClock(),
+                AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
+                AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
+                AnomalyDetectorSettings.TRAIN_SAMPLE_TIME_RANGE_IN_HOURS,
+                AnomalyDetectorSettings.MIN_TRAIN_SAMPLES,
+                AnomalyDetectorSettings.MAX_SHINGLE_PROPORTION_MISSING,
+                AnomalyDetectorSettings.MAX_IMPUTATION_NEIGHBOR_DISTANCE,
+                AnomalyDetectorSettings.PREVIEW_SAMPLE_RATE,
+                AnomalyDetectorSettings.MAX_PREVIEW_SAMPLES,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+                threadPool,
+                AD_THREAD_POOL_NAME
+                );
 
         long heapSizeBytes = JvmInfo.jvmInfo().getMem().getHeapMax().getBytes();
 
@@ -433,198 +436,198 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         serializeRCFBufferPool.setTimeBetweenEvictionRuns(AnomalyDetectorSettings.HOURLY_MAINTENANCE);
 
         CheckpointDao checkpoint = new CheckpointDao(
-            client,
-            clientUtil,
-            CommonName.CHECKPOINT_INDEX_NAME,
-            gson,
-            mapper,
-            converter,
-            new ThresholdedRandomCutForestMapper(),
-            AccessController
+                client,
+                clientUtil,
+                CommonName.CHECKPOINT_INDEX_NAME,
+                gson,
+                mapper,
+                converter,
+                new ThresholdedRandomCutForestMapper(),
+                AccessController
                 .doPrivileged(
-                    (PrivilegedAction<Schema<ThresholdedRandomCutForestState>>) () -> RuntimeSchema
+                        (PrivilegedAction<Schema<ThresholdedRandomCutForestState>>) () -> RuntimeSchema
                         .getSchema(ThresholdedRandomCutForestState.class)
-                ),
-            HybridThresholdingModel.class,
-            anomalyDetectionIndices,
-            AnomalyDetectorSettings.MAX_CHECKPOINT_BYTES,
-            serializeRCFBufferPool,
-            AnomalyDetectorSettings.SERIALIZATION_BUFFER_BYTES,
-            1 - AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE
-        );
+                        ),
+                HybridThresholdingModel.class,
+                anomalyDetectionIndices,
+                AnomalyDetectorSettings.MAX_CHECKPOINT_BYTES,
+                serializeRCFBufferPool,
+                AnomalyDetectorSettings.SERIALIZATION_BUFFER_BYTES,
+                1 - AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE
+                );
 
         Random random = new Random(42);
 
         CheckpointWriteWorker checkpointWriteQueue = new CheckpointWriteWorker(
-            heapSizeBytes,
-            AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_SIZE_IN_BYTES,
-            AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
-            clusterService,
-            random,
-            adCircuitBreakerService,
-            threadPool,
-            settings,
-            AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
-            getClock(),
-            AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
-            AnomalyDetectorSettings.QUEUE_MAINTENANCE,
-            checkpoint,
-            CommonName.CHECKPOINT_INDEX_NAME,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            stateManager,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE
-        );
+                heapSizeBytes,
+                AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_SIZE_IN_BYTES,
+                AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
+                clusterService,
+                random,
+                adCircuitBreakerService,
+                threadPool,
+                settings,
+                AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
+                getClock(),
+                AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
+                AnomalyDetectorSettings.QUEUE_MAINTENANCE,
+                checkpoint,
+                CommonName.CHECKPOINT_INDEX_NAME,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+                stateManager,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE
+                );
 
         EntityCache cache = new PriorityCache(
-            checkpoint,
-            AnomalyDetectorSettings.DEDICATED_CACHE_SIZE.get(settings),
-            AnomalyDetectorSettings.CHECKPOINT_TTL,
-            AnomalyDetectorSettings.MAX_INACTIVE_ENTITIES,
-            memoryTracker,
-            AnomalyDetectorSettings.NUM_TREES,
-            getClock(),
-            clusterService,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            threadPool,
-            checkpointWriteQueue,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT
-        );
+                checkpoint,
+                AnomalyDetectorSettings.DEDICATED_CACHE_SIZE.get(settings),
+                AnomalyDetectorSettings.MAX_INACTIVE_ENTITIES,
+                memoryTracker,
+                AnomalyDetectorSettings.NUM_TREES,
+                getClock(),
+                clusterService,
+                threadPool,
+                checkpointWriteQueue,
+                AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
+                stateManager,
+                AnomalyDetectorSettings.CHECKPOINT_SAVE_FREQ.get(settings),
+                AnomalyDetectorSettings.MODEL_TTL_INTERVAL_MULTIPLIER.get(settings)
+                );
 
         CacheProvider cacheProvider = new CacheProvider(cache);
 
         EntityColdStarter entityColdStarter = new EntityColdStarter(
-            getClock(),
-            threadPool,
-            stateManager,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
-            AnomalyDetectorSettings.NUM_TREES,
-            AnomalyDetectorSettings.TIME_DECAY,
-            AnomalyDetectorSettings.NUM_MIN_SAMPLES,
-            AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
-            AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
-            interpolator,
-            searchFeatureDao,
-            AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE,
-            featureManager,
-            settings,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            checkpointWriteQueue,
-            AnomalyDetectorSettings.MAX_COLD_START_ROUNDS
-        );
+                getClock(),
+                threadPool,
+                stateManager,
+                AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+                AnomalyDetectorSettings.NUM_TREES,
+                AnomalyDetectorSettings.TIME_DECAY,
+                AnomalyDetectorSettings.NUM_MIN_SAMPLES,
+                AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
+                AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
+                interpolator,
+                searchFeatureDao,
+                AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE,
+                featureManager,
+                settings,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+                checkpointWriteQueue,
+                AnomalyDetectorSettings.MAX_COLD_START_ROUNDS
+                );
 
         EntityColdStartWorker coldstartQueue = new EntityColdStartWorker(
-            heapSizeBytes,
-            AnomalyDetectorSettings.ENTITY_REQUEST_SIZE_IN_BYTES,
-            AnomalyDetectorSettings.ENTITY_COLD_START_QUEUE_MAX_HEAP_PERCENT,
-            clusterService,
-            random,
-            adCircuitBreakerService,
-            threadPool,
-            settings,
-            AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
-            getClock(),
-            AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
-            AnomalyDetectorSettings.QUEUE_MAINTENANCE,
-            entityColdStarter,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            stateManager
-        );
+                heapSizeBytes,
+                AnomalyDetectorSettings.ENTITY_REQUEST_SIZE_IN_BYTES,
+                AnomalyDetectorSettings.ENTITY_COLD_START_QUEUE_MAX_HEAP_PERCENT,
+                clusterService,
+                random,
+                adCircuitBreakerService,
+                threadPool,
+                settings,
+                AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
+                getClock(),
+                AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
+                AnomalyDetectorSettings.QUEUE_MAINTENANCE,
+                entityColdStarter,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+                stateManager
+                );
 
         ModelManager modelManager = new ModelManager(
-            checkpoint,
-            getClock(),
-            AnomalyDetectorSettings.NUM_TREES,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
-            AnomalyDetectorSettings.TIME_DECAY,
-            AnomalyDetectorSettings.NUM_MIN_SAMPLES,
-            AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE,
-            AnomalyDetectorSettings.MIN_PREVIEW_SIZE,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            entityColdStarter,
-            featureManager,
-            memoryTracker
-        );
+                checkpoint,
+                getClock(),
+                AnomalyDetectorSettings.NUM_TREES,
+                AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+                AnomalyDetectorSettings.TIME_DECAY,
+                AnomalyDetectorSettings.NUM_MIN_SAMPLES,
+                AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE,
+                AnomalyDetectorSettings.MIN_PREVIEW_SIZE,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+                entityColdStarter,
+                featureManager,
+                memoryTracker
+                );
 
         MultiEntityResultHandler multiEntityResultHandler = new MultiEntityResultHandler(
-            client,
-            settings,
-            threadPool,
-            anomalyDetectionIndices,
-            this.clientUtil,
-            this.indexUtils,
-            clusterService
-        );
+                client,
+                settings,
+                threadPool,
+                anomalyDetectionIndices,
+                this.clientUtil,
+                this.indexUtils,
+                clusterService
+                );
 
         ResultWriteWorker resultWriteQueue = new ResultWriteWorker(
-            heapSizeBytes,
-            AnomalyDetectorSettings.RESULT_WRITE_QUEUE_SIZE_IN_BYTES,
-            AnomalyDetectorSettings.RESULT_WRITE_QUEUE_MAX_HEAP_PERCENT,
-            clusterService,
-            random,
-            adCircuitBreakerService,
-            threadPool,
-            settings,
-            AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
-            getClock(),
-            AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
-            AnomalyDetectorSettings.QUEUE_MAINTENANCE,
-            multiEntityResultHandler,
-            xContentRegistry,
-            stateManager,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE
-        );
+                heapSizeBytes,
+                AnomalyDetectorSettings.RESULT_WRITE_QUEUE_SIZE_IN_BYTES,
+                AnomalyDetectorSettings.RESULT_WRITE_QUEUE_MAX_HEAP_PERCENT,
+                clusterService,
+                random,
+                adCircuitBreakerService,
+                threadPool,
+                settings,
+                AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
+                getClock(),
+                AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
+                AnomalyDetectorSettings.QUEUE_MAINTENANCE,
+                multiEntityResultHandler,
+                xContentRegistry,
+                stateManager,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE
+                );
 
         CheckpointReadWorker checkpointReadQueue = new CheckpointReadWorker(
-            heapSizeBytes,
-            AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
-            AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_MAX_HEAP_PERCENT,
-            clusterService,
-            random,
-            adCircuitBreakerService,
-            threadPool,
-            settings,
-            AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
-            getClock(),
-            AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
-            AnomalyDetectorSettings.QUEUE_MAINTENANCE,
-            modelManager,
-            checkpoint,
-            coldstartQueue,
-            resultWriteQueue,
-            stateManager,
-            anomalyDetectionIndices,
-            cacheProvider,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            checkpointWriteQueue
-        );
+                heapSizeBytes,
+                AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
+                AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_MAX_HEAP_PERCENT,
+                clusterService,
+                random,
+                adCircuitBreakerService,
+                threadPool,
+                settings,
+                AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
+                getClock(),
+                AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
+                AnomalyDetectorSettings.QUEUE_MAINTENANCE,
+                modelManager,
+                checkpoint,
+                coldstartQueue,
+                resultWriteQueue,
+                stateManager,
+                anomalyDetectionIndices,
+                cacheProvider,
+                AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+                checkpointWriteQueue
+                );
 
         ColdEntityWorker coldEntityQueue = new ColdEntityWorker(
-            heapSizeBytes,
-            AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
-            AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
-            clusterService,
-            random,
-            adCircuitBreakerService,
-            threadPool,
-            settings,
-            AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
-            getClock(),
-            AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
-            checkpointReadQueue,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
-            stateManager
-        );
+                heapSizeBytes,
+                AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
+                AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
+                clusterService,
+                random,
+                adCircuitBreakerService,
+                threadPool,
+                settings,
+                AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
+                getClock(),
+                AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
+                AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
+                checkpointReadQueue,
+                stateManager
+                );
 
         ADDataMigrator dataMigrator = new ADDataMigrator(client, clusterService, xContentRegistry, anomalyDetectionIndices);
         HashRing hashRing = new HashRing(nodeFilter, getClock(), settings, client, clusterService, dataMigrator, modelManager);
@@ -632,121 +635,121 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         anomalyDetectorRunner = new AnomalyDetectorRunner(modelManager, featureManager, AnomalyDetectorSettings.MAX_PREVIEW_RESULTS);
 
         Map<String, ADStat<?>> stats = ImmutableMap
-            .<String, ADStat<?>>builder()
-            .put(StatNames.AD_EXECUTE_REQUEST_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(StatNames.AD_EXECUTE_FAIL_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(StatNames.AD_HC_EXECUTE_REQUEST_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(StatNames.AD_HC_EXECUTE_FAIL_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(
-                StatNames.MODEL_INFORMATION.getName(),
-                new ADStat<>(false, new ModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService))
-            )
-            .put(
-                StatNames.ANOMALY_DETECTORS_INDEX_STATUS.getName(),
-                new ADStat<>(true, new IndexStatusSupplier(indexUtils, AnomalyDetector.ANOMALY_DETECTORS_INDEX))
-            )
-            .put(
-                StatNames.ANOMALY_RESULTS_INDEX_STATUS.getName(),
-                new ADStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.ANOMALY_RESULT_INDEX_ALIAS))
-            )
-            .put(
-                StatNames.MODELS_CHECKPOINT_INDEX_STATUS.getName(),
-                new ADStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.CHECKPOINT_INDEX_NAME))
-            )
-            .put(
-                StatNames.ANOMALY_DETECTION_JOB_INDEX_STATUS.getName(),
-                new ADStat<>(true, new IndexStatusSupplier(indexUtils, AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX))
-            )
-            .put(
-                StatNames.ANOMALY_DETECTION_STATE_STATUS.getName(),
-                new ADStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.DETECTION_STATE_INDEX))
-            )
-            .put(StatNames.DETECTOR_COUNT.getName(), new ADStat<>(true, new SettableSupplier()))
-            .put(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName(), new ADStat<>(true, new SettableSupplier()))
-            .put(StatNames.MULTI_ENTITY_DETECTOR_COUNT.getName(), new ADStat<>(true, new SettableSupplier()))
-            .put(StatNames.AD_EXECUTING_BATCH_TASK_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(StatNames.AD_CANCELED_BATCH_TASK_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(StatNames.AD_TOTAL_BATCH_TASK_EXECUTION_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(StatNames.AD_BATCH_TASK_FAILURE_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
-            .put(StatNames.MODEL_COUNT.getName(), new ADStat<>(false, new ModelsOnNodeCountSupplier(modelManager, cacheProvider)))
-            .build();
+                .<String, ADStat<?>>builder()
+                .put(StatNames.AD_EXECUTE_REQUEST_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(StatNames.AD_EXECUTE_FAIL_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(StatNames.AD_HC_EXECUTE_REQUEST_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(StatNames.AD_HC_EXECUTE_FAIL_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(
+                        StatNames.MODEL_INFORMATION.getName(),
+                        new ADStat<>(false, new ModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService))
+                        )
+                .put(
+                        StatNames.ANOMALY_DETECTORS_INDEX_STATUS.getName(),
+                        new ADStat<>(true, new IndexStatusSupplier(indexUtils, AnomalyDetector.ANOMALY_DETECTORS_INDEX))
+                        )
+                .put(
+                        StatNames.ANOMALY_RESULTS_INDEX_STATUS.getName(),
+                        new ADStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.ANOMALY_RESULT_INDEX_ALIAS))
+                        )
+                .put(
+                        StatNames.MODELS_CHECKPOINT_INDEX_STATUS.getName(),
+                        new ADStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.CHECKPOINT_INDEX_NAME))
+                        )
+                .put(
+                        StatNames.ANOMALY_DETECTION_JOB_INDEX_STATUS.getName(),
+                        new ADStat<>(true, new IndexStatusSupplier(indexUtils, AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX))
+                        )
+                .put(
+                        StatNames.ANOMALY_DETECTION_STATE_STATUS.getName(),
+                        new ADStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.DETECTION_STATE_INDEX))
+                        )
+                .put(StatNames.DETECTOR_COUNT.getName(), new ADStat<>(true, new SettableSupplier()))
+                .put(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName(), new ADStat<>(true, new SettableSupplier()))
+                .put(StatNames.MULTI_ENTITY_DETECTOR_COUNT.getName(), new ADStat<>(true, new SettableSupplier()))
+                .put(StatNames.AD_EXECUTING_BATCH_TASK_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(StatNames.AD_CANCELED_BATCH_TASK_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(StatNames.AD_TOTAL_BATCH_TASK_EXECUTION_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(StatNames.AD_BATCH_TASK_FAILURE_COUNT.getName(), new ADStat<>(false, new CounterSupplier()))
+                .put(StatNames.MODEL_COUNT.getName(), new ADStat<>(false, new ModelsOnNodeCountSupplier(modelManager, cacheProvider)))
+                .build();
 
         adStats = new ADStats(stats);
 
         adTaskCacheManager = new ADTaskCacheManager(settings, clusterService, memoryTracker);
         adTaskManager = new ADTaskManager(
-            settings,
-            clusterService,
-            client,
-            xContentRegistry,
-            anomalyDetectionIndices,
-            nodeFilter,
-            hashRing,
-            adTaskCacheManager,
-            threadPool
-        );
+                settings,
+                clusterService,
+                client,
+                xContentRegistry,
+                anomalyDetectionIndices,
+                nodeFilter,
+                hashRing,
+                adTaskCacheManager,
+                threadPool
+                );
         AnomalyResultBulkIndexHandler anomalyResultBulkIndexHandler = new AnomalyResultBulkIndexHandler(
-            client,
-            settings,
-            threadPool,
-            this.clientUtil,
-            this.indexUtils,
-            clusterService,
-            anomalyDetectionIndices
-        );
+                client,
+                settings,
+                threadPool,
+                this.clientUtil,
+                this.indexUtils,
+                clusterService,
+                anomalyDetectionIndices
+                );
         adBatchTaskRunner = new ADBatchTaskRunner(
-            settings,
-            threadPool,
-            clusterService,
-            client,
-            adCircuitBreakerService,
-            featureManager,
-            adTaskManager,
-            anomalyDetectionIndices,
-            adStats,
-            anomalyResultBulkIndexHandler,
-            adTaskCacheManager,
-            searchFeatureDao,
-            hashRing,
-            modelManager
-        );
+                settings,
+                threadPool,
+                clusterService,
+                client,
+                adCircuitBreakerService,
+                featureManager,
+                adTaskManager,
+                anomalyDetectionIndices,
+                adStats,
+                anomalyResultBulkIndexHandler,
+                adTaskCacheManager,
+                searchFeatureDao,
+                hashRing,
+                modelManager
+                );
 
         ADSearchHandler adSearchHandler = new ADSearchHandler(settings, clusterService, client);
 
         // return objects used by Guice to inject dependencies for e.g.,
         // transport action handler constructors
         return ImmutableList
-            .of(
-                anomalyDetectionIndices,
-                anomalyDetectorRunner,
-                searchFeatureDao,
-                singleFeatureLinearUniformInterpolator,
-                interpolator,
-                gson,
-                jvmService,
-                hashRing,
-                featureManager,
-                modelManager,
-                stateManager,
-                new ADClusterEventListener(clusterService, hashRing),
-                adCircuitBreakerService,
-                adStats,
-                new MasterEventListener(clusterService, threadPool, client, getClock(), clientUtil, nodeFilter),
-                nodeFilter,
-                multiEntityResultHandler,
-                checkpoint,
-                cacheProvider,
-                adTaskManager,
-                adBatchTaskRunner,
-                adSearchHandler,
-                coldstartQueue,
-                resultWriteQueue,
-                checkpointReadQueue,
-                checkpointWriteQueue,
-                coldEntityQueue,
-                entityColdStarter,
-                adTaskCacheManager
-            );
+                .of(
+                        anomalyDetectionIndices,
+                        anomalyDetectorRunner,
+                        searchFeatureDao,
+                        singleFeatureLinearUniformInterpolator,
+                        interpolator,
+                        gson,
+                        jvmService,
+                        hashRing,
+                        featureManager,
+                        modelManager,
+                        stateManager,
+                        new ADClusterEventListener(clusterService, hashRing),
+                        adCircuitBreakerService,
+                        adStats,
+                        new MasterEventListener(clusterService, threadPool, client, getClock(), clientUtil, nodeFilter),
+                        nodeFilter,
+                        multiEntityResultHandler,
+                        checkpoint,
+                        cacheProvider,
+                        adTaskManager,
+                        adBatchTaskRunner,
+                        adSearchHandler,
+                        coldstartQueue,
+                        resultWriteQueue,
+                        checkpointReadQueue,
+                        checkpointWriteQueue,
+                        coldEntityQueue,
+                        entityColdStarter,
+                        adTaskCacheManager
+                        );
     }
 
     /**
@@ -761,24 +764,24 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
     @Override
     public List<ExecutorBuilder<?>> getExecutorBuilders(Settings settings) {
         return ImmutableList
-            .of(
-                new ScalingExecutorBuilder(
-                    AD_THREAD_POOL_NAME,
-                    1,
-                    // HCAD can be heavy after supporting 1 million entities.
-                    // Limit to use at most half of the processors.
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 2),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_THREAD_POOL_NAME
-                ),
-                new ScalingExecutorBuilder(
-                    AD_BATCH_TASK_THREAD_POOL_NAME,
-                    1,
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 8),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_BATCH_TASK_THREAD_POOL_NAME
-                )
-            );
+                .of(
+                        new ScalingExecutorBuilder(
+                                AD_THREAD_POOL_NAME,
+                                1,
+                                // HCAD can be heavy after supporting 1 million entities.
+                                // Limit to use at most half of the processors.
+                                Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 2),
+                                TimeValue.timeValueMinutes(10),
+                                AD_THREAD_POOL_PREFIX + AD_THREAD_POOL_NAME
+                                ),
+                        new ScalingExecutorBuilder(
+                                AD_BATCH_TASK_THREAD_POOL_NAME,
+                                1,
+                                Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 8),
+                                TimeValue.timeValueMinutes(10),
+                                AD_THREAD_POOL_PREFIX + AD_BATCH_TASK_THREAD_POOL_NAME
+                                )
+                        );
     }
 
     @Override
@@ -787,108 +790,110 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
         List<Setting<?>> numericSetting = NumericSetting.getInstance().getSettings();
 
         List<Setting<?>> systemSetting = ImmutableList
-            .of(
-                // HCAD cache
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_CACHE_MISS_HANDLING_PER_SECOND,
-                AnomalyDetectorSettings.DEDICATED_CACHE_SIZE,
-                // Detector config
-                LegacyOpenDistroAnomalyDetectorSettings.DETECTION_INTERVAL,
-                LegacyOpenDistroAnomalyDetectorSettings.DETECTION_WINDOW_DELAY,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
-                AnomalyDetectorSettings.DETECTION_INTERVAL,
-                AnomalyDetectorSettings.DETECTION_WINDOW_DELAY,
-                AnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
-                // Fault tolerance
-                LegacyOpenDistroAnomalyDetectorSettings.REQUEST_TIMEOUT,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-                LegacyOpenDistroAnomalyDetectorSettings.COOLDOWN_MINUTES,
-                LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_MINUTES,
-                LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_INITIAL_DELAY,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_BACKOFF,
-                AnomalyDetectorSettings.REQUEST_TIMEOUT,
-                AnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-                AnomalyDetectorSettings.COOLDOWN_MINUTES,
-                AnomalyDetectorSettings.BACKOFF_MINUTES,
-                AnomalyDetectorSettings.BACKOFF_INITIAL_DELAY,
-                AnomalyDetectorSettings.MAX_RETRY_FOR_BACKOFF,
-                // result index rollover
-                LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_ROLLOVER_PERIOD,
-                LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_MAX_DOCS,
-                LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_RETENTION_PERIOD,
-                AnomalyDetectorSettings.AD_RESULT_HISTORY_ROLLOVER_PERIOD,
-                AnomalyDetectorSettings.AD_RESULT_HISTORY_MAX_DOCS_PER_SHARD,
-                AnomalyDetectorSettings.AD_RESULT_HISTORY_RETENTION_PERIOD,
-                // resource usage control
-                LegacyOpenDistroAnomalyDetectorSettings.MODEL_MAX_SIZE_PERCENTAGE,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_SINGLE_ENTITY_ANOMALY_DETECTORS,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS,
-                LegacyOpenDistroAnomalyDetectorSettings.INDEX_PRESSURE_SOFT_LIMIT,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_PRIMARY_SHARDS,
-                AnomalyDetectorSettings.MODEL_MAX_SIZE_PERCENTAGE,
-                AnomalyDetectorSettings.MAX_SINGLE_ENTITY_ANOMALY_DETECTORS,
-                AnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS,
-                AnomalyDetectorSettings.INDEX_PRESSURE_SOFT_LIMIT,
-                AnomalyDetectorSettings.INDEX_PRESSURE_HARD_LIMIT,
-                AnomalyDetectorSettings.MAX_PRIMARY_SHARDS,
-                // Security
-                LegacyOpenDistroAnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
-                AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
-                // Historical
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE,
-                LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR,
-                LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_SIZE,
-                AnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE,
-                AnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS,
-                AnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR,
-                AnomalyDetectorSettings.BATCH_TASK_PIECE_SIZE,
-                AnomalyDetectorSettings.MAX_TOP_ENTITIES_FOR_HISTORICAL_ANALYSIS,
-                AnomalyDetectorSettings.MAX_RUNNING_ENTITIES_PER_DETECTOR_FOR_HISTORICAL_ANALYSIS,
-                AnomalyDetectorSettings.MAX_CACHED_DELETED_TASKS,
-                // rate limiting
-                AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_CONCURRENCY,
-                AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_CONCURRENCY,
-                AnomalyDetectorSettings.ENTITY_COLD_START_QUEUE_CONCURRENCY,
-                AnomalyDetectorSettings.RESULT_WRITE_QUEUE_CONCURRENCY,
-                AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_BATCH_SIZE,
-                AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_BATCH_SIZE,
-                AnomalyDetectorSettings.RESULT_WRITE_QUEUE_BATCH_SIZE,
-                AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
-                AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_MAX_HEAP_PERCENT,
-                AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
-                AnomalyDetectorSettings.RESULT_WRITE_QUEUE_MAX_HEAP_PERCENT,
-                AnomalyDetectorSettings.ENTITY_COLD_START_QUEUE_MAX_HEAP_PERCENT,
-                AnomalyDetectorSettings.EXPECTED_COLD_ENTITY_EXECUTION_TIME_IN_SECS,
-                // query limit
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_ENTITIES_PER_QUERY,
-                LegacyOpenDistroAnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW,
-                AnomalyDetectorSettings.MAX_ENTITIES_PER_QUERY,
-                AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW,
-                AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW,
-                AnomalyDetectorSettings.PAGE_SIZE,
-                // clean resource
-                AnomalyDetectorSettings.DELETE_AD_RESULT_WHEN_DELETE_DETECTOR,
-                // stats/profile API
-                AnomalyDetectorSettings.MAX_MODEL_SIZE_PER_NODE
-            );
+                .of(
+                        // HCAD cache
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_CACHE_MISS_HANDLING_PER_SECOND,
+                        AnomalyDetectorSettings.DEDICATED_CACHE_SIZE,
+                        // Detector config
+                        LegacyOpenDistroAnomalyDetectorSettings.DETECTION_INTERVAL,
+                        LegacyOpenDistroAnomalyDetectorSettings.DETECTION_WINDOW_DELAY,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
+                        AnomalyDetectorSettings.DETECTION_INTERVAL,
+                        AnomalyDetectorSettings.DETECTION_WINDOW_DELAY,
+                        AnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
+                        // Fault tolerance
+                        LegacyOpenDistroAnomalyDetectorSettings.REQUEST_TIMEOUT,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+                        LegacyOpenDistroAnomalyDetectorSettings.COOLDOWN_MINUTES,
+                        LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_MINUTES,
+                        LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_INITIAL_DELAY,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_BACKOFF,
+                        AnomalyDetectorSettings.REQUEST_TIMEOUT,
+                        AnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+                        AnomalyDetectorSettings.COOLDOWN_MINUTES,
+                        AnomalyDetectorSettings.BACKOFF_MINUTES,
+                        AnomalyDetectorSettings.BACKOFF_INITIAL_DELAY,
+                        AnomalyDetectorSettings.MAX_RETRY_FOR_BACKOFF,
+                        // result index rollover
+                        LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_ROLLOVER_PERIOD,
+                        LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_MAX_DOCS,
+                        LegacyOpenDistroAnomalyDetectorSettings.AD_RESULT_HISTORY_RETENTION_PERIOD,
+                        AnomalyDetectorSettings.AD_RESULT_HISTORY_ROLLOVER_PERIOD,
+                        AnomalyDetectorSettings.AD_RESULT_HISTORY_MAX_DOCS_PER_SHARD,
+                        AnomalyDetectorSettings.AD_RESULT_HISTORY_RETENTION_PERIOD,
+                        // resource usage control
+                        LegacyOpenDistroAnomalyDetectorSettings.MODEL_MAX_SIZE_PERCENTAGE,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_SINGLE_ENTITY_ANOMALY_DETECTORS,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS,
+                        LegacyOpenDistroAnomalyDetectorSettings.INDEX_PRESSURE_SOFT_LIMIT,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_PRIMARY_SHARDS,
+                        AnomalyDetectorSettings.MODEL_MAX_SIZE_PERCENTAGE,
+                        AnomalyDetectorSettings.MAX_SINGLE_ENTITY_ANOMALY_DETECTORS,
+                        AnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS,
+                        AnomalyDetectorSettings.INDEX_PRESSURE_SOFT_LIMIT,
+                        AnomalyDetectorSettings.INDEX_PRESSURE_HARD_LIMIT,
+                        AnomalyDetectorSettings.MAX_PRIMARY_SHARDS,
+                        // Security
+                        LegacyOpenDistroAnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
+                        AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
+                        // Historical
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE,
+                        LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR,
+                        LegacyOpenDistroAnomalyDetectorSettings.BATCH_TASK_PIECE_SIZE,
+                        AnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE,
+                        AnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS,
+                        AnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR,
+                        AnomalyDetectorSettings.BATCH_TASK_PIECE_SIZE,
+                        AnomalyDetectorSettings.MAX_TOP_ENTITIES_FOR_HISTORICAL_ANALYSIS,
+                        AnomalyDetectorSettings.MAX_RUNNING_ENTITIES_PER_DETECTOR_FOR_HISTORICAL_ANALYSIS,
+                        AnomalyDetectorSettings.MAX_CACHED_DELETED_TASKS,
+                        // rate limiting
+                        AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_CONCURRENCY,
+                        AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_CONCURRENCY,
+                        AnomalyDetectorSettings.ENTITY_COLD_START_QUEUE_CONCURRENCY,
+                        AnomalyDetectorSettings.RESULT_WRITE_QUEUE_CONCURRENCY,
+                        AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_BATCH_SIZE,
+                        AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_BATCH_SIZE,
+                        AnomalyDetectorSettings.RESULT_WRITE_QUEUE_BATCH_SIZE,
+                        AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
+                        AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_MAX_HEAP_PERCENT,
+                        AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
+                        AnomalyDetectorSettings.RESULT_WRITE_QUEUE_MAX_HEAP_PERCENT,
+                        AnomalyDetectorSettings.ENTITY_COLD_START_QUEUE_MAX_HEAP_PERCENT,
+                        AnomalyDetectorSettings.EXPECTED_COLD_ENTITY_EXECUTION_TIME_IN_SECS,
+                        // query limit
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_ENTITIES_PER_QUERY,
+                        LegacyOpenDistroAnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW,
+                        AnomalyDetectorSettings.MAX_ENTITIES_PER_QUERY,
+                        AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW,
+                        AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW,
+                        AnomalyDetectorSettings.PAGE_SIZE,
+                        // clean resource
+                        AnomalyDetectorSettings.DELETE_AD_RESULT_WHEN_DELETE_DETECTOR,
+                        // stats/profile API
+                        AnomalyDetectorSettings.MAX_MODEL_SIZE_PER_NODE,
+                        // checkpoint
+                        AnomalyDetectorSettings.CHECKPOINT_SAVE_FREQ
+                        );
         return unmodifiableList(
-            Stream
+                Stream
                 .of(enabledSetting.stream(), systemSetting.stream(), numericSetting.stream())
                 .reduce(Stream::concat)
                 .orElseGet(Stream::empty)
                 .collect(Collectors.toList())
-        );
+                );
     }
 
     @Override
     public List<NamedXContentRegistry.Entry> getNamedXContent() {
         return ImmutableList
-            .of(
-                AnomalyDetector.XCONTENT_REGISTRY,
-                AnomalyResult.XCONTENT_REGISTRY,
-                DetectorInternalState.XCONTENT_REGISTRY,
-                AnomalyDetectorJob.XCONTENT_REGISTRY
-            );
+                .of(
+                        AnomalyDetector.XCONTENT_REGISTRY,
+                        AnomalyResult.XCONTENT_REGISTRY,
+                        DetectorInternalState.XCONTENT_REGISTRY,
+                        AnomalyDetectorJob.XCONTENT_REGISTRY
+                        );
     }
 
     /*
@@ -897,38 +902,38 @@ public class AnomalyDetectorPlugin extends Plugin implements ActionPlugin, Scrip
     @Override
     public List<ActionHandler<? extends ActionRequest, ? extends ActionResponse>> getActions() {
         return Arrays
-            .asList(
-                new ActionHandler<>(DeleteModelAction.INSTANCE, DeleteModelTransportAction.class),
-                new ActionHandler<>(StopDetectorAction.INSTANCE, StopDetectorTransportAction.class),
-                new ActionHandler<>(RCFResultAction.INSTANCE, RCFResultTransportAction.class),
-                new ActionHandler<>(ThresholdResultAction.INSTANCE, ThresholdResultTransportAction.class),
-                new ActionHandler<>(AnomalyResultAction.INSTANCE, AnomalyResultTransportAction.class),
-                new ActionHandler<>(CronAction.INSTANCE, CronTransportAction.class),
-                new ActionHandler<>(ADStatsNodesAction.INSTANCE, ADStatsNodesTransportAction.class),
-                new ActionHandler<>(ProfileAction.INSTANCE, ProfileTransportAction.class),
-                new ActionHandler<>(RCFPollingAction.INSTANCE, RCFPollingTransportAction.class),
-                new ActionHandler<>(SearchAnomalyDetectorAction.INSTANCE, SearchAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(SearchAnomalyResultAction.INSTANCE, SearchAnomalyResultTransportAction.class),
-                new ActionHandler<>(SearchADTasksAction.INSTANCE, SearchADTasksTransportAction.class),
-                new ActionHandler<>(StatsAnomalyDetectorAction.INSTANCE, StatsAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(DeleteAnomalyDetectorAction.INSTANCE, DeleteAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(GetAnomalyDetectorAction.INSTANCE, GetAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(IndexAnomalyDetectorAction.INSTANCE, IndexAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(AnomalyDetectorJobAction.INSTANCE, AnomalyDetectorJobTransportAction.class),
-                new ActionHandler<>(ADResultBulkAction.INSTANCE, ADResultBulkTransportAction.class),
-                new ActionHandler<>(EntityResultAction.INSTANCE, EntityResultTransportAction.class),
-                new ActionHandler<>(EntityProfileAction.INSTANCE, EntityProfileTransportAction.class),
-                new ActionHandler<>(SearchAnomalyDetectorInfoAction.INSTANCE, SearchAnomalyDetectorInfoTransportAction.class),
-                new ActionHandler<>(PreviewAnomalyDetectorAction.INSTANCE, PreviewAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(ADBatchAnomalyResultAction.INSTANCE, ADBatchAnomalyResultTransportAction.class),
-                new ActionHandler<>(ADBatchTaskRemoteExecutionAction.INSTANCE, ADBatchTaskRemoteExecutionTransportAction.class),
-                new ActionHandler<>(ADTaskProfileAction.INSTANCE, ADTaskProfileTransportAction.class),
-                new ActionHandler<>(ADCancelTaskAction.INSTANCE, ADCancelTaskTransportAction.class),
-                new ActionHandler<>(ForwardADTaskAction.INSTANCE, ForwardADTaskTransportAction.class),
-                new ActionHandler<>(DeleteAnomalyResultsAction.INSTANCE, DeleteAnomalyResultsTransportAction.class),
-                new ActionHandler<>(SearchTopAnomalyResultAction.INSTANCE, SearchTopAnomalyResultTransportAction.class),
-                new ActionHandler<>(ValidateAnomalyDetectorAction.INSTANCE, ValidateAnomalyDetectorTransportAction.class)
-            );
+                .asList(
+                        new ActionHandler<>(DeleteModelAction.INSTANCE, DeleteModelTransportAction.class),
+                        new ActionHandler<>(StopDetectorAction.INSTANCE, StopDetectorTransportAction.class),
+                        new ActionHandler<>(RCFResultAction.INSTANCE, RCFResultTransportAction.class),
+                        new ActionHandler<>(ThresholdResultAction.INSTANCE, ThresholdResultTransportAction.class),
+                        new ActionHandler<>(AnomalyResultAction.INSTANCE, AnomalyResultTransportAction.class),
+                        new ActionHandler<>(CronAction.INSTANCE, CronTransportAction.class),
+                        new ActionHandler<>(ADStatsNodesAction.INSTANCE, ADStatsNodesTransportAction.class),
+                        new ActionHandler<>(ProfileAction.INSTANCE, ProfileTransportAction.class),
+                        new ActionHandler<>(RCFPollingAction.INSTANCE, RCFPollingTransportAction.class),
+                        new ActionHandler<>(SearchAnomalyDetectorAction.INSTANCE, SearchAnomalyDetectorTransportAction.class),
+                        new ActionHandler<>(SearchAnomalyResultAction.INSTANCE, SearchAnomalyResultTransportAction.class),
+                        new ActionHandler<>(SearchADTasksAction.INSTANCE, SearchADTasksTransportAction.class),
+                        new ActionHandler<>(StatsAnomalyDetectorAction.INSTANCE, StatsAnomalyDetectorTransportAction.class),
+                        new ActionHandler<>(DeleteAnomalyDetectorAction.INSTANCE, DeleteAnomalyDetectorTransportAction.class),
+                        new ActionHandler<>(GetAnomalyDetectorAction.INSTANCE, GetAnomalyDetectorTransportAction.class),
+                        new ActionHandler<>(IndexAnomalyDetectorAction.INSTANCE, IndexAnomalyDetectorTransportAction.class),
+                        new ActionHandler<>(AnomalyDetectorJobAction.INSTANCE, AnomalyDetectorJobTransportAction.class),
+                        new ActionHandler<>(ADResultBulkAction.INSTANCE, ADResultBulkTransportAction.class),
+                        new ActionHandler<>(EntityResultAction.INSTANCE, EntityResultTransportAction.class),
+                        new ActionHandler<>(EntityProfileAction.INSTANCE, EntityProfileTransportAction.class),
+                        new ActionHandler<>(SearchAnomalyDetectorInfoAction.INSTANCE, SearchAnomalyDetectorInfoTransportAction.class),
+                        new ActionHandler<>(PreviewAnomalyDetectorAction.INSTANCE, PreviewAnomalyDetectorTransportAction.class),
+                        new ActionHandler<>(ADBatchAnomalyResultAction.INSTANCE, ADBatchAnomalyResultTransportAction.class),
+                        new ActionHandler<>(ADBatchTaskRemoteExecutionAction.INSTANCE, ADBatchTaskRemoteExecutionTransportAction.class),
+                        new ActionHandler<>(ADTaskProfileAction.INSTANCE, ADTaskProfileTransportAction.class),
+                        new ActionHandler<>(ADCancelTaskAction.INSTANCE, ADCancelTaskTransportAction.class),
+                        new ActionHandler<>(ForwardADTaskAction.INSTANCE, ForwardADTaskTransportAction.class),
+                        new ActionHandler<>(DeleteAnomalyResultsAction.INSTANCE, DeleteAnomalyResultsTransportAction.class),
+                        new ActionHandler<>(SearchTopAnomalyResultAction.INSTANCE, SearchTopAnomalyResultTransportAction.class),
+                        new ActionHandler<>(ValidateAnomalyDetectorAction.INSTANCE, ValidateAnomalyDetectorTransportAction.class)
+                        );
     }
 
     @Override

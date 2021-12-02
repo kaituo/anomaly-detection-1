@@ -45,7 +45,7 @@ public class ProfileTransportAction extends TransportNodesAction<ProfileRequest,
     private CacheProvider cacheProvider;
     // the number of models to return. Defaults to 10.
     private volatile int numModelsToReturn;
-
+    
     /**
      * Constructor
      *
@@ -60,48 +60,48 @@ public class ProfileTransportAction extends TransportNodesAction<ProfileRequest,
      */
     @Inject
     public ProfileTransportAction(
-        ThreadPool threadPool,
-        ClusterService clusterService,
-        TransportService transportService,
-        ActionFilters actionFilters,
-        ModelManager modelManager,
-        FeatureManager featureManager,
-        CacheProvider cacheProvider,
-        Settings settings
-    ) {
+            ThreadPool threadPool,
+            ClusterService clusterService,
+            TransportService transportService,
+            ActionFilters actionFilters,
+            ModelManager modelManager,
+            FeatureManager featureManager,
+            CacheProvider cacheProvider,
+            Settings settings
+            ) {
         super(
-            ProfileAction.NAME,
-            threadPool,
-            clusterService,
-            transportService,
-            actionFilters,
-            ProfileRequest::new,
-            ProfileNodeRequest::new,
-            ThreadPool.Names.MANAGEMENT,
-            ProfileNodeResponse.class
-        );
+                ProfileAction.NAME,
+                threadPool,
+                clusterService,
+                transportService,
+                actionFilters,
+                ProfileRequest::new,
+                ProfileNodeRequest::new,
+                ThreadPool.Names.MANAGEMENT,
+                ProfileNodeResponse.class
+                );
         this.modelManager = modelManager;
         this.featureManager = featureManager;
         this.cacheProvider = cacheProvider;
         this.numModelsToReturn = MAX_MODEL_SIZE_PER_NODE.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_MODEL_SIZE_PER_NODE, it -> this.numModelsToReturn = it);
     }
-
+    
     @Override
     protected ProfileResponse newResponse(ProfileRequest request, List<ProfileNodeResponse> responses, List<FailedNodeException> failures) {
         return new ProfileResponse(clusterService.getClusterName(), responses, failures);
     }
-
+    
     @Override
     protected ProfileNodeRequest newNodeRequest(ProfileRequest request) {
         return new ProfileNodeRequest(request);
     }
-
+    
     @Override
     protected ProfileNodeResponse newNodeResponse(StreamInput in) throws IOException {
         return new ProfileNodeResponse(in);
     }
-
+    
     @Override
     protected ProfileNodeResponse nodeOperation(ProfileNodeRequest request) {
         String detectorId = request.getDetectorId();
@@ -117,7 +117,7 @@ public class ProfileTransportAction extends TransportNodesAction<ProfileRequest,
                 activeEntity = cacheProvider.get().getActiveEntities(detectorId);
             }
             if (profiles.contains(DetectorProfileName.INIT_PROGRESS)) {
-                totalUpdates = cacheProvider.get().getTotalUpdates(detectorId);// get toal updates
+                totalUpdates = cacheProvider.get().getTotalUpdates(detectorId);// get total updates
             }
             if (profiles.contains(DetectorProfileName.TOTAL_SIZE_IN_BYTES)) {
                 modelSize = cacheProvider.get().getModelSize(detectorId);
@@ -136,20 +136,20 @@ public class ProfileTransportAction extends TransportNodesAction<ProfileRequest,
             if (profiles.contains(DetectorProfileName.COORDINATING_NODE) || profiles.contains(DetectorProfileName.SHINGLE_SIZE)) {
                 shingleSize = featureManager.getShingleSize(detectorId);
             }
-
+            
             if (profiles.contains(DetectorProfileName.TOTAL_SIZE_IN_BYTES) || profiles.contains(DetectorProfileName.MODELS)) {
                 modelSize = modelManager.getModelSize(detectorId);
             }
         }
-
+        
         return new ProfileNodeResponse(
-            clusterService.localNode(),
-            modelSize,
-            shingleSize,
-            activeEntity,
-            totalUpdates,
-            modelProfiles,
-            modelCount
-        );
+                clusterService.localNode(),
+                modelSize,
+                shingleSize,
+                activeEntity,
+                totalUpdates,
+                modelProfiles,
+                modelCount
+                );
     }
 }
