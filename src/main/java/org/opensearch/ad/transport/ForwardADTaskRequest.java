@@ -24,11 +24,11 @@ import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskAction;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.timeseries.common.exception.VersionException;
+import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.transport.TransportService;
 
@@ -46,7 +46,7 @@ public class ForwardADTaskRequest extends ActionRequest {
      * For most task actions, we only send ForwardADTaskRequest to node with same local AD version.
      * But it's possible that we need to clean up detector cache by sending FINISHED task action to
      * an old coordinating node when no task running for the detector.
-     * Check {@link org.opensearch.ad.task.ADTaskManager#cleanDetectorCache(ADTask, TransportService, AnomalyDetectorFunction)}.
+     * Check {@link org.opensearch.ad.task.ADTaskManager#cleanDetectorCache(ADTask, TransportService, ExecutorFunction)}.
      *
      * @param detector detector
      * @param detectionDateRange detection date range
@@ -64,7 +64,7 @@ public class ForwardADTaskRequest extends ActionRequest {
         Version remoteAdVersion
     ) {
         if (remoteAdVersion == null) {
-            throw new VersionException(detector.getDetectorId(), "Can't forward AD task request to node running null AD version ");
+            throw new VersionException(detector.getId(), "Can't forward AD task request to node running null AD version ");
         }
         this.detector = detector;
         this.detectionDateRange = detectionDateRange;
@@ -155,7 +155,7 @@ public class ForwardADTaskRequest extends ActionRequest {
         ActionRequestValidationException validationException = null;
         if (detector == null) {
             validationException = addValidationError(ADCommonMessages.DETECTOR_MISSING, validationException);
-        } else if (detector.getDetectorId() == null) {
+        } else if (detector.getId() == null) {
             validationException = addValidationError(ADCommonMessages.AD_ID_MISSING_MSG, validationException);
         }
         if (adTaskAction == null) {

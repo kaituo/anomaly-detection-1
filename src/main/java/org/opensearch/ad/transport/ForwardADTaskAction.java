@@ -14,11 +14,11 @@ package org.opensearch.ad.transport;
 import static org.opensearch.ad.constant.ADCommonName.AD_TASK;
 
 import org.opensearch.action.ActionType;
-import org.opensearch.ad.constant.CommonValue;
+import org.opensearch.ad.constant.ADCommonValue;
 
 public class ForwardADTaskAction extends ActionType<AnomalyDetectorJobResponse> {
     // Internal Action which is not used for public facing RestAPIs.
-    public static final String NAME = CommonValue.INTERNAL_ACTION_PREFIX + "detector/" + AD_TASK + "/forward";
+    public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "detector/" + AD_TASK + "/forward";
     public static final ForwardADTaskAction INSTANCE = new ForwardADTaskAction();
 
     private ForwardADTaskAction() {

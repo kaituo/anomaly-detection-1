@@ -29,9 +29,9 @@ import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.AbstractProfileRunnerTests;
 import org.opensearch.ad.AnomalyDetectorProfileRunner;
-import org.opensearch.ad.NodeStateManager;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
@@ -39,7 +39,6 @@ import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.ad.transport.ProfileAction;
 import org.opensearch.ad.transport.ProfileNodeResponse;
 import org.opensearch.ad.transport.ProfileResponse;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.BigArrays;
@@ -71,12 +70,12 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
         throws IOException {
         detector = TestHelpers
             .randomAnomalyDetectorWithInterval(new IntervalTimeConfiguration(detectorIntervalMin, ChronoUnit.MINUTES), true);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(anyString(), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(anyString(), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         runner = new AnomalyDetectorProfileRunner(
             client,
@@ -96,7 +95,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
             if (request.index().equals(CommonName.CONFIG_INDEX)) {
                 switch (detectorStatus) {
                     case EXIST:
-                        listener.onResponse(TestHelpers.createGetResponse(detector, detector.getDetectorId(), CommonName.CONFIG_INDEX));
+                        listener.onResponse(TestHelpers.createGetResponse(detector, detector.getId(), CommonName.CONFIG_INDEX));
                         break;
                     default:
                         assertTrue("should not reach here", false);
@@ -107,7 +106,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
                 switch (jobStatus) {
                     case ENABLED:
                         job = TestHelpers.randomAnomalyDetectorJob(true);
-                        listener.onResponse(TestHelpers.createGetResponse(job, detector.getDetectorId(), CommonName.JOB_INDEX));
+                        listener.onResponse(TestHelpers.createGetResponse(job, detector.getId(), CommonName.JOB_INDEX));
                         break;
                     default:
                         assertTrue("should not reach here", false);
@@ -214,7 +213,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {
@@ -236,7 +235,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
 
         final AtomicInteger called = new AtomicInteger(0);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertTrue(response.getInitProgress() != null);
             called.getAndIncrement();
         }, exception -> {
@@ -258,7 +257,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {

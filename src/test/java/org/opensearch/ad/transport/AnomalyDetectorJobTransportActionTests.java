@@ -16,12 +16,11 @@ import static org.opensearch.ad.constant.ADCommonMessages.DETECTOR_IS_RUNNING;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR;
-import static org.opensearch.ad.util.RestHandlerUtils.PROFILE;
-import static org.opensearch.ad.util.RestHandlerUtils.START_JOB;
-import static org.opensearch.ad.util.RestHandlerUtils.STOP_JOB;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_PRIMARY_TERM;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_SEQ_NO;
-import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
+import static org.opensearch.timeseries.util.RestHandlerUtils.PROFILE;
+import static org.opensearch.timeseries.util.RestHandlerUtils.START_JOB;
+import static org.opensearch.timeseries.util.RestHandlerUtils.STOP_JOB;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -47,7 +46,6 @@ import org.opensearch.ad.mock.model.MockSimpleLog;
 import org.opensearch.ad.mock.transport.MockAnomalyDetectorJobAction;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskProfile;
-import org.opensearch.ad.model.ADTaskState;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
@@ -112,7 +110,7 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
             OpenSearchStatusException.class,
             () -> client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000)
         );
-        assertTrue(exception.getMessage().contains(FAIL_TO_FIND_CONFIG_MSG));
+        assertTrue(exception.getMessage().contains(CommonMessages.FAIL_TO_FIND_CONFIG_MSG));
     }
 
     public void testValidHistoricalAnalysis() throws IOException, InterruptedException {
@@ -180,7 +178,7 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
             assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(adTask.getState()));
             assertEquals(categoryField, adTask.getDetector().getCategoryField().get(0));
 
-            if (ADTaskState.FINISHED.name().equals(adTask.getState())) {
+            if (TaskState.FINISHED.name().equals(adTask.getState())) {
                 List<ADTask> adTasks = searchADTasks(detectorId, true, 100);
                 assertEquals(4, adTasks.size());
                 List<ADTask> entityTasks = adTasks
@@ -236,7 +234,7 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
             assertEquals(categoryField, adTask.getDetector().getCategoryField().get(0));
             assertEquals(ipField, adTask.getDetector().getCategoryField().get(1));
 
-            if (ADTaskState.FINISHED.name().equals(adTask.getState())) {
+            if (TaskState.FINISHED.name().equals(adTask.getState())) {
                 List<ADTask> adTasks = searchADTasks(detectorId, taskId, true, 100);
                 assertEquals(5, adTasks.size());
                 List<ADTask> entityTasks = adTasks
@@ -298,7 +296,7 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
 
         assertEquals(1, adTasks.size());
         assertTrue(adTasks.get(0).getLatest());
-        assertNotEquals(ADTaskState.FAILED.name(), adTasks.get(0).getState());
+        assertNotEquals(TaskState.FAILED.name(), adTasks.get(0).getState());
     }
 
     // TODO: fix this flaky test case
@@ -309,8 +307,8 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
         String detectorId = createDetector(detector);
 
         createDetectionStateIndex();
-        List<ADTaskState> states = ImmutableList.of(ADTaskState.FAILED, ADTaskState.FINISHED, ADTaskState.STOPPED);
-        for (ADTaskState state : states) {
+        List<TaskState> states = ImmutableList.of(TaskState.FAILED, TaskState.FINISHED, TaskState.STOPPED);
+        for (TaskState state : states) {
             ADTask task = randomADTask(randomAlphaOfLength(5), detector, detectorId, dateRange, state);
             createADTask(task);
         }
@@ -431,13 +429,13 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
         assertEquals(1, adTasks.size());
         assertEquals(ADTaskType.REALTIME_SINGLE_ENTITY.name(), adTasks.get(0).getTaskType());
         assertNotEquals(jobId, adTasks.get(0).getTaskId());
-        assertEquals(ADTaskState.STOPPED.name(), adTasks.get(0).getState());
+        assertEquals(TaskState.STOPPED.name(), adTasks.get(0).getState());
     }
 
     public void testStopHistoricalDetector() throws IOException, InterruptedException {
         updateTransientSettings(ImmutableMap.of(BATCH_TASK_PIECE_INTERVAL_SECONDS.getKey(), 5));
         ADTask adTask = startHistoricalAnalysis(startTime, endTime);
-        assertEquals(ADTaskState.INIT.name(), adTask.getState());
+        assertEquals(TaskState.INIT.name(), adTask.getState());
         assertNull(adTask.getStartedBy());
         assertNull(adTask.getUser());
         waitUntil(() -> {
@@ -447,7 +445,7 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
                 if (taskRunning) {
                     // It's possible that the task not started on worker node yet. Recancel it to make sure
                     // task cancelled.
-                    AnomalyDetectorJobRequest request = stopDetectorJobRequest(adTask.getDetectorId(), true);
+                    AnomalyDetectorJobRequest request = stopDetectorJobRequest(adTask.getConfigId(), true);
                     client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000);
                 }
                 return !taskRunning;
@@ -456,7 +454,7 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
             }
         }, 20, TimeUnit.SECONDS);
         ADTask stoppedTask = getADTask(adTask.getTaskId());
-        assertEquals(ADTaskState.STOPPED.name(), stoppedTask.getState());
+        assertEquals(TaskState.STOPPED.name(), stoppedTask.getState());
         assertEquals(0, getExecutingADTask());
     }
 

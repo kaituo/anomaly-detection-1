@@ -21,13 +21,13 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.nodes.BaseNodesResponse;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.ad.model.ModelProfileOnNode;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ToXContentFragment;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.timeseries.model.ModelProfile;
 
 /**
  * This class consists of the aggregated responses from the nodes

@@ -20,27 +20,29 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
-import org.opensearch.ad.NodeStateManager;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ADNodeStateManager;
+import org.opensearch.ad.ml.ADEntityColdStart;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.caching.HCCacheProvider;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.transport.TransportService;
 
 public class DeleteModelTransportAction extends
     TransportNodesAction<DeleteModelRequest, DeleteModelResponse, DeleteModelNodeRequest, DeleteModelNodeResponse> {
     private static final Logger LOG = LogManager.getLogger(DeleteModelTransportAction.class);
     private NodeStateManager nodeStateManager;
-    private ModelManager modelManager;
+    private ADNodeStateManager adNodeStateManager;
+    private ADModelManager modelManager;
     private FeatureManager featureManager;
-    private CacheProvider cache;
+    private HCCacheProvider cache;
     private ADTaskCacheManager adTaskCacheManager;
-    private EntityColdStarter coldStarter;
+    private ADEntityColdStart coldStarter;
 
     @Inject
     public DeleteModelTransportAction(
@@ -49,11 +51,12 @@ public class DeleteModelTransportAction extends
         TransportService transportService,
         ActionFilters actionFilters,
         NodeStateManager nodeStateManager,
-        ModelManager modelManager,
+        ADNodeStateManager adNodeStateManager,
+        ADModelManager modelManager,
         FeatureManager featureManager,
-        CacheProvider cache,
+        HCCacheProvider cache,
         ADTaskCacheManager adTaskCacheManager,
-        EntityColdStarter coldStarter
+        ADEntityColdStart coldStarter
     ) {
         super(
             DeleteModelAction.NAME,
@@ -67,6 +70,7 @@ public class DeleteModelTransportAction extends
             DeleteModelNodeResponse.class
         );
         this.nodeStateManager = nodeStateManager;
+        this.adNodeStateManager = adNodeStateManager;
         this.modelManager = modelManager;
         this.featureManager = featureManager;
         this.cache = cache;
@@ -122,6 +126,7 @@ public class DeleteModelTransportAction extends
 
         // delete transport state
         nodeStateManager.clear(adID);
+        adNodeStateManager.clear(adID);
 
         cache.get().clear(adID);
 

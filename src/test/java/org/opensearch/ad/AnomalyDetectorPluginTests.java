@@ -23,16 +23,17 @@ import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.env.Environment;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
 import io.protostuff.LinkedBuffer;
 
 public class AnomalyDetectorPluginTests extends ADUnitTestCase {
-    AnomalyDetectorPlugin plugin;
+    TimeSeriesAnalyticsPlugin plugin;
 
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        plugin = new AnomalyDetectorPlugin();
+        plugin = new TimeSeriesAnalyticsPlugin();
     }
 
     @Override

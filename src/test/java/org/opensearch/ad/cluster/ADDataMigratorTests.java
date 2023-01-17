@@ -35,7 +35,7 @@ import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.ad.ADUnitTestCase;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -53,7 +53,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     private Client client;
     private ClusterService clusterService;
     private NamedXContentRegistry namedXContentRegistry;
-    private AnomalyDetectionIndices detectionIndices;
+    private ADIndexManagement detectionIndices;
     private ADDataMigrator adDataMigrator;
     private String detectorId;
     private String taskId;
@@ -69,7 +69,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
         client = mock(Client.class);
         clusterService = mock(ClusterService.class);
         namedXContentRegistry = TestHelpers.xContentRegistry();
-        detectionIndices = mock(AnomalyDetectionIndices.class);
+        detectionIndices = mock(ADIndexManagement.class);
         detectorId = randomAlphaOfLength(10);
         taskId = randomAlphaOfLength(10);
         detectorContent = "{\"_index\":\".opendistro-anomaly-detectors\",\"_type\":\"_doc\",\"_id\":\""
@@ -104,7 +104,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithNullJobResponse() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         doAnswer(invocation -> {
@@ -118,7 +118,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithInitingDetectionStateIndexFailure() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(false);
 
         doAnswer(invocation -> {
@@ -138,7 +138,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithInitingDetectionStateIndexAlreadyExists() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(false);
 
         doAnswer(invocation -> {
@@ -158,7 +158,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithInitingDetectionStateIndexNotAcknowledged() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(false);
 
         doAnswer(invocation -> {
@@ -178,7 +178,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithInitingDetectionStateIndexAcknowledged() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(false);
 
         doAnswer(invocation -> {
@@ -198,7 +198,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithEmptyJobResponse() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         doAnswer(invocation -> {
@@ -232,7 +232,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithNormalJobResponseButMissingDetector() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         doAnswer(invocation -> {
@@ -282,7 +282,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithNormalJobResponseAndExistingDetector() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         String detectorId = randomAlphaOfLength(10);
@@ -349,7 +349,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     }
 
     public void testMigrateDataWithNormalJobResponse_ExistingDetector_ExistingInternalError() {
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         String detectorId = randomAlphaOfLength(10);
@@ -420,7 +420,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     public void testMigrateDataTwice() {
         adDataMigrator.migrateData();
         adDataMigrator.migrateData();
-        verify(detectionIndices, times(1)).doesAnomalyDetectorJobIndexExist();
+        verify(detectionIndices, times(1)).doesJobIndexExist();
     }
 
     public void testMigrateDataWithNoAvailableShardsException() {
@@ -432,7 +432,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
                 );
             return null;
         }).when(client).search(any(), any());
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         adDataMigrator.migrateData();
@@ -445,7 +445,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             listener.onFailure(new IndexNotFoundException(CommonName.JOB_INDEX));
             return null;
         }).when(client).search(any(), any());
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         adDataMigrator.migrateData();
@@ -459,7 +459,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             listener.onFailure(new RuntimeException("test unknown exception"));
             return null;
         }).when(client).search(any(), any());
-        when(detectionIndices.doesAnomalyDetectorJobIndexExist()).thenReturn(true);
+        when(detectionIndices.doesJobIndexExist()).thenReturn(true);
         when(detectionIndices.doesDetectorStateIndexExist()).thenReturn(true);
 
         adDataMigrator.migrateData();

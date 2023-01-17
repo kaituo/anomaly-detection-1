@@ -11,7 +11,7 @@
 
 package org.opensearch.ad.transport;
 
-import static org.opensearch.ad.indices.AnomalyDetectionIndices.ALL_AD_RESULTS_INDEX_PATTERN;
+import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.TOP_ANOMALY_RESULT_TIMEOUT_IN_MILLIS;
 
 import java.time.Clock;
@@ -310,7 +310,7 @@ public class SearchTopAnomalyResultTransportAction extends
             SearchRequest searchRequest = generateSearchRequest(request);
 
             // Adding search over any custom result indices
-            String rawCustomResultIndex = getAdResponse.getDetector().getResultIndex();
+            String rawCustomResultIndex = getAdResponse.getDetector().getCustomResultIndex();
             String customResultIndex = rawCustomResultIndex == null ? null : rawCustomResultIndex.trim();
             if (!Strings.isNullOrEmpty(customResultIndex)) {
                 searchRequest.indices(defaultIndex, customResultIndex);

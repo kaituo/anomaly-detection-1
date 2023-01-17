@@ -24,9 +24,9 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.BACKOFF_MINUTES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_BACKOFF_MINUTES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_ENTITIES_PER_QUERY;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.PAGE_SIZE;
 
 import java.io.IOException;
@@ -69,32 +69,21 @@ import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.action.support.master.AcknowledgedResponse;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.NodeStateManager;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.cluster.HashRing;
-import org.opensearch.ad.feature.CompositeRetriever;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.ratelimit.CheckpointReadWorker;
-import org.opensearch.ad.ratelimit.ColdEntityWorker;
-import org.opensearch.ad.ratelimit.EntityColdStartWorker;
-import org.opensearch.ad.ratelimit.EntityFeatureRequest;
-import org.opensearch.ad.ratelimit.ResultWriteWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointReadWorker;
+import org.opensearch.ad.ratelimit.ADColdEntityWorker;
+import org.opensearch.ad.ratelimit.ADColdStartWorker;
+import org.opensearch.ad.ratelimit.ADResultWriteWorker;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.stats.ADStat;
 import org.opensearch.ad.stats.ADStats;
 import org.opensearch.ad.stats.suppliers.CounterSupplier;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.ClientUtil;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.ad.util.Throttler;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
@@ -144,27 +133,27 @@ public class MultiEntityResultTests extends AbstractADTest {
     private TransportInterceptor entityResultInterceptor;
     private Clock clock;
     private AnomalyDetector detector;
-    private NodeStateManager stateManager;
+    private ADNodeStateManager stateManager;
     private static Settings settings;
     private TransportService transportService;
     private Client client;
     private SecurityClientUtil clientUtil;
     private FeatureManager featureQuery;
-    private ModelManager normalModelManager;
+    private ADModelManager normalModelManager;
     private HashRing hashRing;
     private ClusterService clusterService;
     private IndexNameExpressionResolver indexNameResolver;
-    private ADCircuitBreakerService adCircuitBreakerService;
+    private CircuitBreakerService adCircuitBreakerService;
     private ADStats adStats;
     private ThreadPool mockThreadPool;
     private String detectorId;
     private Instant now;
-    private CacheProvider provider;
-    private AnomalyDetectionIndices indexUtil;
-    private ResultWriteWorker resultWriteQueue;
-    private CheckpointReadWorker checkpointReadQueue;
-    private EntityColdStartWorker entityColdStartQueue;
-    private ColdEntityWorker coldEntityQueue;
+    private EntityCacheProvider provider;
+    private ADIndexManagement indexUtil;
+    private ADResultWriteWorker resultWriteQueue;
+    private ADCheckpointReadWorker checkpointReadQueue;
+    private ADColdStartWorker entityColdStartQueue;
+    private ADColdEntityWorker coldEntityQueue;
     private String app0 = "app_0";
     private String server1 = "server_1";
     private String server2 = "server_2";
@@ -198,13 +187,13 @@ public class MultiEntityResultTests extends AbstractADTest {
         String categoryField = "a";
         detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(detectorId, Collections.singletonList(categoryField));
 
-        stateManager = mock(NodeStateManager.class);
+        stateManager = mock(ADNodeStateManager.class);
         // make sure parameters are not null, otherwise this mock won't get invoked
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(stateManager).getAnomalyDetector(anyString(), any(ActionListener.class));
+        }).when(stateManager).getConfig(anyString(), any(ActionListener.class));
 
         settings = Settings.builder().put(AnomalyDetectorSettings.COOLDOWN_MINUTES.getKey(), TimeValue.timeValueMinutes(5)).build();
 
@@ -223,15 +212,15 @@ public class MultiEntityResultTests extends AbstractADTest {
 
         featureQuery = mock(FeatureManager.class);
 
-        normalModelManager = mock(ModelManager.class);
+        normalModelManager = mock(ADModelManager.class);
 
         hashRing = mock(HashRing.class);
 
         Set<Setting<?>> anomalyResultSetting = new HashSet<>(ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
         anomalyResultSetting.add(MAX_ENTITIES_PER_QUERY);
         anomalyResultSetting.add(PAGE_SIZE);
-        anomalyResultSetting.add(MAX_RETRY_FOR_UNRESPONSIVE_NODE);
-        anomalyResultSetting.add(BACKOFF_MINUTES);
+        anomalyResultSetting.add(AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE);
+        anomalyResultSetting.add(AD_BACKOFF_MINUTES);
         ClusterSettings clusterSettings = new ClusterSettings(Settings.EMPTY, anomalyResultSetting);
 
         DiscoveryNode discoveryNode = new DiscoveryNode(
@@ -246,16 +235,16 @@ public class MultiEntityResultTests extends AbstractADTest {
 
         indexNameResolver = new IndexNameExpressionResolver(new ThreadContext(Settings.EMPTY));
 
-        adCircuitBreakerService = mock(ADCircuitBreakerService.class);
+        adCircuitBreakerService = mock(CircuitBreakerService.class);
         when(adCircuitBreakerService.isOpen()).thenReturn(false);
 
-        Map<String, ADStat<?>> statsMap = new HashMap<String, ADStat<?>>() {
+        Map<String, TimeSeriesStat<?>> statsMap = new HashMap<String, TimeSeriesStat<?>>() {
             {
-                put(StatNames.AD_EXECUTE_REQUEST_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
-                put(StatNames.AD_EXECUTE_FAIL_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
-                put(StatNames.AD_HC_EXECUTE_REQUEST_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
-                put(StatNames.AD_HC_EXECUTE_FAIL_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
-                put(StatNames.MODEL_CORRUTPION_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
+                put(StatNames.AD_EXECUTE_REQUEST_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
+                put(StatNames.AD_EXECUTE_FAIL_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
+                put(StatNames.AD_HC_EXECUTE_REQUEST_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
+                put(StatNames.AD_HC_EXECUTE_FAIL_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
+                put(StatNames.MODEL_CORRUTPION_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
             }
         };
         adStats = new ADStats(statsMap);
@@ -267,7 +256,7 @@ public class MultiEntityResultTests extends AbstractADTest {
             return null;
         })
             .when(adTaskManager)
-            .initRealtimeTaskCacheAndCleanupStaleCache(
+            .initCacheWithCleanupIfRequired(
                 anyString(),
                 any(AnomalyDetector.class),
                 any(TransportService.class),
@@ -293,19 +282,19 @@ public class MultiEntityResultTests extends AbstractADTest {
             adTaskManager
         );
 
-        provider = mock(CacheProvider.class);
+        provider = mock(EntityCacheProvider.class);
         entityCache = mock(EntityCache.class);
         when(provider.get()).thenReturn(entityCache);
         when(entityCache.get(any(), any()))
             .thenReturn(MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build()));
         when(entityCache.selectUpdateCandidate(any(), any(), any())).thenReturn(Pair.of(new ArrayList<Entity>(), new ArrayList<Entity>()));
 
-        indexUtil = mock(AnomalyDetectionIndices.class);
-        resultWriteQueue = mock(ResultWriteWorker.class);
-        checkpointReadQueue = mock(CheckpointReadWorker.class);
-        entityColdStartQueue = mock(EntityColdStartWorker.class);
+        indexUtil = mock(ADIndexManagement.class);
+        resultWriteQueue = mock(ADResultWriteWorker.class);
+        checkpointReadQueue = mock(ADCheckpointReadWorker.class);
+        entityColdStartQueue = mock(ADColdStartWorker.class);
 
-        coldEntityQueue = mock(ColdEntityWorker.class);
+        coldEntityQueue = mock(ADColdEntityWorker.class);
 
         attrs1 = new HashMap<>();
         attrs1.put(serviceField, app0);
@@ -396,9 +385,9 @@ public class MultiEntityResultTests extends AbstractADTest {
         };
     }
 
-    private void setUpEntityResult(int nodeIndex, NodeStateManager nodeStateManager) {
+    private void setUpEntityResult(int nodeIndex, ADNodeStateManager nodeStateManager) {
         // register entity result action
-        new EntityResultTransportAction(
+        new EntityADResultTransportAction(
             new ActionFilters(Collections.emptySet()),
             // since we send requests to testNodes[1]
             testNodes[nodeIndex].transportService,
@@ -415,8 +404,7 @@ public class MultiEntityResultTests extends AbstractADTest {
             adStats
         );
 
-        when(normalModelManager.getAnomalyResultForEntity(any(), any(), any(), any(), anyInt()))
-            .thenReturn(new ThresholdingResult(0, 1, 1));
+        when(normalModelManager.getResult(any(), any(), any(), any(), anyInt())).thenReturn(new ThresholdingResult(0, 1, 1));
     }
 
     private void setUpEntityResult(int nodeIndex) {
@@ -431,12 +419,12 @@ public class MultiEntityResultTests extends AbstractADTest {
             .setCategoryFields(ImmutableList.of(randomAlphaOfLength(5)))
             .build();
         doAnswer(invocation -> {
-            ActionListener<GetResponse> listener = invocation.getArgument(1);
+            ActionListener<GetResponse> listener = invocation.getArgument(2);
             listener.onResponse(TestHelpers.createGetResponse(detector, detectorId, CommonName.CONFIG_INDEX));
             return null;
         }).when(client).get(any(GetRequest.class), any(ActionListener.class));
 
-        stateManager = new NodeStateManager(
+        stateManager = new ADNodeStateManager(
             client,
             xContentRegistry(),
             settings,
@@ -537,11 +525,7 @@ public class MultiEntityResultTests extends AbstractADTest {
         PlainActionFuture<AnomalyResultResponse> listener2 = new PlainActionFuture<>();
         action.doExecute(null, request, listener2);
         Exception e = expectThrows(EndRunException.class, () -> listener2.actionGet(10000L));
-        assertThat(
-            "actual message: " + e.getMessage(),
-            e.getMessage(),
-            containsString(AnomalyResultTransportAction.TROUBLE_QUERYING_ERR_MSG)
-        );
+        assertThat("actual message: " + e.getMessage(), e.getMessage(), containsString(ResultProcessor.TROUBLE_QUERYING_ERR_MSG));
         assertTrue(!((EndRunException) e).isEndNow());
     }
 
@@ -644,7 +628,7 @@ public class MultiEntityResultTests extends AbstractADTest {
 
     private <T extends TransportResponse> void setUpTransportInterceptor(
         Function<TransportResponseHandler<T>, TransportResponseHandler<T>> interceptor,
-        NodeStateManager nodeStateManager
+        ADNodeStateManager nodeStateManager
     ) {
         entityResultInterceptor = new TransportInterceptor() {
             @Override
@@ -659,7 +643,7 @@ public class MultiEntityResultTests extends AbstractADTest {
                         TransportRequestOptions options,
                         TransportResponseHandler<T2> handler
                     ) {
-                        if (action.equals(EntityResultAction.NAME)) {
+                        if (action.equals(EntityADResultAction.NAME)) {
                             sender
                                 .sendRequest(
                                     connection,
@@ -747,7 +731,7 @@ public class MultiEntityResultTests extends AbstractADTest {
             return null;
         }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
 
-        stateManager = new NodeStateManager(
+        stateManager = new ADNodeStateManager(
             client,
             xContentRegistry(),
             settings,
@@ -757,7 +741,7 @@ public class MultiEntityResultTests extends AbstractADTest {
             clusterService
         );
 
-        NodeStateManager spyStateManager = spy(stateManager);
+        ADNodeStateManager spyStateManager = spy(stateManager);
 
         setUpSearchResponse();
         setUpTransportInterceptor(this::entityResultHandler, spyStateManager);
@@ -765,11 +749,11 @@ public class MultiEntityResultTests extends AbstractADTest {
         when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class)))
             .thenReturn(Optional.of(testNodes[1].discoveryNode()));
 
-        ADCircuitBreakerService openBreaker = mock(ADCircuitBreakerService.class);
+        CircuitBreakerService openBreaker = mock(CircuitBreakerService.class);
         when(openBreaker.isOpen()).thenReturn(true);
 
         // register entity result action
-        new EntityResultTransportAction(
+        new EntityADResultTransportAction(
             new ActionFilters(Collections.emptySet()),
             // since we send requests to testNodes[1]
             testNodes[1].transportService,
@@ -947,13 +931,13 @@ public class MultiEntityResultTests extends AbstractADTest {
         Entity entity2 = Entity.createEntityByReordering(attrs2);
         coldEntities.add(entity2);
 
-        provider = mock(CacheProvider.class);
+        provider = mock(EntityCacheProvider.class);
         entityCache = mock(EntityCache.class);
         when(provider.get()).thenReturn(entityCache);
         when(entityCache.selectUpdateCandidate(any(), any(), any())).thenReturn(Pair.of(hotEntities, coldEntities));
         when(entityCache.get(any(), any())).thenReturn(null);
 
-        new EntityResultTransportAction(
+        new EntityADResultTransportAction(
             new ActionFilters(Collections.emptySet()),
             // since we send requests to testNodes[1]
             testNodes[1].transportService,
@@ -1197,14 +1181,14 @@ public class MultiEntityResultTests extends AbstractADTest {
     }
 
     @SuppressWarnings("unchecked")
-    private NodeStateManager setUpTestExceptionTestingInModelNode() throws IOException {
+    private ADNodeStateManager setUpTestExceptionTestingInModelNode() throws IOException {
         setUpSearchResponse();
         setUpTransportInterceptor(this::entityResultHandler);
         // mock hashing ring response. This has to happen after setting up test nodes with the failure interceptor
         when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class)))
             .thenReturn(Optional.of(testNodes[1].discoveryNode()));
 
-        NodeStateManager modelNodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager modelNodeStateManager = mock(ADNodeStateManager.class);
         CountDownLatch modelNodeInProgress = new CountDownLatch(1);
         // make sure parameters are not null, otherwise this mock won't get invoked
         doAnswer(invocation -> {
@@ -1212,12 +1196,12 @@ public class MultiEntityResultTests extends AbstractADTest {
             listener.onResponse(Optional.of(detector));
             modelNodeInProgress.countDown();
             return null;
-        }).when(modelNodeStateManager).getAnomalyDetector(anyString(), any(ActionListener.class));
+        }).when(modelNodeStateManager).getConfig(anyString(), any(ActionListener.class));
         return modelNodeStateManager;
     }
 
     public void testEndRunNowInModelNode() throws InterruptedException, IOException {
-        NodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
+        ADNodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
 
         CountDownLatch inProgress = new CountDownLatch(1);
         doAnswer(invocation -> {
@@ -1262,7 +1246,7 @@ public class MultiEntityResultTests extends AbstractADTest {
     }
 
     public void testEndRunNowFalseInModelNode() throws InterruptedException, IOException {
-        NodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
+        ADNodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
 
         when(modelNodeStateManager.fetchExceptionAndClear(anyString()))
             .thenReturn(
@@ -1310,7 +1294,7 @@ public class MultiEntityResultTests extends AbstractADTest {
      * @throws InterruptedException when failing to wait for inProgress to finish
      */
     public void testTimeOutExceptionInModelNode() throws IOException, InterruptedException {
-        NodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
+        ADNodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
 
         when(modelNodeStateManager.fetchExceptionAndClear(anyString())).thenReturn(Optional.of(new OpenSearchTimeoutException("blah")));
 
@@ -1348,7 +1332,7 @@ public class MultiEntityResultTests extends AbstractADTest {
     public void testSelectHigherExceptionInModelNode() throws InterruptedException, IOException {
         when(entityCache.get(any(), any())).thenThrow(EndRunException.class);
 
-        NodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
+        ADNodeStateManager modelNodeStateManager = setUpTestExceptionTestingInModelNode();
 
         when(modelNodeStateManager.fetchExceptionAndClear(anyString())).thenReturn(Optional.of(new OpenSearchTimeoutException("blah")));
 

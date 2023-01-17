@@ -42,7 +42,6 @@ import org.opensearch.action.admin.indices.settings.put.UpdateSettingsRequest;
 import org.opensearch.action.support.master.AcknowledgedResponse;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.client.IndicesAdminClient;
@@ -56,12 +55,11 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.index.IndexNotFoundException;
-import org.opensearch.timeseries.constant.CommonName;
 
 public class UpdateMappingTests extends AbstractADTest {
     private static String resultIndexName;
 
-    private AnomalyDetectionIndices adIndices;
+    private ADIndexManagement adIndices;
     private ClusterService clusterService;
     private int numberOfNodes;
     private AdminClient adminClient;
@@ -122,7 +120,7 @@ public class UpdateMappingTests extends AbstractADTest {
         nodeFilter = mock(DiscoveryNodeFilterer.class);
         numberOfNodes = 2;
         when(nodeFilter.getNumberOfEligibleDataNodes()).thenReturn(numberOfNodes);
-        adIndices = new AnomalyDetectionIndices(
+        adIndices = new ADIndexManagement(
             client,
             clusterService,
             threadPool,
@@ -165,10 +163,10 @@ public class UpdateMappingTests extends AbstractADTest {
             .numberOfReplicas(0)
             .putMapping(new MappingMetadata("type", new HashMap<String, Object>() {
                 {
-                    put(AnomalyDetectionIndices.META, new HashMap<String, Object>() {
+                    put(ADIndexManagement.META, new HashMap<String, Object>() {
                         {
                             // version 1 will cause update
-                            put(CommonName.SCHEMA_VERSION_FIELD, 1);
+                            put(org.opensearch.timeseries.constant.CommonName.SCHEMA_VERSION_FIELD, 1);
                         }
                     });
                 }
@@ -307,7 +305,7 @@ public class UpdateMappingTests extends AbstractADTest {
             return null;
         }).when(indicesAdminClient).updateSettings(any(), any());
 
-        adIndices = new AnomalyDetectionIndices(client, clusterService, threadPool, settings, nodeFilter, 1);
+        adIndices = new ADIndexManagement(client, clusterService, threadPool, settings, nodeFilter, 1);
 
         adIndices.update();
         adIndices.update();

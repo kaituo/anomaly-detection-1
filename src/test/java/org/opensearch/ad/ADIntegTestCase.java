@@ -12,8 +12,8 @@
 package org.opensearch.ad;
 
 import static org.opensearch.ad.AbstractADTest.LOG;
-import static org.opensearch.ad.util.RestHandlerUtils.XCONTENT_WITH_TYPE;
 import static org.opensearch.common.xcontent.XContentFactory.jsonBuilder;
+import static org.opensearch.timeseries.util.RestHandlerUtils.XCONTENT_WITH_TYPE;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -40,12 +40,11 @@ import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.action.support.master.AcknowledgedResponse;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.mock.plugin.MockReindexPlugin;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
-import org.opensearch.ad.util.RestHandlerUtils;
 import org.opensearch.client.Client;
 import org.opensearch.client.node.NodeClient;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -60,9 +59,11 @@ import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.test.transport.MockTransportService;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Feature;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -78,11 +79,11 @@ public abstract class ADIntegTestCase extends OpenSearchIntegTestCase {
 
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return Collections.singletonList(AnomalyDetectorPlugin.class);
+        return Collections.singletonList(TimeSeriesAnalyticsPlugin.class);
     }
 
     protected Collection<Class<? extends Plugin>> transportClientPlugins() {
-        return Collections.singletonList(AnomalyDetectorPlugin.class);
+        return Collections.singletonList(TimeSeriesAnalyticsPlugin.class);
     }
 
     @Override
@@ -102,7 +103,7 @@ public abstract class ADIntegTestCase extends OpenSearchIntegTestCase {
 
     public void createDetectors(List<AnomalyDetector> detectors, boolean createIndexFirst) throws IOException {
         if (createIndexFirst) {
-            createIndex(CommonName.CONFIG_INDEX, AnomalyDetectionIndices.getAnomalyDetectorMappings());
+            createIndex(CommonName.CONFIG_INDEX, ADIndexManagement.getConfigMappings());
         }
 
         for (AnomalyDetector detector : detectors) {
@@ -126,19 +127,19 @@ public abstract class ADIntegTestCase extends OpenSearchIntegTestCase {
     }
 
     public void createDetectorIndex() throws IOException {
-        createIndex(CommonName.CONFIG_INDEX, AnomalyDetectionIndices.getAnomalyDetectorMappings());
+        createIndex(CommonName.CONFIG_INDEX, ADIndexManagement.getConfigMappings());
     }
 
     public void createADResultIndex() throws IOException {
-        createIndex(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS, AnomalyDetectionIndices.getAnomalyResultMappings());
+        createIndex(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS, ADIndexManagement.getAnomalyResultMappings());
     }
 
     public void createCustomADResultIndex(String indexName) throws IOException {
-        createIndex(indexName, AnomalyDetectionIndices.getAnomalyResultMappings());
+        createIndex(indexName, ADIndexManagement.getAnomalyResultMappings());
     }
 
     public void createDetectionStateIndex() throws IOException {
-        createIndex(ADCommonName.DETECTION_STATE_INDEX, AnomalyDetectionIndices.getDetectionStateMappings());
+        createIndex(ADCommonName.DETECTION_STATE_INDEX, ADIndexManagement.getDetectionStateMappings());
     }
 
     public void createTestDataIndex(String indexName) {

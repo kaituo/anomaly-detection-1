@@ -31,10 +31,8 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.cluster.HashRing;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.ModelManager;
 import org.opensearch.ad.ml.SingleStreamModelIdMapper;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -43,7 +41,9 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.transport.TransportAddress;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
 import org.opensearch.transport.ConnectTransportException;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportException;
@@ -69,7 +69,7 @@ public class RCFPollingTests extends AbstractADTest {
     private ClusterService clusterService;
     private HashRing hashRing;
     private TransportAddress transportAddress1;
-    private ModelManager manager;
+    private ADModelManager manager;
     private TransportService transportService;
     private PlainActionFuture<RCFPollingResponse> future;
     private RCFPollingTransportAction action;
@@ -104,7 +104,7 @@ public class RCFPollingTests extends AbstractADTest {
         clusterService = mock(ClusterService.class);
         hashRing = mock(HashRing.class);
         transportAddress1 = new TransportAddress(new InetSocketAddress(InetAddress.getByName("1.2.3.4"), 9300));
-        manager = mock(ModelManager.class);
+        manager = mock(ADModelManager.class);
         transportService = new TransportService(
             Settings.EMPTY,
             mock(Transport.class),

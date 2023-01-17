@@ -21,7 +21,6 @@ import java.util.List;
 import org.junit.Ignore;
 import org.opensearch.Version;
 import org.opensearch.action.ActionRequestValidationException;
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.ADTaskProfile;
@@ -35,13 +34,14 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.InternalSettingsPlugin;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
 import com.google.common.collect.ImmutableList;
 
 public class ADTaskProfileTests extends OpenSearchSingleNodeTestCase {
     @Override
     protected Collection<Class<? extends Plugin>> getPlugins() {
-        return pluginList(InternalSettingsPlugin.class, AnomalyDetectorPlugin.class);
+        return pluginList(InternalSettingsPlugin.class, TimeSeriesAnalyticsPlugin.class);
     }
 
     @Override

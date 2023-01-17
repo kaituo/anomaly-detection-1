@@ -12,8 +12,8 @@
 package org.opensearch.ad.e2e;
 
 import static org.opensearch.ad.TestHelpers.toHttpEntity;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.BACKOFF_MINUTES;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_BACKOFF_MINUTES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE;
 
 import java.io.File;
 import java.io.FileReader;
@@ -61,8 +61,8 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
 
         settingCommand.startObject();
         settingCommand.startObject("persistent");
-        settingCommand.field(MAX_RETRY_FOR_UNRESPONSIVE_NODE.getKey(), 100_000);
-        settingCommand.field(BACKOFF_MINUTES.getKey(), 0);
+        settingCommand.field(AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE.getKey(), 100_000);
+        settingCommand.field(AD_BACKOFF_MINUTES.getKey(), 0);
         settingCommand.endObject();
         settingCommand.endObject();
         Request request = new Request("PUT", "/_cluster/settings");

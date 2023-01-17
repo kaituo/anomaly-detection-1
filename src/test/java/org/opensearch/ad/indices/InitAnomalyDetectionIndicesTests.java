@@ -32,7 +32,6 @@ import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.client.IndicesAdminClient;
@@ -52,7 +51,7 @@ public class InitAnomalyDetectionIndicesTests extends AbstractADTest {
     ThreadPool threadPool;
     Settings settings;
     DiscoveryNodeFilterer nodeFilter;
-    AnomalyDetectionIndices adIndices;
+    ADIndexManagement adIndices;
     ClusterName clusterName;
     ClusterState clusterState;
     IndicesAdminClient indicesClient;
@@ -97,7 +96,7 @@ public class InitAnomalyDetectionIndicesTests extends AbstractADTest {
         clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
-        adIndices = new AnomalyDetectionIndices(
+        adIndices = new ADIndexManagement(
             client,
             clusterService,
             threadPool,
@@ -186,7 +185,7 @@ public class InitAnomalyDetectionIndicesTests extends AbstractADTest {
         } else if (index.equals(ADCommonName.CHECKPOINT_INDEX_NAME)) {
             adIndices.initCheckpointIndex(listener);
         } else if (index.equals(CommonName.JOB_INDEX)) {
-            adIndices.initAnomalyDetectorJobIndex(listener);
+            adIndices.initJobIndex(listener);
         } else {
             adIndices.initDefaultAnomalyResultIndexIfAbsent(listener);
         }

@@ -19,7 +19,7 @@ import static org.mockito.Mockito.when;
 import static org.opensearch.ad.TestHelpers.createClusterState;
 import static org.opensearch.ad.TestHelpers.createSearchResponse;
 import static org.opensearch.ad.TestHelpers.matchAllRequest;
-import static org.opensearch.ad.indices.AnomalyDetectionIndices.ALL_AD_RESULTS_INDEX_PATTERN;
+import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

@@ -9,7 +9,6 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.TreeMap;
 
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.io.stream.NamedWriteableAwareStreamInput;
@@ -18,12 +17,14 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.InternalSettingsPlugin;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.model.Entity;
 
 public class ADEntityTaskProfileTests extends OpenSearchSingleNodeTestCase {
 
     @Override
     protected Collection<Class<? extends Plugin>> getPlugins() {
-        return pluginList(InternalSettingsPlugin.class, AnomalyDetectorPlugin.class);
+        return pluginList(InternalSettingsPlugin.class, TimeSeriesAnalyticsPlugin.class);
     }
 
     @Override

@@ -12,7 +12,7 @@
 package org.opensearch.ad.transport;
 
 import org.opensearch.action.ActionType;
-import org.opensearch.ad.constant.CommonValue;
+import org.opensearch.ad.constant.ADCommonValue;
 
 /**
  * ADStatsNodesAction class
@@ -20,7 +20,7 @@ import org.opensearch.ad.constant.CommonValue;
 public class ADStatsNodesAction extends ActionType<ADStatsNodesResponse> {
 
     // Internal Action which is not used for public facing RestAPIs.
-    public static final String NAME = CommonValue.INTERNAL_ACTION_PREFIX + "stats/nodes";
+    public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "stats/nodes";
     public static final ADStatsNodesAction INSTANCE = new ADStatsNodesAction();
 
     /**

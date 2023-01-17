@@ -18,25 +18,28 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.apache.commons.lang.builder.ToStringBuilder;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
-import org.opensearch.ad.constant.CommonValue;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
-import org.opensearch.common.io.stream.Writeable;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.ParseField;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.timeseries.annotation.Generated;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.constant.CommonValue;
+import org.opensearch.timeseries.model.DataByFeatureId;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.FeatureData;
+import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.util.ParseUtils;
 
 import com.google.common.base.Objects;
@@ -44,7 +47,7 @@ import com.google.common.base.Objects;
 /**
  * Include result returned from RCF model and feature data.
  */
-public class AnomalyResult implements ToXContentObject, Writeable {
+public class AnomalyResult extends IndexableResult {
     private static final Logger LOG = LogManager.getLogger(ThresholdingResult.class);
     public static final String PARSE_FIELD_NAME = "AnomalyResult";
     public static final NamedXContentRegistry.Entry XCONTENT_REGISTRY = new NamedXContentRegistry.Entry(
@@ -65,31 +68,9 @@ public class AnomalyResult implements ToXContentObject, Writeable {
     // unused currently. added since odfe 1.4
     public static final String IS_ANOMALY_FIELD = "is_anomaly";
 
-    private final String detectorId;
     private final String taskId;
     private final Double anomalyScore;
     private final Double anomalyGrade;
-    private final Double confidence;
-    private final List<FeatureData> featureData;
-    private final Instant dataStartTime;
-    private final Instant dataEndTime;
-    private final Instant executionStartTime;
-    private final Instant executionEndTime;
-    private final String error;
-    private final Entity entity;
-    private User user;
-    private final Integer schemaVersion;
-    /*
-     * model id for easy aggregations of entities. The front end needs to query
-     * for entities ordered by the descending order of anomaly grades and the
-     * number of anomalies. After supporting multi-category fields, it is hard
-     * to write such queries since the entity information is stored in a nested
-     * object array. Also, the front end has all code/queries/ helper functions
-     * in place to rely on a single key per entity combo. This PR adds model id
-     * to anomaly result to help the transition to multi-categorical field less
-     * painful.
-     */
-    private final String modelId;
 
     /**
      * the approximate time of current anomaly. We might detect anomaly late.  This field
@@ -213,7 +194,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
         Instant executionStartTime,
         Instant executionEndTime,
         String error,
-        Entity entity,
+        Optional<Entity> entity,
         User user,
         Integer schemaVersion,
         String modelId
@@ -243,7 +224,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
     }
 
     public AnomalyResult(
-        String detectorId,
+        String id,
         String taskId,
         Double anomalyScore,
         Double anomalyGrade,
@@ -254,7 +235,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
         Instant executionStartTime,
         Instant executionEndTime,
         String error,
-        Entity entity,
+        Optional<Entity> entity,
         User user,
         Integer schemaVersion,
         String modelId,
@@ -264,21 +245,23 @@ public class AnomalyResult implements ToXContentObject, Writeable {
         List<ExpectedValueList> expectedValuesList,
         Double threshold
     ) {
-        this.detectorId = detectorId;
+        super(
+            id,
+            confidence,
+            featureData,
+            dataStartTime,
+            dataEndTime,
+            executionStartTime,
+            executionEndTime,
+            error,
+            entity,
+            user,
+            schemaVersion,
+            modelId
+        );
         this.taskId = taskId;
         this.anomalyScore = anomalyScore;
         this.anomalyGrade = anomalyGrade;
-        this.confidence = confidence;
-        this.featureData = featureData;
-        this.dataStartTime = dataStartTime;
-        this.dataEndTime = dataEndTime;
-        this.executionStartTime = executionStartTime;
-        this.executionEndTime = executionEndTime;
-        this.error = error;
-        this.entity = entity;
-        this.user = user;
-        this.schemaVersion = schemaVersion;
-        this.modelId = modelId;
         this.approxAnomalyStartTime = approxAnomalyStartTime;
         this.relevantAttribution = relevantAttribution;
         this.pastValues = pastValues;
@@ -325,7 +308,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
         Instant executionStartTime,
         Instant executionEndTime,
         String error,
-        Entity entity,
+        Optional<Entity> entity,
         User user,
         Integer schemaVersion,
         String modelId,
@@ -439,33 +422,10 @@ public class AnomalyResult implements ToXContentObject, Writeable {
     }
 
     public AnomalyResult(StreamInput input) throws IOException {
-        this.detectorId = input.readString();
+        super(input);
         this.anomalyScore = input.readDouble();
         this.anomalyGrade = input.readDouble();
-        this.confidence = input.readDouble();
-        int featureSize = input.readVInt();
-        this.featureData = new ArrayList<>(featureSize);
-        for (int i = 0; i < featureSize; i++) {
-            featureData.add(new FeatureData(input));
-        }
-        this.dataStartTime = input.readInstant();
-        this.dataEndTime = input.readInstant();
-        this.executionStartTime = input.readInstant();
-        this.executionEndTime = input.readInstant();
-        this.error = input.readOptionalString();
-        if (input.readBoolean()) {
-            this.entity = new Entity(input);
-        } else {
-            this.entity = null;
-        }
-        if (input.readBoolean()) {
-            this.user = new User(input);
-        } else {
-            user = null;
-        }
-        this.schemaVersion = input.readInt();
         this.taskId = input.readOptionalString();
-        this.modelId = input.readOptionalString();
 
         // if anomaly is caused by current input, we don't show approximate time
         this.approxAnomalyStartTime = input.readOptionalInstant();
@@ -507,7 +467,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         XContentBuilder xContentBuilder = builder
             .startObject()
-            .field(DETECTOR_ID_FIELD, detectorId)
+            .field(DETECTOR_ID_FIELD, configId)
             .field(CommonName.SCHEMA_VERSION_FIELD, schemaVersion);
         // In normal AD result, we always pass data start/end times. In custom result index,
         // we need to write/delete a dummy AD result to verify if user has write permission
@@ -543,7 +503,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
         if (error != null) {
             xContentBuilder.field(CommonName.ERROR_FIELD, error);
         }
-        if (entity != null) {
+        if (entity.isPresent()) {
             xContentBuilder.field(CommonName.ENTITY_FIELD, entity);
         }
         if (user != null) {
@@ -697,7 +657,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
             executionStartTime,
             executionEndTime,
             error,
-            entity,
+            Optional.ofNullable(entity),
             user,
             schemaVersion,
             modelId,
@@ -717,7 +677,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
         if (o == null || getClass() != o.getClass())
             return false;
         AnomalyResult that = (AnomalyResult) o;
-        return Objects.equal(detectorId, that.detectorId)
+        return Objects.equal(configId, that.configId)
             && Objects.equal(taskId, that.taskId)
             && Objects.equal(anomalyScore, that.anomalyScore)
             && Objects.equal(anomalyGrade, that.anomalyGrade)
@@ -742,7 +702,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
     public int hashCode() {
         return Objects
             .hashCode(
-                detectorId,
+                configId,
                 taskId,
                 anomalyScore,
                 anomalyGrade,
@@ -767,7 +727,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
     @Override
     public String toString() {
         return new ToStringBuilder(this)
-            .append("detectorId", detectorId)
+            .append("detectorId", configId)
             .append("taskId", taskId)
             .append("anomalyScore", anomalyScore)
             .append("anomalyGrade", anomalyGrade)
@@ -789,7 +749,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
     }
 
     public String getDetectorId() {
-        return detectorId;
+        return configId;
     }
 
     public String getTaskId() {
@@ -802,42 +762,6 @@ public class AnomalyResult implements ToXContentObject, Writeable {
 
     public Double getAnomalyGrade() {
         return anomalyGrade;
-    }
-
-    public Double getConfidence() {
-        return confidence;
-    }
-
-    public List<FeatureData> getFeatureData() {
-        return featureData;
-    }
-
-    public Instant getDataStartTime() {
-        return dataStartTime;
-    }
-
-    public Instant getDataEndTime() {
-        return dataEndTime;
-    }
-
-    public Instant getExecutionStartTime() {
-        return executionStartTime;
-    }
-
-    public Instant getExecutionEndTime() {
-        return executionEndTime;
-    }
-
-    public String getError() {
-        return error;
-    }
-
-    public Entity getEntity() {
-        return entity;
-    }
-
-    public String getModelId() {
-        return modelId;
     }
 
     public Instant getApproAnomalyStartTime() {
@@ -866,6 +790,7 @@ public class AnomalyResult implements ToXContentObject, Writeable {
      * @return whether the anomaly result is important when the anomaly grade is not 0
      * or error is there.
      */
+    @Override
     public boolean isHighPriority() {
         // AnomalyResult.toXContent won't record Double.NaN and thus make it null
         return (getAnomalyGrade() != null && getAnomalyGrade() > 0) || getError() != null;
@@ -873,34 +798,10 @@ public class AnomalyResult implements ToXContentObject, Writeable {
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        out.writeString(detectorId);
+        super.writeTo(out);
         out.writeDouble(anomalyScore);
         out.writeDouble(anomalyGrade);
-        out.writeDouble(confidence);
-        out.writeVInt(featureData.size());
-        for (FeatureData feature : featureData) {
-            feature.writeTo(out);
-        }
-        out.writeInstant(dataStartTime);
-        out.writeInstant(dataEndTime);
-        out.writeInstant(executionStartTime);
-        out.writeInstant(executionEndTime);
-        out.writeOptionalString(error);
-        if (entity != null) {
-            out.writeBoolean(true);
-            entity.writeTo(out);
-        } else {
-            out.writeBoolean(false);
-        }
-        if (user != null) {
-            out.writeBoolean(true); // user exists
-            user.writeTo(out);
-        } else {
-            out.writeBoolean(false); // user does not exist
-        }
-        out.writeInt(schemaVersion);
         out.writeOptionalString(taskId);
-        out.writeOptionalString(modelId);
 
         out.writeOptionalInstant(approxAnomalyStartTime);
 

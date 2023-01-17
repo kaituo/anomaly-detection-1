@@ -41,6 +41,8 @@ import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.index.IndexingPressure;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.transport.ResultBulkResponse;
 import org.opensearch.transport.TransportService;
 
 public class ADResultBulkTransportActionTests extends AbstractADTest {
@@ -118,7 +120,7 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
             return null;
         }).when(client).execute(any(), any(), any());
 
-        PlainActionFuture<ADResultBulkResponse> future = PlainActionFuture.newFuture();
+        PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
 
         future.actionGet();
@@ -151,7 +153,7 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
             return null;
         }).when(client).execute(any(), any(), any());
 
-        PlainActionFuture<ADResultBulkResponse> future = PlainActionFuture.newFuture();
+        PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
 
         future.actionGet();
@@ -190,7 +192,7 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
             return null;
         }).when(client).execute(any(), any(), any());
 
-        PlainActionFuture<ADResultBulkResponse> future = PlainActionFuture.newFuture();
+        PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
 
         future.actionGet();
@@ -210,6 +212,6 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
 
     public void testValidateRequest() {
         ActionRequestValidationException e = new ADResultBulkRequest().validate();
-        assertThat(e.validationErrors(), hasItem(ADResultBulkRequest.NO_REQUESTS_ADDED_ERR));
+        assertThat(e.validationErrors(), hasItem(CommonMessages.NO_REQUESTS_ADDED_ERR));
     }
 }

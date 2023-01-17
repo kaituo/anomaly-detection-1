@@ -114,7 +114,7 @@ public final class AnomalyDetectorSettings {
             Setting.Property.Dynamic
         );
 
-    public static final Setting<Integer> MAX_RETRY_FOR_UNRESPONSIVE_NODE = Setting
+    public static final Setting<Integer> AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE = Setting
         .intSetting(
             "plugins.anomaly_detection.max_retry_for_unresponsive_node",
             LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
@@ -131,7 +131,7 @@ public final class AnomalyDetectorSettings {
             Setting.Property.Dynamic
         );
 
-    public static final Setting<TimeValue> BACKOFF_MINUTES = Setting
+    public static final Setting<TimeValue> AD_BACKOFF_MINUTES = Setting
         .positiveTimeSetting(
             "plugins.anomaly_detection.backoff_minutes",
             LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_MINUTES,
@@ -733,11 +733,6 @@ public final class AnomalyDetectorSettings {
     // pagination size
     public static final Setting<Integer> PAGE_SIZE = Setting
         .intSetting("plugins.anomaly_detection.page_size", 1_000, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
-
-    // within an interval, how many percents are used to process requests.
-    // 1.0 means we use all of the detection interval to process requests.
-    // to ensure we don't block next interval, it is better to set it less than 1.0.
-    public static final float INTERVAL_RATIO_FOR_REQUESTS = 0.9f;
 
     // ======================================
     // preview setting

@@ -25,7 +25,6 @@ import org.opensearch.Version;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -38,7 +37,7 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.timeseries.constant.CommonName;
 
 public class CustomIndexTests extends AbstractADTest {
-    AnomalyDetectionIndices adIndices;
+    ADIndexManagement adIndices;
     Client client;
     ClusterService clusterService;
     DiscoveryNodeFilterer nodeFilter;
@@ -81,7 +80,7 @@ public class CustomIndexTests extends AbstractADTest {
 
         nodeFilter = mock(DiscoveryNodeFilterer.class);
 
-        adIndices = new AnomalyDetectionIndices(
+        adIndices = new ADIndexManagement(
             client,
             clusterService,
             threadPool,
@@ -187,7 +186,7 @@ public class CustomIndexTests extends AbstractADTest {
         attribution_nested_mapping.put("feature_id", Collections.singletonMap("type", "keyword"));
         mappings.put(AnomalyResult.RELEVANT_ATTRIBUTION_FIELD, attribution_mapping);
 
-        mappings.put(CommonName.SCHEMA_VERSION_FIELD, Collections.singletonMap("type", "integer"));
+        mappings.put(org.opensearch.timeseries.constant.CommonName.SCHEMA_VERSION_FIELD, Collections.singletonMap("type", "integer"));
 
         mappings.put(AnomalyResult.TASK_ID_FIELD, Collections.singletonMap("type", "keyword"));
 

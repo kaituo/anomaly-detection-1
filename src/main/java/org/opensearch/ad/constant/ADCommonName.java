@@ -35,7 +35,7 @@ public class ADCommonName {
     // ======================================
     public static final String ANOMALY_DETECTOR = "[Anomaly Detector]";
     public static final String AD_PLUGIN_NAME = "opensearch-anomaly-detection";
-    public static final String AD_PLUGIN_NAME_FOR_TEST = "org.opensearch.ad.AnomalyDetectorPlugin";
+    public static final String AD_PLUGIN_NAME_FOR_TEST = "org.opensearch.timeseries.TimeSeriesAnalyticsPlugin";
     public static final String AD_PLUGIN_VERSION_FOR_TEST = "NA";
 
     // ======================================
@@ -77,18 +77,6 @@ public class ADCommonName {
     public static final String CANCEL_TASK = "cancel_task";
 
     // ======================================
-    // Query
-    // ======================================
-    // Used in finding the max timestamp
-    public static final String AGG_NAME_MAX_TIME = "max_timefield";
-    // Used in finding the min timestamp
-    public static final String AGG_NAME_MIN_TIME = "min_timefield";
-    // date histogram aggregation name
-    public static final String DATE_HISTOGRAM = "date_histogram";
-    // feature aggregation name
-    public static final String FEATURE_AGGS = "feature_aggs";
-
-    // ======================================
     // Used in stats API
     // ======================================
     public static final String DETECTOR_ID_KEY = "detector_id";
@@ -102,11 +90,8 @@ public class ADCommonName {
     public static final String CONFIDENCE_JSON_KEY = "confidence";
     public static final String ANOMALY_GRADE_JSON_KEY = "anomalyGrade";
     public static final String QUEUE_JSON_KEY = "queue";
-    // ======================================
-    // Used for backward-compatibility in messaging
-    // ======================================
-    public static final String EMPTY_FIELD = "";
 
+    // ======================================
     // Validation
     // ======================================
     // detector validation aspect

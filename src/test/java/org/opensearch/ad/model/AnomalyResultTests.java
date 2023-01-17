@@ -11,13 +11,10 @@
 
 package org.opensearch.ad.model;
 
-import static org.opensearch.test.OpenSearchTestCase.randomDouble;
-
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Locale;
 
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.io.stream.NamedWriteableAwareStreamInput;
@@ -26,6 +23,7 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.InternalSettingsPlugin;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
 import com.google.common.base.Objects;
 
@@ -33,7 +31,7 @@ public class AnomalyResultTests extends OpenSearchSingleNodeTestCase {
 
     @Override
     protected Collection<Class<? extends Plugin>> getPlugins() {
-        return pluginList(InternalSettingsPlugin.class, AnomalyDetectorPlugin.class);
+        return pluginList(InternalSettingsPlugin.class, TimeSeriesAnalyticsPlugin.class);
     }
 
     @Override

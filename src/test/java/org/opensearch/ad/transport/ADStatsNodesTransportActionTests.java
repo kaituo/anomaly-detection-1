@@ -26,19 +26,13 @@ import java.util.Set;
 import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.stats.ADStat;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.stats.ADStats;
-import org.opensearch.ad.stats.InternalStatNames;
 import org.opensearch.ad.stats.suppliers.CounterSupplier;
 import org.opensearch.ad.stats.suppliers.IndexStatusSupplier;
 import org.opensearch.ad.stats.suppliers.ModelsOnNodeSupplier;
 import org.opensearch.ad.stats.suppliers.SettableSupplier;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.ClientUtil;
-import org.opensearch.ad.util.IndexUtils;
 import org.opensearch.ad.util.Throttler;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
@@ -49,13 +43,19 @@ import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.monitor.jvm.JvmStats;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.caching.HCCacheProvider;
+import org.opensearch.timeseries.stats.InternalStatNames;
+import org.opensearch.timeseries.stats.TimeSeriesStat;
+import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 import org.opensearch.transport.TransportService;
 
 public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
 
     private ADStatsNodesTransportAction action;
     private ADStats adStats;
-    private Map<String, ADStat<?>> statsMap;
+    private Map<String, TimeSeriesStat<?>> statsMap;
     private String clusterStatName1, clusterStatName2;
     private String nodeStatName1, nodeStatName2;
     private ADTaskManager adTaskManager;
@@ -76,8 +76,8 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
             clusterService(),
             indexNameResolver
         );
-        ModelManager modelManager = mock(ModelManager.class);
-        CacheProvider cacheProvider = mock(CacheProvider.class);
+        ADModelManager modelManager = mock(ADModelManager.class);
+        HCCacheProvider cacheProvider = mock(HCCacheProvider.class);
         EntityCache cache = mock(EntityCache.class);
         when(cacheProvider.get()).thenReturn(cache);
 
@@ -94,13 +94,16 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        statsMap = new HashMap<String, ADStat<?>>() {
+        statsMap = new HashMap<String, TimeSeriesStat<?>>() {
             {
-                put(nodeStatName1, new ADStat<>(false, new CounterSupplier()));
-                put(nodeStatName2, new ADStat<>(false, new ModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService)));
-                put(clusterStatName1, new ADStat<>(true, new IndexStatusSupplier(indexUtils, "index1")));
-                put(clusterStatName2, new ADStat<>(true, new IndexStatusSupplier(indexUtils, "index2")));
-                put(InternalStatNames.JVM_HEAP_USAGE.getName(), new ADStat<>(true, new SettableSupplier()));
+                put(nodeStatName1, new TimeSeriesStat<>(false, new CounterSupplier()));
+                put(
+                    nodeStatName2,
+                    new TimeSeriesStat<>(false, new ModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService))
+                );
+                put(clusterStatName1, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index1")));
+                put(clusterStatName2, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index2")));
+                put(InternalStatNames.JVM_HEAP_USAGE.getName(), new TimeSeriesStat<>(true, new SettableSupplier()));
             }
         };
 

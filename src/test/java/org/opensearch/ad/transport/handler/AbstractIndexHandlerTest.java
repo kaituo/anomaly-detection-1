@@ -30,10 +30,8 @@ import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.transport.AnomalyResultTests;
-import org.opensearch.ad.util.ClientUtil;
-import org.opensearch.ad.util.IndexUtils;
 import org.opensearch.ad.util.Throttler;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterState;
@@ -43,6 +41,8 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 
 public abstract class AbstractIndexHandlerTest extends AbstractADTest {
     enum IndexCreation {
@@ -62,7 +62,7 @@ public abstract class AbstractIndexHandlerTest extends AbstractADTest {
     protected Client client;
 
     @Mock
-    protected AnomalyDetectionIndices anomalyDetectionIndices;
+    protected ADIndexManagement anomalyDetectionIndices;
 
     @Mock
     protected Throttler throttler;
@@ -137,8 +137,8 @@ public abstract class AbstractIndexHandlerTest extends AbstractADTest {
                     break;
             }
             return null;
-        }).when(anomalyDetectionIndices).initDefaultAnomalyResultIndexDirectly(any());
-        when(anomalyDetectionIndices.doesDefaultAnomalyResultIndexExist()).thenReturn(anomalyResultIndexExists);
+        }).when(anomalyDetectionIndices).initDefaultResultIndexDirectly(any());
+        when(anomalyDetectionIndices.doesDefaultResultIndexExist()).thenReturn(anomalyResultIndexExists);
     }
 
     protected void setUpSavingAnomalyResultIndex(boolean anomalyResultIndexExists) throws IOException {

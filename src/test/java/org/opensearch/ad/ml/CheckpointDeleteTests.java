@@ -29,13 +29,14 @@ import org.opensearch.OpenSearchException;
 import org.opensearch.action.ActionListener;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.util.ClientUtil;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.client.Client;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.ScrollableHitSource;
+import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.util.ClientUtil;
 
 import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestMapper;
 import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestState;
@@ -60,11 +61,11 @@ public class CheckpointDeleteTests extends AbstractADTest {
         PARTIAL_FAILURE
     }
 
-    private CheckpointDao checkpointDao;
+    private ADCheckpointDao checkpointDao;
     private Client client;
     private ClientUtil clientUtil;
     private Gson gson;
-    private AnomalyDetectionIndices indexUtil;
+    private ADIndexManagement indexUtil;
     private String detectorId;
     private int maxCheckpointBytes;
     private GenericObjectPool<LinkedBuffer> objectPool;
@@ -82,12 +83,12 @@ public class CheckpointDeleteTests extends AbstractADTest {
     @Before
     public void setUp() throws Exception {
         super.setUp();
-        super.setUpLog4jForJUnit(CheckpointDao.class);
+        super.setUpLog4jForJUnit(ADCheckpointDao.class);
 
         client = mock(Client.class);
         clientUtil = mock(ClientUtil.class);
         gson = null;
-        indexUtil = mock(AnomalyDetectionIndices.class);
+        indexUtil = mock(ADIndexManagement.class);
         detectorId = "123";
         maxCheckpointBytes = 1_000_000;
 
@@ -97,7 +98,7 @@ public class CheckpointDeleteTests extends AbstractADTest {
         objectPool = mock(GenericObjectPool.class);
         int deserializeRCFBufferSize = 512;
         anomalyRate = 0.005;
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             ADCommonName.CHECKPOINT_INDEX_NAME,
@@ -157,7 +158,7 @@ public class CheckpointDeleteTests extends AbstractADTest {
             return null;
         }).when(client).execute(eq(DeleteByQueryAction.INSTANCE), any(), any());
 
-        checkpointDao.deleteModelCheckpointByDetectorId(detectorId);
+        checkpointDao.deleteModelCheckpointByConfigId(detectorId);
     }
 
     public void testDeleteSingleNormal() throws Exception {
@@ -172,7 +173,7 @@ public class CheckpointDeleteTests extends AbstractADTest {
 
     public void testDeleteSingleResultFailure() throws Exception {
         delete_by_detector_id_template(DeleteExecutionMode.FAILURE);
-        assertTrue(testAppender.containsMessage(CheckpointDao.NOT_ABLE_TO_DELETE_LOG_MSG));
+        assertTrue(testAppender.containsMessage(CheckpointDao.NOT_ABLE_TO_DELETE_CHECKPOINT_MSG));
     }
 
     public void testDeleteSingleResultPartialFailure() throws Exception {

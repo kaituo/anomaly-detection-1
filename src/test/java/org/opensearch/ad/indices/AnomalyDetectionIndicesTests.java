@@ -18,13 +18,10 @@ import java.util.Collections;
 import org.junit.Before;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
-import org.opensearch.ad.util.RestHandlerUtils;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.xcontent.XContentFactory;
@@ -36,7 +33,7 @@ import org.opensearch.timeseries.constant.CommonName;
 
 public class AnomalyDetectionIndicesTests extends OpenSearchIntegTestCase {
 
-    private AnomalyDetectionIndices indices;
+    private ADIndexManagement indices;
     private Settings settings;
     private DiscoveryNodeFilterer nodeFilter;
 
@@ -44,7 +41,7 @@ public class AnomalyDetectionIndicesTests extends OpenSearchIntegTestCase {
     // unregistered settings like AD_RESULT_HISTORY_MAX_DOCS.
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return Collections.singletonList(AnomalyDetectorPlugin.class);
+        return Collections.singletonList(TimeSeriesAnalyticsPlugin.class);
     }
 
     @Before
@@ -59,7 +56,7 @@ public class AnomalyDetectionIndicesTests extends OpenSearchIntegTestCase {
 
         nodeFilter = new DiscoveryNodeFilterer(clusterService());
 
-        indices = new AnomalyDetectionIndices(
+        indices = new ADIndexManagement(
             client(),
             clusterService(),
             client().threadPool(),
@@ -70,7 +67,7 @@ public class AnomalyDetectionIndicesTests extends OpenSearchIntegTestCase {
     }
 
     public void testAnomalyDetectorIndexNotExists() {
-        boolean exists = indices.doesAnomalyDetectorIndexExist();
+        boolean exists = indices.doesConfigIndexExist();
         assertFalse(exists);
     }
 
@@ -105,7 +102,7 @@ public class AnomalyDetectionIndicesTests extends OpenSearchIntegTestCase {
     }
 
     public void testAnomalyResultIndexNotExists() {
-        boolean exists = indices.doesDefaultAnomalyResultIndexExist();
+        boolean exists = indices.doesDefaultResultIndexExist();
         assertFalse(exists);
     }
 
@@ -155,10 +152,10 @@ public class AnomalyDetectionIndicesTests extends OpenSearchIntegTestCase {
     }
 
     public void testGetDetectionStateIndexMapping() throws IOException {
-        String detectorIndexMappings = AnomalyDetectionIndices.getAnomalyDetectorMappings();
+        String detectorIndexMappings = ADIndexManagement.getConfigMappings();
         detectorIndexMappings = detectorIndexMappings
             .substring(detectorIndexMappings.indexOf("\"properties\""), detectorIndexMappings.lastIndexOf("}"));
-        String detectionStateIndexMapping = AnomalyDetectionIndices.getDetectionStateMappings();
+        String detectionStateIndexMapping = ADIndexManagement.getDetectionStateMappings();
         assertTrue(detectionStateIndexMapping.contains(detectorIndexMappings));
     }
 }
