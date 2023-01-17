@@ -13,9 +13,9 @@ package org.opensearch.ad;
 
 import static org.opensearch.action.DocWriteResponse.Result.CREATED;
 import static org.opensearch.action.DocWriteResponse.Result.UPDATED;
-import static org.opensearch.ad.AnomalyDetectorPlugin.AD_THREAD_POOL_NAME;
-import static org.opensearch.ad.util.RestHandlerUtils.XCONTENT_WITH_TYPE;
 import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedToken;
+import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME;
+import static org.opensearch.timeseries.util.RestHandlerUtils.XCONTENT_WITH_TYPE;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -31,18 +31,14 @@ import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.model.ADTaskState;
-import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetectorJob;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyResultAction;
 import org.opensearch.ad.transport.AnomalyResultRequest;
 import org.opensearch.ad.transport.AnomalyResultResponse;
 import org.opensearch.ad.transport.AnomalyResultTransportAction;
-import org.opensearch.ad.util.SecurityUtil;
 import org.opensearch.client.Client;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
@@ -63,6 +59,10 @@ import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.InternalFailure;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.function.ExecutorFunction;
+import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.model.TaskState;
+import org.opensearch.timeseries.util.SecurityUtil;
 
 import com.google.common.base.Throwables;
 
@@ -77,9 +77,9 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
     private Client client;
     private ThreadPool threadPool;
     private ConcurrentHashMap<String, Integer> detectorEndRunExceptionCount;
-    private AnomalyDetectionIndices anomalyDetectionIndices;
+    private ADIndexManagement anomalyDetectionIndices;
     private ADTaskManager adTaskManager;
-    private NodeStateManager nodeStateManager;
+    private ADNodeStateManager nodeStateManager;
     private ExecuteADResultResponseRecorder recorder;
 
     public static AnomalyDetectorJobRunner getJobRunnerInstance() {
@@ -117,11 +117,11 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         this.adTaskManager = adTaskManager;
     }
 
-    public void setAnomalyDetectionIndices(AnomalyDetectionIndices anomalyDetectionIndices) {
+    public void setAnomalyDetectionIndices(ADIndexManagement anomalyDetectionIndices) {
         this.anomalyDetectionIndices = anomalyDetectionIndices;
     }
 
-    public void setNodeStateManager(NodeStateManager nodeStateManager) {
+    public void setNodeStateManager(ADNodeStateManager nodeStateManager) {
         this.nodeStateManager = nodeStateManager;
     }
 
@@ -148,12 +148,12 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
 
         Runnable runnable = () -> {
             try {
-                nodeStateManager.getAnomalyDetector(detectorId, ActionListener.wrap(detectorOptional -> {
+                nodeStateManager.getConfig(detectorId, ActionListener.wrap(detectorOptional -> {
                     if (!detectorOptional.isPresent()) {
                         log.error(new ParameterizedMessage("fail to get detector [{}]", detectorId));
                         return;
                     }
-                    AnomalyDetector detector = detectorOptional.get();
+                    Config detector = detectorOptional.get();
 
                     if (jobParameter.getLockDurationSeconds() != null) {
                         lockService
@@ -222,7 +222,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         Instant detectionStartTime,
         Instant executionStartTime,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         String detectorId = jobParameter.getName();
         if (lock == null) {
@@ -293,7 +293,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         String user,
         List<String> roles,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         // using one thread in the write threadpool
         try (InjectSecurity injectSecurity = new InjectSecurity(detectorId, settings, client.threadPool().getThreadContext())) {
@@ -400,7 +400,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         Instant executionStartTime,
         Exception exception,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         String detectorId = jobParameter.getName();
         if (exception instanceof EndRunException) {
@@ -489,7 +489,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         Instant executionStartTime,
         EndRunException exception,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         String detectorId = jobParameter.getName();
         detectorEndRunExceptionCount.remove(detectorId);
@@ -507,14 +507,14 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
                 executionStartTime,
                 error,
                 true,
-                ADTaskState.STOPPED.name(),
+                TaskState.STOPPED.name(),
                 recorder,
                 detector
             )
         );
     }
 
-    private void stopAdJob(String detectorId, AnomalyDetectorFunction function) {
+    private void stopAdJob(String detectorId, ExecutorFunction function) {
         GetRequest getRequest = new GetRequest(CommonName.JOB_INDEX).id(detectorId);
         ActionListener<GetResponse> listener = ActionListener.wrap(response -> {
             if (response.isExists()) {
@@ -573,7 +573,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         Instant executionStartTime,
         AnomalyResultResponse response,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         String detectorId = jobParameter.getName();
         detectorEndRunExceptionCount.remove(detectorId);
@@ -598,7 +598,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         Exception exception,
         boolean releaseLock,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         try {
             String errorMessage = exception instanceof TimeSeriesException
@@ -629,7 +629,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         String errorMessage,
         boolean releaseLock,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         indexAnomalyResultException(
             jobParameter,
@@ -655,7 +655,7 @@ public class AnomalyDetectorJobRunner implements ScheduledJobRunner {
         boolean releaseLock,
         String taskState,
         ExecuteADResultResponseRecorder recorder,
-        AnomalyDetector detector
+        Config detector
     ) {
         try {
             recorder.indexAnomalyResultException(detectionStartTime, executionStartTime, errorMessage, taskState, detector);

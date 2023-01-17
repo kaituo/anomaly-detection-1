@@ -30,7 +30,6 @@ import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.ad.model.AnomalyResult;
-import org.opensearch.ad.model.Entity;
 import org.opensearch.ad.model.EntityProfile;
 import org.opensearch.ad.model.EntityProfileName;
 import org.opensearch.ad.model.EntityState;
@@ -39,8 +38,6 @@ import org.opensearch.ad.settings.ADNumericSetting;
 import org.opensearch.ad.transport.EntityProfileAction;
 import org.opensearch.ad.transport.EntityProfileRequest;
 import org.opensearch.ad.transport.EntityProfileResponse;
-import org.opensearch.ad.util.MultiResponsesDelegateActionListener;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.routing.Preference;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
@@ -56,8 +53,11 @@ import org.opensearch.search.aggregations.AggregationBuilders;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 
 public class EntityProfileRunner extends AbstractProfileRunner {
     private final Logger logger = LogManager.getLogger(EntityProfileRunner.class);
@@ -460,7 +460,7 @@ public class EntityProfileRunner extends AbstractProfileRunner {
 
         SearchSourceBuilder source = new SearchSourceBuilder()
             .query(boolQueryBuilder)
-            .aggregation(AggregationBuilders.max(ADCommonName.AGG_NAME_MAX_TIME).field(CommonName.EXECUTION_END_TIME_FIELD))
+            .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(CommonName.EXECUTION_END_TIME_FIELD))
             .trackTotalHits(false)
             .size(0);
 

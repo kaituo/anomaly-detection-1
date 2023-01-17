@@ -22,6 +22,7 @@ import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.common.io.stream.Writeable;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.timeseries.model.ModelProfile;
 
 public class ModelProfileOnNode implements Writeable, ToXContent {
     // field name in toXContent

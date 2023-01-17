@@ -17,17 +17,17 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.ad.transport.SearchTopAnomalyResultAction;
 import org.opensearch.ad.transport.SearchTopAnomalyResultRequest;
-import org.opensearch.ad.util.RestHandlerUtils;
 import org.opensearch.client.node.NodeClient;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 
 import com.google.common.collect.ImmutableList;
 
@@ -40,7 +40,7 @@ public class RestSearchTopAnomalyResultAction extends BaseRestHandler {
         .format(
             Locale.ROOT,
             "%s/{%s}/%s/%s",
-            AnomalyDetectorPlugin.AD_BASE_DETECTORS_URI,
+            TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI,
             RestHandlerUtils.DETECTOR_ID,
             RestHandlerUtils.RESULTS,
             RestHandlerUtils.TOP_ANOMALIES

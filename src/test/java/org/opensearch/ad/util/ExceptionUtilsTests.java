@@ -18,6 +18,7 @@ import org.opensearch.index.shard.ShardId;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.util.ExceptionUtil;
 
 public class ExceptionUtilsTests extends OpenSearchTestCase {
 

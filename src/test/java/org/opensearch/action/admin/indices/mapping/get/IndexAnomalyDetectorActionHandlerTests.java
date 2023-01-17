@@ -44,14 +44,15 @@ import org.opensearch.action.search.SearchAction;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.NodeStateManager;
+import org.opensearch.ad.ADNodeStateManager;
+import org.opensearch.ad.AbstractADTest;
+import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.feature.SearchFeatureDao;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorActionHandler;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.IndexAnomalyDetectorResponse;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.node.NodeClient;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -86,7 +87,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
     private SecurityClientUtil clientUtil;
     private TransportService transportService;
     private ActionListener<IndexAnomalyDetectorResponse> channel;
-    private AnomalyDetectionIndices anomalyDetectionIndices;
+    private ADIndexManagement anomalyDetectionIndices;
     private String detectorId;
     private Long seqNo;
     private Long primaryTerm;
@@ -123,14 +124,14 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         clusterService = mock(ClusterService.class);
         clientMock = spy(new NodeClient(settings, threadPool));
         clock = mock(Clock.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
         transportService = mock(TransportService.class);
 
         channel = mock(ActionListener.class);
 
-        anomalyDetectionIndices = mock(AnomalyDetectionIndices.class);
-        when(anomalyDetectionIndices.doesAnomalyDetectorIndexExist()).thenReturn(true);
+        anomalyDetectionIndices = mock(ADIndexManagement.class);
+        when(anomalyDetectionIndices.doesConfigIndexExist()).thenReturn(true);
 
         detectorId = "123";
         seqNo = 0L;
@@ -203,7 +204,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         // we can also use spy to overstep the final methods
         NodeClient client = getCustomNodeClient(detectorResponse, userIndexResponse, detector, threadPool);
         NodeClient clientSpy = spy(client);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
 
         handler = new IndexAnomalyDetectorActionHandler(
@@ -240,7 +241,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         String errorMsg = String
             .format(
                 Locale.ROOT,
-                IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_SINGLE_ENTITY_DETECTORS_PREFIX_MSG,
+                IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_SINGLE_STREAM_DETECTORS_PREFIX_MSG,
                 maxSingleEntityAnomalyDetectors
             );
         assertTrue(value.getMessage().contains(errorMsg));
@@ -281,7 +282,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
                 }
             }
         };
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
 
         handler = new IndexAnomalyDetectorActionHandler(
@@ -315,7 +316,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         verify(channel).onFailure(response.capture());
         Exception value = response.getValue();
         assertTrue(value instanceof Exception);
-        assertTrue(value.getMessage().contains(IndexAnomalyDetectorActionHandler.CATEGORICAL_FIELD_TYPE_ERR_MSG));
+        assertTrue(value.getMessage().contains(CommonMessages.CATEGORICAL_FIELD_TYPE_ERR_MSG));
     }
 
     @SuppressWarnings("unchecked")
@@ -368,7 +369,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         };
 
         NodeClient clientSpy = spy(client);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
 
         handler = new IndexAnomalyDetectorActionHandler(
@@ -463,7 +464,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         };
 
         NodeClient clientSpy = spy(client);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         ClusterName clusterName = new ClusterName("test");
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().build()).build();
@@ -503,7 +504,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         if (fieldTypeName.equals(CommonName.IP_TYPE) || fieldTypeName.equals(CommonName.KEYWORD_TYPE)) {
             assertTrue(value.getMessage().contains(IndexAnomalyDetectorActionHandler.NO_DOCS_IN_USER_INDEX_MSG));
         } else {
-            assertTrue(value.getMessage().contains(IndexAnomalyDetectorActionHandler.CATEGORICAL_FIELD_TYPE_ERR_MSG));
+            assertTrue(value.getMessage().contains(CommonMessages.CATEGORICAL_FIELD_TYPE_ERR_MSG));
         }
     }
 
@@ -572,7 +573,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         // we can also use spy to overstep the final methods
         NodeClient client = getCustomNodeClient(detectorResponse, userIndexResponse, detector, threadPool);
         NodeClient clientSpy = spy(client);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
 
         handler = new IndexAnomalyDetectorActionHandler(
@@ -606,11 +607,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         Exception value = response.getValue();
         assertTrue(value instanceof IllegalArgumentException);
         String errorMsg = String
-            .format(
-                Locale.ROOT,
-                IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_MULTI_ENTITY_DETECTORS_PREFIX_MSG,
-                maxMultiEntityAnomalyDetectors
-            );
+            .format(Locale.ROOT, IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG, maxMultiEntityAnomalyDetectors);
         assertTrue(value.getMessage().contains(errorMsg));
     }
 
@@ -695,7 +692,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         verify(channel).onFailure(response.capture());
         Exception value = response.getValue();
         assertTrue(value instanceof IllegalArgumentException);
-        assertTrue(value.getMessage().contains(IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_MULTI_ENTITY_DETECTORS_PREFIX_MSG));
+        assertTrue(value.getMessage().contains(IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG));
     }
 
     @Ignore

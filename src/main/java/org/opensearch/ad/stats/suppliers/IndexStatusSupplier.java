@@ -13,7 +13,7 @@ package org.opensearch.ad.stats.suppliers;
 
 import java.util.function.Supplier;
 
-import org.opensearch.ad.util.IndexUtils;
+import org.opensearch.timeseries.util.IndexUtils;
 
 /**
  * IndexStatusSupplier provides the status of an index as the value

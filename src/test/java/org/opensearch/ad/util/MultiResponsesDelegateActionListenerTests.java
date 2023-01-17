@@ -24,6 +24,7 @@ import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.DetectorProfile;
 import org.opensearch.ad.model.EntityAnomalyResult;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 
 public class MultiResponsesDelegateActionListenerTests extends OpenSearchTestCase {
 

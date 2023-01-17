@@ -14,7 +14,6 @@ package org.opensearch.ad.rest;
 import static org.hamcrest.Matchers.containsString;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.DUPLICATE_DETECTOR_MSG;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.NO_DOCS_IN_USER_INDEX_MSG;
-import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -31,7 +30,6 @@ import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 import org.hamcrest.CoreMatchers;
 import org.junit.Assert;
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.AnomalyDetectorRestTestCase;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
@@ -481,14 +479,14 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         updateClusterSettings(ADEnabledSetting.AD_ENABLED, false);
         Exception ex = expectThrows(
             ResponseException.class,
-            () -> TestHelpers.makeRequest(client(), "GET", AnomalyDetectorPlugin.LEGACY_AD_BASE + "/stats", ImmutableMap.of(), "", null)
+            () -> TestHelpers.makeRequest(client(), "GET", TimeSeriesAnalyticsPlugin.LEGACY_AD_BASE + "/stats", ImmutableMap.of(), "", null)
         );
         assertThat(ex.getMessage(), containsString(ADCommonMessages.DISABLED_ERR_MSG));
 
         updateClusterSettings(ADEnabledSetting.AD_ENABLED, true);
 
         Response statsResponse = TestHelpers
-            .makeRequest(client(), "GET", AnomalyDetectorPlugin.LEGACY_AD_BASE + "/stats", ImmutableMap.of(), "", null);
+            .makeRequest(client(), "GET", TimeSeriesAnalyticsPlugin.LEGACY_AD_BASE + "/stats", ImmutableMap.of(), "", null);
 
         assertEquals("Get stats failed", RestStatus.OK, TestHelpers.restStatus(statsResponse));
     }
@@ -510,7 +508,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
                 .makeRequest(
                     client(),
                     "POST",
-                    String.format(Locale.ROOT, TestHelpers.AD_BASE_PREVIEW_URI, input.getDetectorId()),
+                    String.format(Locale.ROOT, TestHelpers.AD_BASE_PREVIEW_URI, input.getConfigId()),
                     ImmutableMap.of(),
                     TestHelpers.toHttpEntity(input),
                     null
@@ -895,7 +893,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                FAIL_TO_FIND_CONFIG_MSG,
+                CommonMessages.FAIL_TO_FIND_CONFIG_MSG,
                 () -> TestHelpers
                     .makeRequest(
                         client(),
@@ -997,7 +995,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                FAIL_TO_FIND_CONFIG_MSG,
+                CommonMessages.FAIL_TO_FIND_CONFIG_MSG,
                 () -> TestHelpers
                     .makeRequest(
                         client(),

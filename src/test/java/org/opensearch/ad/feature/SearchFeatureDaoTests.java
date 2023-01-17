@@ -57,13 +57,9 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
-import org.opensearch.ad.AnomalyDetectorPlugin;
-import org.opensearch.ad.NodeStateManager;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.time.DateFormatter;
@@ -135,7 +131,7 @@ public class SearchFeatureDaoTests {
     @Mock
     private Max max;
     @Mock
-    private NodeStateManager stateManager;
+    private ADNodeStateManager stateManager;
 
     @Mock
     private AnomalyDetector detector;
@@ -163,7 +159,7 @@ public class SearchFeatureDaoTests {
         imputer = new LinearUniformImputer(false);
 
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(AnomalyDetectorPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();
@@ -173,12 +169,12 @@ public class SearchFeatureDaoTests {
         settings = Settings.EMPTY;
 
         when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
         searchFeatureDao = spy(
             new SearchFeatureDao(client, xContent, imputer, clientUtil, settings, null, AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE)
@@ -378,7 +374,7 @@ public class SearchFeatureDaoTests {
 
         ActionListener<Optional<Long>> listener = mock(ActionListener.class);
         Entity entity = Entity.createSingleAttributeEntity("field", "app_1");
-        searchFeatureDao.getEntityMinDataTime(detector, entity, listener);
+        searchFeatureDao.getMinDataTime(detector, entity, listener);
 
         ArgumentCaptor<Optional<Long>> captor = ArgumentCaptor.forClass(Optional.class);
         verify(listener).onResponse(captor.capture());

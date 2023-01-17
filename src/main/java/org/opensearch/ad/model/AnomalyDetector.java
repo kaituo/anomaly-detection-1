@@ -150,18 +150,18 @@ public class AnomalyDetector extends Config {
         checkAndThrowValidationErrors(ValidationAspect.DETECTOR);
 
         if (detectionInterval == null) {
-            errorMessage = ADCommonMessages.NULL_DETECTION_INTERVAL;
-            issueType = ValidationIssueType.DETECTION_INTERVAL;
-        } else if (((IntervalTimeConfiguration) detectionInterval).getInterval() <= 0) {
-            errorMessage = ADCommonMessages.INVALID_DETECTION_INTERVAL;
-            issueType = ValidationIssueType.DETECTION_INTERVAL;
-        }
+                        errorMessage = ADCommonMessages.NULL_DETECTION_INTERVAL;
+                        issueType = ValidationIssueType.DETECTION_INTERVAL;
+                    } else if (((IntervalTimeConfiguration) detectionInterval).getInterval() <= 0) {
+                        errorMessage = ADCommonMessages.INVALID_DETECTION_INTERVAL;
+                        issueType = ValidationIssueType.DETECTION_INTERVAL;
+                    }
 
-        int maxCategoryFields = ADNumericSetting.maxCategoricalFields();
-        if (categoryFields != null && categoryFields.size() > maxCategoryFields) {
-            errorMessage = CommonMessages.getTooManyCategoricalFieldErr(maxCategoryFields);
-            issueType = ValidationIssueType.CATEGORY;
-        }
+                    int maxCategoryFields = ADNumericSetting.maxCategoricalFields();
+                    if (categoryFields != null && categoryFields.size() > maxCategoryFields) {
+                        errorMessage = CommonMessages.getTooManyCategoricalFieldErr(maxCategoryFields);
+                        issueType = ValidationIssueType.CATEGORY;
+                    }
 
         checkAndThrowValidationErrors(ValidationAspect.DETECTOR);
 

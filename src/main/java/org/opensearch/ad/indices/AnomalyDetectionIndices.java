@@ -20,7 +20,7 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.ANOMALY_RESULTS
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.CHECKPOINT_INDEX_MAPPING_FILE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_PRIMARY_SHARDS;
 import static org.opensearch.timeseries.constant.CommonMessages.CAN_NOT_FIND_RESULT_INDEX;
-import static org.opensearch.timeseries.settings.TimeSeriesSettings.INDEX_MAPPING_FILE;
+import static org.opensearch.timeseries.settings.TimeSeriesSettings.CONFIG_INDEX_MAPPING_FILE;
 import static org.opensearch.timeseries.settings.TimeSeriesSettings.JOBS_INDEX_MAPPING_FILE;
 
 import java.io.IOException;
@@ -59,10 +59,10 @@ import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.support.GroupedActionListener;
 import org.opensearch.action.support.IndicesOptions;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.constant.CommonValue;
+import org.opensearch.timeseries.constant.CommonValue;
 import org.opensearch.ad.model.AnomalyResult;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.function.ExecutorFunction;
+import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.LocalNodeClusterManagerListener;
@@ -238,7 +238,7 @@ public class AnomalyDetectionIndices implements LocalNodeClusterManagerListener 
      * @throws IOException IOException if mapping file can't be read correctly
      */
     public static String getAnomalyDetectorMappings() throws IOException {
-        URL url = AnomalyDetectionIndices.class.getClassLoader().getResource(INDEX_MAPPING_FILE);
+        URL url = AnomalyDetectionIndices.class.getClassLoader().getResource(CONFIG_INDEX_MAPPING_FILE);
         return Resources.toString(url, Charsets.UTF_8);
     }
 
@@ -321,7 +321,7 @@ public class AnomalyDetectionIndices implements LocalNodeClusterManagerListener 
         return clusterService.state().metadata().hasIndex(indexName);
     }
 
-    public <T> void initCustomResultIndexAndExecute(String resultIndex, AnomalyDetectorFunction function, ActionListener<T> listener) {
+    public <T> void initCustomResultIndexAndExecute(String resultIndex, ExecutorFunction function, ActionListener<T> listener) {
         try {
             if (!doesIndexExist(resultIndex)) {
                 initCustomAnomalyResultIndexDirectly(resultIndex, ActionListener.wrap(response -> {
@@ -351,7 +351,7 @@ public class AnomalyDetectionIndices implements LocalNodeClusterManagerListener 
         }
     }
 
-    public <T> void validateCustomResultIndexAndExecute(String resultIndex, AnomalyDetectorFunction function, ActionListener<T> listener) {
+    public <T> void validateCustomResultIndexAndExecute(String resultIndex, ExecutorFunction function, ActionListener<T> listener) {
         try {
             if (!isValidResultIndexMapping(resultIndex)) {
                 logger.warn("Can't create detector with custom result index {} as its mapping is invalid", resultIndex);
@@ -389,7 +389,7 @@ public class AnomalyDetectionIndices implements LocalNodeClusterManagerListener 
         String securityLogId,
         String user,
         List<String> roles,
-        AnomalyDetectorFunction function,
+        ExecutorFunction function,
         ActionListener<T> listener
     ) {
         if (!doesIndexExist(resultIndex)) {

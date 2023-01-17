@@ -82,6 +82,13 @@ public class CommonMessages {
     // rate limiting worker
     // ======================================
     public static final String BUG_RESPONSE = "We might have bugs.";
+    // TODO: change it on frotnend, backend, and document
     public static final String MEMORY_LIMIT_EXCEEDED_ERR_MSG = "AD models memory usage exceeds our limit.";
+
+    // ======================================
+    // transport
+    // ======================================
+    public static final String CONFIG_ID_MISSING_MSG = "config ID is missing";
+    public static final String MODEL_ID_MISSING_MSG = "model ID is missing";
 
 }

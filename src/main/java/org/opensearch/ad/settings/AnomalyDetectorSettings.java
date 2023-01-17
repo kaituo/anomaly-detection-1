@@ -114,7 +114,7 @@ public final class AnomalyDetectorSettings {
             Setting.Property.Dynamic
         );
 
-    public static final Setting<Integer> MAX_RETRY_FOR_UNRESPONSIVE_NODE = Setting
+    public static final Setting<Integer> AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE = Setting
         .intSetting(
             "plugins.anomaly_detection.max_retry_for_unresponsive_node",
             LegacyOpenDistroAnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
@@ -131,7 +131,7 @@ public final class AnomalyDetectorSettings {
             Setting.Property.Dynamic
         );
 
-    public static final Setting<TimeValue> BACKOFF_MINUTES = Setting
+    public static final Setting<TimeValue> AD_BACKOFF_MINUTES = Setting
         .positiveTimeSetting(
             "plugins.anomaly_detection.backoff_minutes",
             LegacyOpenDistroAnomalyDetectorSettings.BACKOFF_MINUTES,
@@ -177,8 +177,6 @@ public final class AnomalyDetectorSettings {
     public static final String ANOMALY_DETECTION_STATE_INDEX_MAPPING_FILE = "mappings/anomaly-detection-state.json";
     public static final String CHECKPOINT_INDEX_MAPPING_FILE = "mappings/anomaly-checkpoint.json";
 
-    public static final Duration HOURLY_MAINTENANCE = Duration.ofHours(1);
-
     // saving checkpoint every 12 hours.
     // To support 1 million entities in 36 data nodes, each node has roughly 28K models.
     // In each hour, we roughly need to save 2400 models. Since each model saving can
@@ -217,16 +215,7 @@ public final class AnomalyDetectorSettings {
     /// start seeing some results.
     public static final int NUM_MIN_SAMPLES = 32;
 
-    // The threshold for splitting RCF models in single-stream detectors.
-    // The smallest machine in the Amazon managed service has 1GB heap.
-    // With the setting, the desired model size there is of 2 MB.
-    // By default, we can have at most 5 features. Since the default shingle size
-    // is 8, we have at most 40 dimensions in RCF. In our current RCF setting,
-    // 30 trees, and bounding box cache ratio 0, 40 dimensions use 449KB.
-    // Users can increase the number of features to 10 and shingle size to 60,
-    // 30 trees, bounding box cache ratio 0, 600 dimensions use 1.8 MB.
-    // Since these sizes are smaller than the threshold 2 MB, we won't split models
-    // even in the smallest machine.
+
     public static final double DESIRED_MODEL_SIZE_PERCENTAGE = 0.002;
 
     public static final Setting<Double> MODEL_MAX_SIZE_PERCENTAGE = Setting
@@ -720,24 +709,12 @@ public final class AnomalyDetectorSettings {
     // to risk OOM for the flexibility.
     public static final int MAX_CHECKPOINT_BYTES = 30_000_000;
 
-    // Sets the cap on the number of buffer that can be allocated by the rcf deserialization
-    // buffer pool. Each buffer is of 512 bytes. Memory occupied by 20 buffers is 10.24 KB.
-    public static final int MAX_TOTAL_RCF_SERIALIZATION_BUFFERS = 20;
-
-    // the size of the buffer used for rcf deserialization
-    public static final int SERIALIZATION_BUFFER_BYTES = 512;
-
     // ======================================
     // pagination setting
     // ======================================
     // pagination size
     public static final Setting<Integer> PAGE_SIZE = Setting
         .intSetting("plugins.anomaly_detection.page_size", 1_000, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
-
-    // within an interval, how many percents are used to process requests.
-    // 1.0 means we use all of the detection interval to process requests.
-    // to ensure we don't block next interval, it is better to set it less than 1.0.
-    public static final float INTERVAL_RATIO_FOR_REQUESTS = 0.9f;
 
     // ======================================
     // preview setting

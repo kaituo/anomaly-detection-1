@@ -11,10 +11,8 @@
 
 package org.opensearch.ad.model;
 
-import static org.opensearch.ad.constant.ADCommonMessages.INVALID_RESULT_INDEX_PREFIX;
 import static org.opensearch.ad.constant.ADCommonName.CUSTOM_RESULT_INDEX_PREFIX;
 import static org.opensearch.ad.model.AnomalyDetector.MAX_RESULT_INDEX_NAME_SIZE;
-import static org.opensearch.timeseries.constant.CommonMessages.INVALID_CHAR_IN_RESULT_INDEX_NAME;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -30,6 +28,8 @@ import org.opensearch.index.query.MatchAllQueryBuilder;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.ValidationException;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
@@ -39,18 +39,18 @@ import com.google.common.collect.ImmutableMap;
 public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
 
     public void testParseAnomalyDetector() throws IOException {
-        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), Instant.now());
+        Config detector = TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), Instant.now());
         String detectorString = TestHelpers.xContentBuilderToString(detector.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
         LOG.info(detectorString);
         detectorString = detectorString
             .replaceFirst("\\{", String.format(Locale.ROOT, "{\"%s\":\"%s\",", randomAlphaOfLength(5), randomAlphaOfLength(5)));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
     }
 
     public void testParseAnomalyDetectorWithCustomIndex() throws IOException {
         String resultIndex = ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + "test";
-        AnomalyDetector detector = TestHelpers
+        Config detector = TestHelpers
             .randomDetector(
                 ImmutableList.of(TestHelpers.randomFeature()),
                 randomAlphaOfLength(5),
@@ -63,7 +63,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
         LOG.info(detectorString);
         detectorString = detectorString
             .replaceFirst("\\{", String.format(Locale.ROOT, "{\"%s\":\"%s\",", randomAlphaOfLength(5), randomAlphaOfLength(5)));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals("Parsing result index doesn't work", resultIndex, parsedDetector.getCustomResultIndex());
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
     }
@@ -86,30 +86,30 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     public void testParseAnomalyDetectorWithoutParams() throws IOException {
-        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), Instant.now());
+        Config detector = TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), Instant.now());
         String detectorString = TestHelpers.xContentBuilderToString(detector.toXContent(TestHelpers.builder()));
         LOG.info(detectorString);
         detectorString = detectorString
             .replaceFirst("\\{", String.format(Locale.ROOT, "{\"%s\":\"%s\",", randomAlphaOfLength(5), randomAlphaOfLength(5)));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
     }
 
     public void testParseAnomalyDetectorWithCustomDetectionDelay() throws IOException {
-        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), Instant.now());
+        Config detector = TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), Instant.now());
         String detectorString = TestHelpers.xContentBuilderToString(detector.toXContent(TestHelpers.builder()));
         LOG.info(detectorString);
         TimeValue detectionInterval = new TimeValue(1, TimeUnit.MINUTES);
         TimeValue detectionWindowDelay = new TimeValue(10, TimeUnit.MINUTES);
         detectorString = detectorString
             .replaceFirst("\\{", String.format(Locale.ROOT, "{\"%s\":\"%s\",", randomAlphaOfLength(5), randomAlphaOfLength(5)));
-        AnomalyDetector parsedDetector = AnomalyDetector
+        Config parsedDetector = Config
             .parse(TestHelpers.parser(detectorString), detector.getId(), detector.getVersion(), detectionInterval, detectionWindowDelay);
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
     }
 
     public void testParseSingleEntityAnomalyDetector() throws IOException {
-        AnomalyDetector detector = TestHelpers
+        Config detector = TestHelpers
             .randomAnomalyDetector(
                 ImmutableList.of(TestHelpers.randomFeature()),
                 TestHelpers.randomUiMetadata(),
@@ -120,12 +120,12 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
         LOG.info(detectorString);
         detectorString = detectorString
             .replaceFirst("\\{", String.format(Locale.ROOT, "{\"%s\":\"%s\",", randomAlphaOfLength(5), randomAlphaOfLength(5)));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
     }
 
     public void testParseHistoricalAnomalyDetectorWithoutUser() throws IOException {
-        AnomalyDetector detector = TestHelpers
+        Config detector = TestHelpers
             .randomAnomalyDetector(
                 ImmutableList.of(TestHelpers.randomFeature()),
                 TestHelpers.randomUiMetadata(),
@@ -137,7 +137,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
         LOG.info(detectorString);
         detectorString = detectorString
             .replaceFirst("\\{", String.format(Locale.ROOT, "{\"%s\":\"%s\",", randomAlphaOfLength(5), randomAlphaOfLength(5)));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
     }
 
@@ -150,7 +150,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             + "\"unit\":\"Minutes\"}},\"shingle_size\":4,\"schema_version\":-1203962153,\"ui_metadata\":{\"JbAaV\":{\"feature_id\":"
             + "\"rIFjS\",\"feature_name\":\"QXCmS\",\"feature_enabled\":false,\"aggregation_query\":{\"aa\":"
             + "{\"value_count\":{\"field\":\"ok\"}}}}},\"last_update_time\":1568396089028}";
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertTrue(parsedDetector.getFilterQuery() instanceof MatchAllQueryBuilder);
     }
 
@@ -164,7 +164,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             + "{\"JbAaV\":{\"feature_id\":\"rIFjS\",\"feature_name\":\"QXCmS\",\"feature_enabled\":false,"
             + "\"aggregation_query\":{\"aa\":{\"value_count\":{\"field\":\"ok\"}}}}},"
             + "\"last_update_time\":1568396089028}";
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertTrue(parsedDetector.getFilterQuery() instanceof MatchAllQueryBuilder);
     }
 
@@ -189,7 +189,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             + "{\"period\":{\"interval\":425,\"unit\":\"Minutes\"}},\"schema_version\":-1203962153,\"ui_metadata\":"
             + "{\"JbAaV\":{\"feature_id\":\"rIFjS\",\"feature_name\":\"QXCmS\",\"feature_enabled\":false,"
             + "\"aggregation_query\":{\"aa\":{\"value_count\":{\"field\":\"ok\"}}}}},\"last_update_time\":1568396089028}";
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString), "id", 1L, null, null);
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString), "id", 1L, null, null);
         assertTrue(parsedDetector.getFilterQuery() instanceof MatchAllQueryBuilder);
         assertEquals((long) parsedDetector.getShingleSize(), (long) TimeSeriesSettings.DEFAULT_SHINGLE_SIZE);
     }
@@ -252,7 +252,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             + "{\"value_count\":{\"field\":\"ok\"}}}}},\"last_update_time\":1568396089028}";
         IllegalArgumentException exception = expectThrows(
             IllegalArgumentException.class,
-            () -> AnomalyDetector.parse(TestHelpers.parser(detectorString))
+            () -> Config.parse(TestHelpers.parser(detectorString))
         );
         assertEquals(
             String.format(Locale.ROOT, ADCommonMessages.INVALID_TIME_CONFIGURATION_UNITS, ChronoUnit.MILLIS),
@@ -271,7 +271,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             + "{\"value_count\":{\"field\":\"ok\"}}}}},\"last_update_time\":1568396089028}";
         IllegalArgumentException exception = expectThrows(
             IllegalArgumentException.class,
-            () -> AnomalyDetector.parse(TestHelpers.parser(detectorString))
+            () -> Config.parse(TestHelpers.parser(detectorString))
         );
         assertEquals(
             String.format(Locale.ROOT, ADCommonMessages.INVALID_TIME_CONFIGURATION_UNITS, ChronoUnit.MILLIS),
@@ -280,17 +280,17 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     public void testParseAnomalyDetectorWithNullUiMetadata() throws IOException {
-        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(null, Instant.now());
+        Config detector = TestHelpers.randomAnomalyDetector(null, Instant.now());
         String detectorString = TestHelpers.xContentBuilderToString(detector.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
         assertNull(parsedDetector.getUiMetadata());
     }
 
     public void testParseAnomalyDetectorWithEmptyUiMetadata() throws IOException {
-        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of(), Instant.now());
+        Config detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of(), Instant.now());
         String detectorString = TestHelpers.xContentBuilderToString(detector.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals("Parsing anomaly detector doesn't work", detector, parsedDetector);
     }
 
@@ -513,7 +513,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
     public void testInvalidWindowDelay() {
         IllegalArgumentException exception = expectThrows(
             IllegalArgumentException.class,
-            () -> new AnomalyDetector(
+            () -> new Config(
                 randomAlphaOfLength(10),
                 randomLong(),
                 randomAlphaOfLength(20),
@@ -538,22 +538,21 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     public void testNullFeatures() throws IOException {
-        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(null, null, Instant.now().truncatedTo(ChronoUnit.SECONDS));
+        Config detector = TestHelpers.randomAnomalyDetector(null, null, Instant.now().truncatedTo(ChronoUnit.SECONDS));
         String detectorString = TestHelpers.xContentBuilderToString(detector.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals(0, parsedDetector.getFeatureAttributes().size());
     }
 
     public void testEmptyFeatures() throws IOException {
-        AnomalyDetector detector = TestHelpers
-            .randomAnomalyDetector(ImmutableList.of(), null, Instant.now().truncatedTo(ChronoUnit.SECONDS));
+        Config detector = TestHelpers.randomAnomalyDetector(ImmutableList.of(), null, Instant.now().truncatedTo(ChronoUnit.SECONDS));
         String detectorString = TestHelpers.xContentBuilderToString(detector.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString));
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString));
         assertEquals(0, parsedDetector.getFeatureAttributes().size());
     }
 
     public void testGetShingleSize() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
+        Config anomalyDetector = new Config(
             randomAlphaOfLength(5),
             randomLong(),
             randomAlphaOfLength(5),
@@ -577,7 +576,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     public void testGetShingleSizeReturnsDefaultValue() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
+        Config anomalyDetector = new Config(
             randomAlphaOfLength(5),
             randomLong(),
             randomAlphaOfLength(5),
@@ -601,7 +600,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     public void testNullFeatureAttributes() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
+        Config anomalyDetector = new Config(
             randomAlphaOfLength(5),
             randomLong(),
             randomAlphaOfLength(5),
@@ -625,43 +624,22 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
         assertEquals(0, anomalyDetector.getFeatureAttributes().size());
     }
 
-    public void testValidateResultIndex() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
-            randomAlphaOfLength(5),
-            randomLong(),
-            randomAlphaOfLength(5),
-            randomAlphaOfLength(5),
-            randomAlphaOfLength(5),
-            ImmutableList.of(randomAlphaOfLength(5)),
-            ImmutableList.of(TestHelpers.randomFeature()),
-            TestHelpers.randomQuery(),
-            TestHelpers.randomIntervalTimeConfiguration(),
-            TestHelpers.randomIntervalTimeConfiguration(),
-            null,
-            null,
-            1,
-            Instant.now(),
-            null,
-            TestHelpers.randomUser(),
-            null,
-            TestHelpers.randomImputationOption()
-        );
-
-        String errorMessage = anomalyDetector.validateCustomResultIndex("abc");
-        assertEquals(INVALID_RESULT_INDEX_PREFIX, errorMessage);
+    public void testValidateResultIndex() {
+        String errorMessage = Config.validateCustomResultIndex("abc");
+        assertEquals(ADCommonMessages.INVALID_RESULT_INDEX_PREFIX, errorMessage);
 
         StringBuilder resultIndexNameBuilder = new StringBuilder(CUSTOM_RESULT_INDEX_PREFIX);
         for (int i = 0; i < MAX_RESULT_INDEX_NAME_SIZE - CUSTOM_RESULT_INDEX_PREFIX.length(); i++) {
             resultIndexNameBuilder.append("a");
         }
-        assertNull(anomalyDetector.validateCustomResultIndex(resultIndexNameBuilder.toString()));
+        assertNull(Config.validateCustomResultIndex(resultIndexNameBuilder.toString()));
         resultIndexNameBuilder.append("a");
 
-        errorMessage = anomalyDetector.validateCustomResultIndex(resultIndexNameBuilder.toString());
-        assertEquals(AnomalyDetector.INVALID_RESULT_INDEX_NAME_SIZE, errorMessage);
+        errorMessage = Config.validateCustomResultIndex(resultIndexNameBuilder.toString());
+        assertEquals(Config.INVALID_RESULT_INDEX_NAME_SIZE, errorMessage);
 
-        errorMessage = anomalyDetector.validateCustomResultIndex(CUSTOM_RESULT_INDEX_PREFIX + "abc#");
-        assertEquals(INVALID_CHAR_IN_RESULT_INDEX_NAME, errorMessage);
+        errorMessage = Config.validateCustomResultIndex(CUSTOM_RESULT_INDEX_PREFIX + "abc#");
+        assertEquals(CommonMessages.INVALID_CHAR_IN_RESULT_INDEX_NAME, errorMessage);
     }
 
     public void testParseAnomalyDetectorWithNoDescription() throws IOException {
@@ -672,7 +650,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             + "\"unit\":\"Minutes\"}},\"shingle_size\":4,\"schema_version\":-1203962153,\"ui_metadata\":{\"JbAaV\":{\"feature_id\":"
             + "\"rIFjS\",\"feature_name\":\"QXCmS\",\"feature_enabled\":false,\"aggregation_query\":{\"aa\":"
             + "{\"value_count\":{\"field\":\"ok\"}}}}},\"last_update_time\":1568396089028}";
-        AnomalyDetector parsedDetector = AnomalyDetector.parse(TestHelpers.parser(detectorString), "id", 1L, null, null);
+        Config parsedDetector = Config.parse(TestHelpers.parser(detectorString), "id", 1L, null, null);
         assertEquals(parsedDetector.getDescription(), "");
     }
 }

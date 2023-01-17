@@ -17,6 +17,8 @@ import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.common.io.stream.Writeable;
+import org.opensearch.timeseries.ratelimit.QueuedRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 
 public class ResultWriteRequest extends QueuedRequest implements Writeable {
     private final AnomalyResult result;

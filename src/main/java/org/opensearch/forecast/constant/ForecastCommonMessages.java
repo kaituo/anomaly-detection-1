@@ -45,6 +45,7 @@ public class ForecastCommonMessages {
     // ======================================
     // Used for custom forecast result index
     // ======================================
+    public static String CAN_NOT_FIND_RESULT_INDEX = "Can't find result index ";
     public static String INVALID_RESULT_INDEX_PREFIX = "Result index must start with " + CUSTOM_RESULT_INDEX_PREFIX;
     public static String INVALID_CHAR_IN_RESULT_INDEX_NAME =
         "Result index name has invalid character. Valid characters are a-z, 0-9, -(hyphen) and _(underscore)";
@@ -53,9 +54,4 @@ public class ForecastCommonMessages {
     // Task
     // ======================================
     public static String FORECASTER_IS_RUNNING = "Forecaster is already running";
-
-    // ======================================
-    // transport
-    // ======================================
-    public static final String FORECAST_ID_MISSING_MSG = "forecaster ID is missing";
 }

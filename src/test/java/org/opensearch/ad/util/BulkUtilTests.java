@@ -25,6 +25,7 @@ import org.opensearch.index.Index;
 import org.opensearch.index.engine.VersionConflictEngineException;
 import org.opensearch.index.shard.ShardId;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.util.BulkUtil;
 
 public class BulkUtilTests extends OpenSearchTestCase {
     public void testGetFailedIndexRequest() {

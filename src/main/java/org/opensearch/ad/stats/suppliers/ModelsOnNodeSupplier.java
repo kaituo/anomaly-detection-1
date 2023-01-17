@@ -11,10 +11,10 @@
 
 package org.opensearch.ad.stats.suppliers;
 
-import static org.opensearch.ad.ml.ModelState.LAST_CHECKPOINT_TIME_KEY;
-import static org.opensearch.ad.ml.ModelState.LAST_USED_TIME_KEY;
-import static org.opensearch.ad.ml.ModelState.MODEL_TYPE_KEY;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_MODEL_SIZE_PER_NODE;
+import static org.opensearch.timeseries.ml.ModelState.LAST_CHECKPOINT_TIME_KEY;
+import static org.opensearch.timeseries.ml.ModelState.LAST_USED_TIME_KEY;
+import static org.opensearch.timeseries.ml.ModelState.MODEL_TYPE_KEY;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,19 +26,21 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.opensearch.ad.caching.CacheProvider;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.timeseries.caching.HCCacheProvider;
 import org.opensearch.timeseries.constant.CommonName;
+
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 /**
  * ModelsOnNodeSupplier provides a List of ModelStates info for the models the nodes contains
  */
 public class ModelsOnNodeSupplier implements Supplier<List<Map<String, Object>>> {
-    private ModelManager modelManager;
-    private CacheProvider cache;
+    private ADModelManager modelManager;
+    private HCCacheProvider<ThresholdedRandomCutForest> cache;
     // the max number of models to return per node. Defaults to 100.
     private volatile int numModelsToReturn;
 
@@ -65,7 +67,12 @@ public class ModelsOnNodeSupplier implements Supplier<List<Map<String, Object>>>
      * @param settings node settings accessor
      * @param clusterService Cluster service accessor
      */
-    public ModelsOnNodeSupplier(ModelManager modelManager, CacheProvider cache, Settings settings, ClusterService clusterService) {
+    public ModelsOnNodeSupplier(
+        ADModelManager modelManager,
+        HCCacheProvider<ThresholdedRandomCutForest> cache,
+        Settings settings,
+        ClusterService clusterService
+    ) {
         this.modelManager = modelManager;
         this.cache = cache;
         this.numModelsToReturn = MAX_MODEL_SIZE_PER_NODE.get(settings);

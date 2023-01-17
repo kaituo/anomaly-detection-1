@@ -14,15 +14,15 @@ package org.opensearch.ad.stats.suppliers;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
+import org.opensearch.timeseries.caching.HCCacheProvider;
 
 /**
  * ModelsOnNodeCountSupplier provides the number of models a node contains
  */
 public class ModelsOnNodeCountSupplier implements Supplier<Long> {
-    private ModelManager modelManager;
-    private CacheProvider cache;
+    private ADModelManager modelManager;
+    private HCCacheProvider cache;
 
     /**
      * Constructor
@@ -30,7 +30,7 @@ public class ModelsOnNodeCountSupplier implements Supplier<Long> {
      * @param modelManager object that manages the model partitions hosted on the node
      * @param cache object that manages multi-entity detectors' models
      */
-    public ModelsOnNodeCountSupplier(ModelManager modelManager, CacheProvider cache) {
+    public ModelsOnNodeCountSupplier(ADModelManager modelManager, HCCacheProvider cache) {
         this.modelManager = modelManager;
         this.cache = cache;
     }

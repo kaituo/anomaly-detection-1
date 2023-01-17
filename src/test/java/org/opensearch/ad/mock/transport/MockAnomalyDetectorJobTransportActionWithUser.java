@@ -21,13 +21,13 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorJobActionHandler;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyDetectorJobRequest;
 import org.opensearch.ad.transport.AnomalyDetectorJobResponse;
 import org.opensearch.ad.transport.AnomalyDetectorJobTransportAction;
-import org.opensearch.ad.util.RestHandlerUtils;
+import org.opensearch.ad.transport.GetAnomalyDetectorResponse;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -38,6 +38,7 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
 public class MockAnomalyDetectorJobTransportActionWithUser extends
@@ -47,7 +48,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
     private final Client client;
     private final ClusterService clusterService;
     private final Settings settings;
-    private final AnomalyDetectionIndices anomalyDetectionIndices;
+    private final ADIndexManagement anomalyDetectionIndices;
     private final NamedXContentRegistry xContentRegistry;
     private volatile Boolean filterByEnabled;
     private ThreadContext.StoredContext context;
@@ -62,7 +63,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         Client client,
         ClusterService clusterService,
         Settings settings,
-        AnomalyDetectionIndices anomalyDetectionIndices,
+        ADIndexManagement anomalyDetectionIndices,
         NamedXContentRegistry xContentRegistry,
         ADTaskManager adTaskManager,
         ExecuteADResultResponseRecorder recorder
@@ -114,7 +115,8 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
                 ),
                 client,
                 clusterService,
-                xContentRegistry
+                xContentRegistry,
+                GetAnomalyDetectorResponse.class
             );
         } catch (Exception e) {
             logger.error(e);

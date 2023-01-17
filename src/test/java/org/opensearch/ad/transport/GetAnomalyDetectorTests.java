@@ -40,16 +40,11 @@ import org.opensearch.action.get.MultiGetItemResponse;
 import org.opensearch.action.get.MultiGetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
-import org.opensearch.ad.NodeStateManager;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
-import org.opensearch.ad.model.Entity;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
-import org.opensearch.ad.util.SecurityClientUtil;
-import org.opensearch.ad.util.Throttler;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.bytes.BytesReference;
@@ -119,7 +114,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
         Clock clock = mock(Clock.class);
         Throttler throttler = new Throttler(clock);
 
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
 
         adTaskManager = mock(ADTaskManager.class);

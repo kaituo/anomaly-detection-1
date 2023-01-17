@@ -11,8 +11,8 @@
 
 package org.opensearch.ad.rest;
 
-import static org.opensearch.ad.AnomalyDetectorPlugin.AD_BASE_URI;
-import static org.opensearch.ad.AnomalyDetectorPlugin.LEGACY_AD_BASE;
+import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_BASE_URI;
+import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.LEGACY_AD_BASE;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -22,38 +22,36 @@ import java.util.TreeSet;
 
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
-import org.opensearch.ad.stats.ADStats;
 import org.opensearch.ad.transport.ADStatsRequest;
 import org.opensearch.ad.transport.StatsAnomalyDetectorAction;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
 import org.opensearch.client.node.NodeClient;
 import org.opensearch.cluster.node.DiscoveryNode;
-import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.common.Strings;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
+import org.opensearch.timeseries.stats.Stats;
+import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
 import com.google.common.collect.ImmutableList;
 
 /**
- * RestStatsAnomalyDetectorAction consists of the REST handler to get the stats from the anomaly detector plugin.
+ * RestStatsAnomalyDetectorAction consists of the REST handler to get the stats from the time series analytics plugin.
  */
 public class RestStatsAnomalyDetectorAction extends BaseRestHandler {
 
     private static final String STATS_ANOMALY_DETECTOR_ACTION = "stats_anomaly_detector";
-    private ADStats adStats;
-    private ClusterService clusterService;
+    private Stats timeSeriesStats;
     private DiscoveryNodeFilterer nodeFilter;
 
     /**
      * Constructor
      *
-     * @param adStats ADStats object
+     * @param timeSeriesStats TimeSeriesStats object
      * @param nodeFilter util class to get eligible data nodes
      */
-    public RestStatsAnomalyDetectorAction(ADStats adStats, DiscoveryNodeFilterer nodeFilter) {
-        this.adStats = adStats;
+    public RestStatsAnomalyDetectorAction(Stats timeSeriesStats, DiscoveryNodeFilterer nodeFilter) {
+        this.timeSeriesStats = timeSeriesStats;
         this.nodeFilter = nodeFilter;
     }
 
@@ -80,7 +78,7 @@ public class RestStatsAnomalyDetectorAction extends BaseRestHandler {
     private ADStatsRequest getRequest(RestRequest request) {
         // parse the nodes the user wants to query the stats for
         String nodesIdsStr = request.param("nodeId");
-        Set<String> validStats = adStats.getStats().keySet();
+        Set<String> validStats = timeSeriesStats.getStats().keySet();
 
         ADStatsRequest adStatsRequest = null;
         if (!Strings.isEmpty(nodesIdsStr)) {

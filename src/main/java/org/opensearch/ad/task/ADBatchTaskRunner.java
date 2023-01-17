@@ -11,17 +11,7 @@
 
 package org.opensearch.ad.task;
 
-import static org.opensearch.ad.AnomalyDetectorPlugin.AD_BATCH_TASK_THREAD_POOL_NAME;
-import static org.opensearch.ad.breaker.MemoryCircuitBreaker.DEFAULT_JVM_HEAP_USAGE_THRESHOLD;
 import static org.opensearch.ad.constant.ADCommonMessages.NO_ELIGIBLE_NODE_TO_RUN_DETECTOR;
-import static org.opensearch.ad.constant.ADCommonName.AGG_NAME_MAX_TIME;
-import static org.opensearch.ad.constant.ADCommonName.AGG_NAME_MIN_TIME;
-import static org.opensearch.ad.model.ADTask.CURRENT_PIECE_FIELD;
-import static org.opensearch.ad.model.ADTask.EXECUTION_END_TIME_FIELD;
-import static org.opensearch.ad.model.ADTask.INIT_PROGRESS_FIELD;
-import static org.opensearch.ad.model.ADTask.STATE_FIELD;
-import static org.opensearch.ad.model.ADTask.TASK_PROGRESS_FIELD;
-import static org.opensearch.ad.model.ADTask.WORKER_NODE_FIELD;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.BATCH_TASK_PIECE_SIZE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE;
@@ -29,9 +19,10 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_RUNNING_ENT
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_TOP_ENTITIES_FOR_HISTORICAL_ANALYSIS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_TOP_ENTITIES_LIMIT_FOR_HISTORICAL_ANALYSIS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.NUM_MIN_SAMPLES;
-import static org.opensearch.ad.stats.InternalStatNames.JVM_HEAP_USAGE;
+import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_BATCH_TASK_THREAD_POOL_NAME;
+import static org.opensearch.timeseries.breaker.MemoryCircuitBreaker.DEFAULT_JVM_HEAP_USAGE_THRESHOLD;
+import static org.opensearch.timeseries.stats.InternalStatNames.JVM_HEAP_USAGE;
 import static org.opensearch.timeseries.stats.StatNames.AD_EXECUTING_BATCH_TASK_COUNT;
-import static org.opensearch.timeseries.util.ParseUtils.isNullOrEmpty;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -52,36 +43,22 @@ import org.opensearch.action.ActionListenerResponseHandler;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.ThreadedActionListener;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.caching.PriorityTracker;
-import org.opensearch.ad.cluster.HashRing;
 import org.opensearch.ad.constant.ADCommonMessages;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.feature.SearchFeatureDao;
-import org.opensearch.ad.feature.SinglePointFeatures;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.ADTask;
-import org.opensearch.ad.model.ADTaskState;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.model.FeatureData;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.stats.ADStats;
 import org.opensearch.ad.transport.ADBatchAnomalyResultRequest;
 import org.opensearch.ad.transport.ADBatchAnomalyResultResponse;
 import org.opensearch.ad.transport.ADBatchTaskRemoteExecutionAction;
 import org.opensearch.ad.transport.ADStatsNodeResponse;
 import org.opensearch.ad.transport.ADStatsNodesAction;
 import org.opensearch.ad.transport.ADStatsRequest;
-import org.opensearch.ad.transport.handler.AnomalyResultBulkIndexHandler;
-import org.opensearch.ad.util.ExceptionUtil;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -100,15 +77,31 @@ import org.opensearch.search.aggregations.metrics.InternalMax;
 import org.opensearch.search.aggregations.metrics.InternalMin;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.breaker.CircuitBreakerService;
+import org.opensearch.timeseries.caching.PriorityTracker;
+import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TaskCancelledException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.feature.SinglePointFeatures;
+import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.TaskState;
+import org.opensearch.timeseries.model.TimeSeriesTask;
 import org.opensearch.timeseries.stats.StatNames;
+import org.opensearch.timeseries.stats.Stats;
+import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
+import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportRequestOptions;
 import org.opensearch.transport.TransportService;
 
@@ -126,19 +119,19 @@ public class ADBatchTaskRunner {
     private final ThreadPool threadPool;
     private final Client client;
     private final SecurityClientUtil clientUtil;
-    private final ADStats adStats;
+    private final Stats adStats;
     private final ClusterService clusterService;
     private final FeatureManager featureManager;
-    private final ADCircuitBreakerService adCircuitBreakerService;
+    private final CircuitBreakerService adCircuitBreakerService;
     private final ADTaskManager adTaskManager;
-    private final AnomalyResultBulkIndexHandler anomalyResultBulkIndexHandler;
-    private final AnomalyDetectionIndices anomalyDetectionIndices;
+    private final ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> anomalyResultBulkIndexHandler;
+    private final ADIndexManagement anomalyDetectionIndices;
     private final SearchFeatureDao searchFeatureDao;
 
     private final ADTaskCacheManager adTaskCacheManager;
     private final TransportRequestOptions option;
     private final HashRing hashRing;
-    private final ModelManager modelManager;
+    private final ADModelManager modelManager;
 
     private volatile Integer maxAdBatchTaskPerNode;
     private volatile Integer pieceSize;
@@ -155,16 +148,16 @@ public class ADBatchTaskRunner {
         ClusterService clusterService,
         Client client,
         SecurityClientUtil clientUtil,
-        ADCircuitBreakerService adCircuitBreakerService,
+        CircuitBreakerService adCircuitBreakerService,
         FeatureManager featureManager,
         ADTaskManager adTaskManager,
-        AnomalyDetectionIndices anomalyDetectionIndices,
-        ADStats adStats,
-        AnomalyResultBulkIndexHandler anomalyResultBulkIndexHandler,
+        ADIndexManagement anomalyDetectionIndices,
+        Stats adStats,
+        ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> anomalyResultBulkIndexHandler,
         ADTaskCacheManager adTaskCacheManager,
         SearchFeatureDao searchFeatureDao,
         HashRing hashRing,
-        ModelManager modelManager
+        ADModelManager modelManager
     ) {
         this.settings = settings;
         this.threadPool = threadPool;
@@ -567,7 +560,7 @@ public class ADBatchTaskRunner {
                                     .executionStartTime(now)
                                     .taskProgress(0.0f)
                                     .initProgress(0.0f)
-                                    .state(ADTaskState.INIT.name())
+                                    .state(TaskState.INIT.name())
                                     .initProgress(0.0f)
                                     .lastUpdateTime(now)
                                     .startedBy(adTask.getStartedBy())
@@ -594,8 +587,8 @@ public class ADBatchTaskRunner {
                     );
             } else {
                 Map<String, Object> updatedFields = new HashMap<>();
-                updatedFields.put(STATE_FIELD, ADTaskState.INIT.name());
-                updatedFields.put(INIT_PROGRESS_FIELD, 0.0f);
+                updatedFields.put(TimeSeriesTask.STATE_FIELD, TaskState.INIT.name());
+                updatedFields.put(TimeSeriesTask.INIT_PROGRESS_FIELD, 0.0f);
                 ActionListener<ADBatchAnomalyResultResponse> workerNodeResponseListener = workerNodeResponseListener(
                     adTask,
                     transportService,
@@ -809,11 +802,11 @@ public class ADBatchTaskRunner {
                     .cleanDetectorCache(
                         adTask,
                         transportService,
-                        () -> adTaskManager.updateADTask(taskId, ImmutableMap.of(STATE_FIELD, ADTaskState.FINISHED.name()))
+                        () -> adTaskManager.updateADTask(taskId, ImmutableMap.of(TimeSeriesTask.STATE_FIELD, TaskState.FINISHED.name()))
                     );
             } else {
                 // Set entity task as FINISHED here
-                adTaskManager.updateADTask(adTask.getTaskId(), ImmutableMap.of(STATE_FIELD, ADTaskState.FINISHED.name()));
+                adTaskManager.updateADTask(adTask.getTaskId(), ImmutableMap.of(TimeSeriesTask.STATE_FIELD, TaskState.FINISHED.name()));
                 adTaskManager.entityTaskDone(adTask, null, transportService);
             }
         }, e -> {
@@ -893,15 +886,15 @@ public class ADBatchTaskRunner {
                     adTask.getTaskId(),
                     ImmutableMap
                         .of(
-                            STATE_FIELD,
-                            ADTaskState.INIT.name(),
-                            CURRENT_PIECE_FIELD,
+                            TimeSeriesTask.STATE_FIELD,
+                            TaskState.INIT.name(),
+                            TimeSeriesTask.CURRENT_PIECE_FIELD,
                             adTask.getDetectionDateRange().getStartTime().toEpochMilli(),
-                            TASK_PROGRESS_FIELD,
+                            TimeSeriesTask.TASK_PROGRESS_FIELD,
                             0.0f,
-                            INIT_PROGRESS_FIELD,
+                            TimeSeriesTask.INIT_PROGRESS_FIELD,
                             0.0f,
-                            WORKER_NODE_FIELD,
+                            TimeSeriesTask.WORKER_NODE_FIELD,
                             clusterService.localNode().getId()
                         ),
                     ActionListener.wrap(r -> {
@@ -947,8 +940,8 @@ public class ADBatchTaskRunner {
     private void getDateRangeOfSourceData(ADTask adTask, BiConsumer<Long, Long> consumer, ActionListener<String> internalListener) {
         String taskId = adTask.getTaskId();
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
-            .aggregation(AggregationBuilders.min(AGG_NAME_MIN_TIME).field(adTask.getDetector().getTimeField()))
-            .aggregation(AggregationBuilders.max(AGG_NAME_MAX_TIME).field(adTask.getDetector().getTimeField()))
+            .aggregation(AggregationBuilders.min(CommonName.AGG_NAME_MIN_TIME).field(adTask.getDetector().getTimeField()))
+            .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(adTask.getDetector().getTimeField()))
             .size(0);
         if (adTask.getEntity() != null && adTask.getEntity().getAttributes().size() > 0) {
             BoolQueryBuilder query = new BoolQueryBuilder();
@@ -964,8 +957,8 @@ public class ADBatchTaskRunner {
             .indices(adTask.getDetector().getIndices().toArray(new String[0]))
             .source(searchSourceBuilder);
         final ActionListener<SearchResponse> searchResponseListener = ActionListener.wrap(r -> {
-            InternalMin minAgg = r.getAggregations().get(AGG_NAME_MIN_TIME);
-            InternalMax maxAgg = r.getAggregations().get(AGG_NAME_MAX_TIME);
+            InternalMin minAgg = r.getAggregations().get(CommonName.AGG_NAME_MIN_TIME);
+            InternalMax maxAgg = r.getAggregations().get(CommonName.AGG_NAME_MAX_TIME);
             double minValue = minAgg.getValue();
             double maxValue = maxAgg.getValue();
             // If time field not exist or there is no value, will return infinity value
@@ -1105,7 +1098,7 @@ public class ADBatchTaskRunner {
                     executeStartTime,
                     Instant.now(),
                     error,
-                    adTask.getEntity(),
+                    Optional.ofNullable(adTask.getEntity()),
                     adTask.getDetector().getUser(),
                     anomalyDetectionIndices.getSchemaVersion(ADIndex.RESULT),
                     adTask.getEntityModelId()
@@ -1135,7 +1128,7 @@ public class ADBatchTaskRunner {
                         executeStartTime,
                         Instant.now(),
                         null,
-                        adTask.getEntity(),
+                        Optional.ofNullable(adTask.getEntity()),
                         adTask.getDetector().getUser(),
                         anomalyDetectionIndices.getSchemaVersion(ADIndex.RESULT),
                         adTask.getEntityModelId(),
@@ -1228,10 +1221,12 @@ public class ADBatchTaskRunner {
             false
         );
 
+        String detectorId = adTask.getId();
         anomalyResultBulkIndexHandler
-            .bulkIndexAnomalyResult(
+            .bulk(
                 resultIndex,
                 anomalyResults,
+                detectorId,
                 runBefore == null ? actionListener : ActionListener.runBefore(actionListener, runBefore)
             );
     }
@@ -1248,11 +1243,11 @@ public class ADBatchTaskRunner {
         String detectorId = adTask.getId();
         String detectorTaskId = adTask.getDetectorLevelTaskId();
         float initProgress = calculateInitProgress(taskId);
-        String taskState = initProgress >= 1.0f ? ADTaskState.RUNNING.name() : ADTaskState.INIT.name();
+        String taskState = initProgress >= 1.0f ? TaskState.RUNNING.name() : TaskState.INIT.name();
         logger.debug("Init progress: {}, taskState:{}, task id: {}", initProgress, taskState, taskId);
 
         if (initProgress >= 1.0f && adTask.isEntityTask()) {
-            updateDetectorLevelTaskState(detectorId, adTask.getParentTaskId(), ADTaskState.RUNNING.name());
+            updateDetectorLevelTaskState(detectorId, adTask.getParentTaskId(), TaskState.RUNNING.name());
         }
 
         if (pieceStartTime < dataEndTime) {
@@ -1276,13 +1271,13 @@ public class ADBatchTaskRunner {
                         taskId,
                         ImmutableMap
                             .of(
-                                STATE_FIELD,
+                                TimeSeriesTask.STATE_FIELD,
                                 taskState,
-                                CURRENT_PIECE_FIELD,
+                                TimeSeriesTask.CURRENT_PIECE_FIELD,
                                 pieceStartTime,
-                                TASK_PROGRESS_FIELD,
+                                TimeSeriesTask.TASK_PROGRESS_FIELD,
                                 taskProgress,
-                                INIT_PROGRESS_FIELD,
+                                TimeSeriesTask.INIT_PROGRESS_FIELD,
                                 initProgress
                             ),
                         ActionListener
@@ -1309,16 +1304,16 @@ public class ADBatchTaskRunner {
                     taskId,
                     ImmutableMap
                         .of(
-                            CURRENT_PIECE_FIELD,
+                            TimeSeriesTask.CURRENT_PIECE_FIELD,
                             dataEndTime,
-                            TASK_PROGRESS_FIELD,
+                            TimeSeriesTask.TASK_PROGRESS_FIELD,
                             1.0f,
-                            EXECUTION_END_TIME_FIELD,
+                            TimeSeriesTask.EXECUTION_END_TIME_FIELD,
                             Instant.now().toEpochMilli(),
-                            INIT_PROGRESS_FIELD,
+                            TimeSeriesTask.INIT_PROGRESS_FIELD,
                             initProgress,
-                            STATE_FIELD,
-                            ADTaskState.FINISHED
+                            TimeSeriesTask.STATE_FIELD,
+                            TaskState.FINISHED
                         ),
                     ActionListener.wrap(r -> internalListener.onResponse("task execution done"), e -> internalListener.onFailure(e))
                 );
@@ -1326,8 +1321,8 @@ public class ADBatchTaskRunner {
     }
 
     private void updateDetectorLevelTaskState(String detectorId, String detectorTaskId, String newState) {
-        AnomalyDetectorFunction function = () -> adTaskManager
-            .updateADTask(detectorTaskId, ImmutableMap.of(STATE_FIELD, newState), ActionListener.wrap(r -> {
+        ExecutorFunction function = () -> adTaskManager
+            .updateADTask(detectorTaskId, ImmutableMap.of(TimeSeriesTask.STATE_FIELD, newState), ActionListener.wrap(r -> {
                 logger.info("Updated HC detector task: {} state as: {} for detector: {}", detectorTaskId, newState, detectorId);
                 adTaskCacheManager.updateDetectorTaskState(detectorId, detectorTaskId, newState);
             }, e -> { logger.error("Failed to update HC detector task: {} for detector: {}", detectorTaskId, detectorId); }));
@@ -1380,7 +1375,7 @@ public class ADBatchTaskRunner {
             String cancelledBy = adTaskCacheManager.getCancelledBy(taskId);
             adTaskCacheManager.remove(taskId, detectorId, detectorTaskId);
             if (!adTaskCacheManager.isHCTaskCoordinatingNode(detectorId)
-                && isNullOrEmpty(adTaskCacheManager.getTasksOfDetector(detectorId))) {
+                && ParseUtils.isNullOrEmpty(adTaskCacheManager.getTasksOfDetector(detectorId))) {
                 // Clean up historical task cache for HC detector on worker node if no running entity task.
                 logger.info("All AD task cancelled, cleanup historical task cache for detector {}", detectorId);
                 adTaskCacheManager.removeHistoricalTaskCache(detectorId);
