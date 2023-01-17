@@ -11,8 +11,7 @@
 
 package org.opensearch.ad.util;
 
-import static org.opensearch.ad.util.ParseUtils.addUserBackendRolesFilter;
-import static org.opensearch.ad.util.ParseUtils.isAdmin;
+import static org.opensearch.timeseries.util.ParseUtils.isAdmin;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -20,9 +19,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Feature;
 import org.opensearch.common.ParsingException;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.commons.authuser.User;
@@ -32,6 +29,9 @@ import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregatorFactories;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.model.Feature;
+import org.opensearch.timeseries.util.ParseUtils;
 
 import com.google.common.collect.ImmutableList;
 
@@ -134,13 +134,13 @@ public class ParseUtilsTests extends OpenSearchTestCase {
 
     public void testAddUserRoleFilterWithNullUser() {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
-        addUserBackendRolesFilter(null, searchSourceBuilder);
+        ParseUtils.addUserBackendRolesFilter(null, searchSourceBuilder);
         assertEquals("{}", searchSourceBuilder.toString());
     }
 
     public void testAddUserRoleFilterWithNullUserBackendRole() {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
-        addUserBackendRolesFilter(
+        ParseUtils.addUserBackendRolesFilter(
             new User(randomAlphaOfLength(5), null, ImmutableList.of(randomAlphaOfLength(5)), ImmutableList.of(randomAlphaOfLength(5))),
             searchSourceBuilder
         );
@@ -154,7 +154,7 @@ public class ParseUtilsTests extends OpenSearchTestCase {
 
     public void testAddUserRoleFilterWithEmptyUserBackendRole() {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
-        addUserBackendRolesFilter(
+        ParseUtils.addUserBackendRolesFilter(
             new User(
                 randomAlphaOfLength(5),
                 ImmutableList.of(),
@@ -175,7 +175,7 @@ public class ParseUtilsTests extends OpenSearchTestCase {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         String backendRole1 = randomAlphaOfLength(5);
         String backendRole2 = randomAlphaOfLength(5);
-        addUserBackendRolesFilter(
+        ParseUtils.addUserBackendRolesFilter(
             new User(
                 randomAlphaOfLength(5),
                 ImmutableList.of(backendRole1, backendRole2),
@@ -242,8 +242,8 @@ public class ParseUtilsTests extends OpenSearchTestCase {
         long startTime = now.minus(10, ChronoUnit.DAYS).toEpochMilli();
         long endTime = now.plus(10, ChronoUnit.DAYS).toEpochMilli();
 
-        AnomalyDetectionException exception = expectThrows(
-            AnomalyDetectionException.class,
+        TimeSeriesException exception = expectThrows(
+            TimeSeriesException.class,
             () -> ParseUtils.batchFeatureQuery(detector, null, startTime, endTime, TestHelpers.xContentRegistry())
         );
         assertEquals("No enabled feature configured", exception.getMessage());
@@ -257,8 +257,8 @@ public class ParseUtilsTests extends OpenSearchTestCase {
 
         long startTime = now.minus(10, ChronoUnit.DAYS).toEpochMilli();
         long endTime = now.plus(10, ChronoUnit.DAYS).toEpochMilli();
-        AnomalyDetectionException exception = expectThrows(
-            AnomalyDetectionException.class,
+        TimeSeriesException exception = expectThrows(
+            TimeSeriesException.class,
             () -> ParseUtils.batchFeatureQuery(detector, null, startTime, endTime, TestHelpers.xContentRegistry())
         );
         assertEquals("No enabled feature configured", exception.getMessage());

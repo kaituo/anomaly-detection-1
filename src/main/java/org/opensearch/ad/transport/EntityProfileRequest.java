@@ -19,15 +19,15 @@ import java.util.Set;
 
 import org.opensearch.action.ActionRequest;
 import org.opensearch.action.ActionRequestValidationException;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.model.Entity;
+import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.EntityProfileName;
 import org.opensearch.common.Strings;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.timeseries.model.Entity;
 
 public class EntityProfileRequest extends ActionRequest implements ToXContentObject {
     public static final String ENTITY = "entity";
@@ -86,13 +86,13 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
     public ActionRequestValidationException validate() {
         ActionRequestValidationException validationException = null;
         if (Strings.isEmpty(adID)) {
-            validationException = addValidationError(CommonErrorMessages.AD_ID_MISSING_MSG, validationException);
+            validationException = addValidationError(ADCommonMessages.AD_ID_MISSING_MSG, validationException);
         }
         if (entityValue == null) {
             validationException = addValidationError("Entity value is missing", validationException);
         }
         if (profilesToCollect == null || profilesToCollect.isEmpty()) {
-            validationException = addValidationError(CommonErrorMessages.EMPTY_PROFILES_COLLECT, validationException);
+            validationException = addValidationError(ADCommonMessages.EMPTY_PROFILES_COLLECT, validationException);
         }
         return validationException;
     }
@@ -100,7 +100,7 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.startObject();
-        builder.field(CommonName.ID_JSON_KEY, adID);
+        builder.field(ADCommonName.ID_JSON_KEY, adID);
         builder.field(ENTITY, entityValue);
         builder.field(PROFILES, profilesToCollect);
         builder.endObject();

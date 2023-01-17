@@ -27,14 +27,12 @@ import java.util.Set;
 
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.model.Entity;
 import org.opensearch.ad.model.EntityProfileName;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.ad.model.ModelProfileOnNode;
 import org.opensearch.ad.transport.EntityProfileAction;
 import org.opensearch.ad.transport.EntityProfileRequest;
 import org.opensearch.ad.transport.EntityProfileResponse;
-import org.opensearch.ad.transport.EntityResultRequest;
+import org.opensearch.ad.transport.EntityADResultRequest;
 import org.opensearch.ad.transport.ProfileNodeResponse;
 import org.opensearch.ad.transport.ProfileResponse;
 import org.opensearch.ad.transport.RCFResultResponse;
@@ -43,6 +41,8 @@ import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.transport.TransportAddress;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.ModelProfile;
 
 /**
  * Put in core package so that we can using Version's package private constructor
@@ -50,7 +50,7 @@ import org.opensearch.common.transport.TransportAddress;
  */
 public class StreamInputOutputTests extends AbstractADTest {
     // public static Version V_1_1_0 = new Version(1010099, org.apache.lucene.util.Version.LUCENE_8_8_2);
-    private EntityResultRequest entityResultRequest;
+    private EntityADResultRequest entityResultRequest;
     private String detectorId;
     private long start, end;
     private Map<Entity, double[]> entities;
@@ -98,7 +98,7 @@ public class StreamInputOutputTests extends AbstractADTest {
         entities.put(entity, feature);
         start = 10L;
         end = 20L;
-        entityResultRequest = new EntityResultRequest(detectorId, entities, start, end);
+        entityResultRequest = new EntityADResultRequest(detectorId, entities, start, end);
     }
 
     /**
@@ -110,8 +110,8 @@ public class StreamInputOutputTests extends AbstractADTest {
         entityResultRequest.writeTo(output);
 
         StreamInput streamInput = output.bytes().streamInput();
-        EntityResultRequest readRequest = new EntityResultRequest(streamInput);
-        assertThat(readRequest.getDetectorId(), equalTo(detectorId));
+        EntityADResultRequest readRequest = new EntityADResultRequest(streamInput);
+        assertThat(readRequest.getConfigId(), equalTo(detectorId));
         assertThat(readRequest.getStart(), equalTo(start));
         assertThat(readRequest.getEnd(), equalTo(end));
         assertTrue(areEqualWithArrayValue(readRequest.getEntities(), entities));

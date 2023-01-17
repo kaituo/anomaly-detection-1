@@ -23,14 +23,14 @@ import org.junit.Ignore;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.ad.HistoricalAnalysisIntegTestCase;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.model.ADTask;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchIntegTestCase;
+import org.opensearch.timeseries.model.TimeSeriesTask;
 
 @OpenSearchIntegTestCase.ClusterScope(scope = OpenSearchIntegTestCase.Scope.TEST, numDataNodes = 2)
 public class SearchADTasksTransportActionTests extends HistoricalAnalysisIntegTestCase {
@@ -81,9 +81,9 @@ public class SearchADTasksTransportActionTests extends HistoricalAnalysisIntegTe
     private SearchRequest searchRequest(boolean isLatest) {
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         BoolQueryBuilder query = new BoolQueryBuilder();
-        query.filter(new TermQueryBuilder(ADTask.IS_LATEST_FIELD, isLatest));
+        query.filter(new TermQueryBuilder(TimeSeriesTask.IS_LATEST_FIELD, isLatest));
         sourceBuilder.query(query);
-        SearchRequest request = new SearchRequest().source(sourceBuilder).indices(CommonName.DETECTION_STATE_INDEX);
+        SearchRequest request = new SearchRequest().source(sourceBuilder).indices(ADCommonName.DETECTION_STATE_INDEX);
         return request;
     }
 

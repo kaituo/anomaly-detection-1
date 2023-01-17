@@ -21,6 +21,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
+import org.opensearch.timeseries.dataprocessor.SingleFeatureLinearUniformInterpolator;
 
 @RunWith(Parameterized.class)
 public class SingleFeatureLinearUniformInterpolatorTests {
@@ -64,7 +65,7 @@ public class SingleFeatureLinearUniformInterpolatorTests {
 
     @Test
     public void testInterpolation() {
-        double[] actual = interpolator.interpolate(input, numInterpolants);
+        double[] actual = interpolator.impute(input, numInterpolants);
         double delta = 1e-8;
         assertArrayEquals(expected, actual, delta);
     }

@@ -44,19 +44,13 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.junit.Before;
 import org.mockito.ArgumentCaptor;
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
-import org.opensearch.ad.common.exception.LimitExceededException;
-import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.ml.ModelManager.ModelType;
-import org.opensearch.ad.ml.ModelState;
+import org.opensearch.ad.ADMemoryTracker;
+import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADModelManager;
+import org.opensearch.ad.ml.ADModelState;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.settings.EnabledSetting;
+import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
@@ -65,14 +59,26 @@ import org.opensearch.monitor.jvm.JvmInfo;
 import org.opensearch.monitor.jvm.JvmInfo.Mem;
 import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.threadpool.Scheduler.ScheduledCancellable;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.caching.EntityCacheProvider;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.ml.ModelManager;
+import org.opensearch.timeseries.ml.ModelManager.ModelType;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
+import org.opensearch.timeseries.common.exception.LimitExceededException;
+import org.opensearch.timeseries.model.Entity;
+
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
+
 import org.opensearch.threadpool.ThreadPool;
 
 public class PriorityCacheTests extends AbstractCacheTest {
     private static final Logger LOG = LogManager.getLogger(PriorityCacheTests.class);
 
     EntityCache entityCache;
-    CheckpointDao checkpoint;
-    ModelManager modelManager;
+    ADCheckpointDao checkpoint;
+    ADModelManager modelManager;
 
     ClusterService clusterService;
     Settings settings;
@@ -86,9 +92,9 @@ public class PriorityCacheTests extends AbstractCacheTest {
     public void setUp() throws Exception {
         super.setUp();
 
-        checkpoint = mock(CheckpointDao.class);
+        checkpoint = mock(ADCheckpointDao.class);
 
-        modelManager = mock(ModelManager.class);
+        modelManager = mock(ADModelManager.class);
 
         clusterService = mock(ClusterService.class);
         ClusterSettings settings = new ClusterSettings(
@@ -114,7 +120,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         threadPool = mock(ThreadPool.class);
         setUpADThreadPool(threadPool);
 
-        EntityCache cache = new PriorityCache(
+        EntityCache cache = new ADPriorityCache(
             checkpoint,
             dedicatedCacheSize,
             AnomalyDetectorSettings.CHECKPOINT_TTL,
@@ -132,7 +138,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             AnomalyDetectorSettings.CHECKPOINT_SAVING_FREQ
         );
 
-        CacheProvider cacheProvider = new CacheProvider();
+        EntityCacheProvider cacheProvider = new EntityCacheProvider();
         cacheProvider.set(cache);
         entityCache = cacheProvider.get();
 
@@ -141,9 +147,9 @@ public class PriorityCacheTests extends AbstractCacheTest {
 
         detector2 = mock(AnomalyDetector.class);
         detectorId2 = "456";
-        when(detector2.getDetectorId()).thenReturn(detectorId2);
-        when(detector2.getDetectionIntervalDuration()).thenReturn(detectorDuration);
-        when(detector2.getDetectorIntervalInSeconds()).thenReturn(detectorDuration.getSeconds());
+        when(detector2.getId()).thenReturn(detectorId2);
+        when(detector2.getIntervalDuration()).thenReturn(detectorDuration);
+        when(detector2.getIntervalInSeconds()).thenReturn(detectorDuration.getSeconds());
 
         point = new double[] { 0.1 };
     }
@@ -167,9 +173,9 @@ public class PriorityCacheTests extends AbstractCacheTest {
         // );
         // when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        memoryTracker = spy(new MemoryTracker(jvmService, modelMaxPercen, 0.002, clusterService, mock(ADCircuitBreakerService.class)));
+        memoryTracker = spy(new ADMemoryTracker(jvmService, modelMaxPercen, 0.002, clusterService, mock(TimeSeriesCircuitBreakerService.class)));
 
-        EntityCache cache = new PriorityCache(
+        EntityCache cache = new ADPriorityCache(
             checkpoint,
             dedicatedCacheSize,
             AnomalyDetectorSettings.CHECKPOINT_TTL,
@@ -187,7 +193,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             AnomalyDetectorSettings.CHECKPOINT_SAVING_FREQ
         );
 
-        CacheProvider cacheProvider = new CacheProvider();
+        EntityCacheProvider cacheProvider = new EntityCacheProvider();
         cacheProvider.set(cache);
         entityCache = cacheProvider.get();
 
@@ -198,24 +204,24 @@ public class PriorityCacheTests extends AbstractCacheTest {
         entityCache.hostIfPossible(detector, modelState1);
         assertEquals(1, entityCache.getTotalActiveEntities());
         assertEquals(1, entityCache.getAllModels().size());
-        ModelState<EntityModel> hitState = entityCache.get(modelState1.getModelId(), detector);
-        assertEquals(detectorId, hitState.getDetectorId());
-        EntityModel model = hitState.getModel();
-        assertEquals(false, model.getTrcf().isPresent());
-        assertTrue(model.getSamples().isEmpty());
-        modelState1.getModel().addSample(point);
-        assertTrue(Arrays.equals(point, model.getSamples().peek()));
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> hitState = entityCache.get(modelState1.getModelId(), detector);
+        assertEquals(detectorId, hitState.getId());
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = hitState.getModel();
+        assertEquals(false, model.getModel().isPresent());
+        assertTrue(model.getValueOnlySamples().isEmpty());
+        modelState1.getModel().addValueOnlySample(point);
+        assertTrue(Arrays.equals(point, model.getValueOnlySamples().peek()));
 
         ArgumentCaptor<Long> memoryConsumed = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Boolean> reserved = ArgumentCaptor.forClass(Boolean.class);
-        ArgumentCaptor<MemoryTracker.Origin> origin = ArgumentCaptor.forClass(MemoryTracker.Origin.class);
+        ArgumentCaptor<ADMemoryTracker.Origin> origin = ArgumentCaptor.forClass(ADMemoryTracker.Origin.class);
 
         // input dimension: 3, shingle: 4
         long expectedMemoryPerEntity = 436828L;
         verify(memoryTracker, times(1)).consumeMemory(memoryConsumed.capture(), reserved.capture(), origin.capture());
         assertEquals(dedicatedCacheSize * expectedMemoryPerEntity, memoryConsumed.getValue().intValue());
         assertEquals(true, reserved.getValue().booleanValue());
-        assertEquals(MemoryTracker.Origin.HC_DETECTOR, origin.getValue());
+        assertEquals(ADMemoryTracker.Origin.HC_DETECTOR, origin.getValue());
 
         // for (int i = 0; i < 2; i++) {
         // cacheProvider.get(modelId2, detector);
@@ -257,11 +263,11 @@ public class PriorityCacheTests extends AbstractCacheTest {
         for (int i = 0; i < 10; i++) {
             entityCache.get(modelId3, detector2);
         }
-        modelState3 = new ModelState<>(
-            new EntityModel(entity3, new ArrayDeque<>(), null),
+        modelState3 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity3, new ArrayDeque<>(), null),
             modelId3,
             detectorId2,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );
@@ -273,11 +279,11 @@ public class PriorityCacheTests extends AbstractCacheTest {
             // replace modelId2 in shared cache
             entityCache.get(modelId4, detector2);
         }
-        modelState4 = new ModelState<>(
-            new EntityModel(entity4, new ArrayDeque<>(), null),
+        modelState4 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity4, new ArrayDeque<>(), null),
             modelId4,
             detectorId2,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );
@@ -301,7 +307,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         entityCache.hostIfPossible(detector, modelState1);
         assertEquals(1, entityCache.getActiveEntities(detectorId));
         when(memoryTracker.canAllocate(anyLong())).thenReturn(false);
-        ModelState<EntityModel> state = null;
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> state = null;
 
         for (int i = 0; i < 4; i++) {
             entityCache.get(modelId2, detector);
@@ -364,7 +370,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         assertEquals(2, entityCache.getTotalActiveEntities());
         assertTrue(entityCache.isActive(detectorId, modelId1));
         assertEquals(0, entityCache.getTotalUpdates(detectorId));
-        modelState1.getModel().addSample(point);
+        modelState1.getModel().addValueOnlySample(point);
         assertEquals(1, entityCache.getTotalUpdates(detectorId));
         assertEquals(1, entityCache.getTotalUpdates(detectorId, modelId1));
         entityCache.clear(detectorId);
@@ -410,7 +416,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         doAnswer(invovacation -> {
             inProgressLatch.await(100, TimeUnit.SECONDS);
             return null;
-        }).when(memoryTracker).releaseMemory(anyLong(), anyBoolean(), any(MemoryTracker.Origin.class));
+        }).when(memoryTracker).releaseMemory(anyLong(), anyBoolean(), any(ADMemoryTracker.Origin.class));
 
         doAnswer(invocation -> {
             inProgressLatch.countDown();
@@ -448,12 +454,12 @@ public class PriorityCacheTests extends AbstractCacheTest {
         final CountDownLatch scheduleCountDown = new CountDownLatch(1);
         final CountDownLatch scheduledThreadCountDown = new CountDownLatch(1);
 
-        doThrow(NullPointerException.class).when(memoryTracker).releaseMemory(anyLong(), anyBoolean(), any(MemoryTracker.Origin.class));
+        doThrow(NullPointerException.class).when(memoryTracker).releaseMemory(anyLong(), anyBoolean(), any(ADMemoryTracker.Origin.class));
 
         doAnswer(invovacation -> {
             scheduleCountDown.await(100, TimeUnit.SECONDS);
             return null;
-        }).when(memoryTracker).syncMemoryState(any(MemoryTracker.Origin.class), anyLong(), anyLong());
+        }).when(memoryTracker).syncMemoryState(any(ADMemoryTracker.Origin.class), anyLong(), anyLong());
 
         AtomicReference<Runnable> runnable = new AtomicReference<Runnable>();
         doAnswer(invocation -> {
@@ -468,7 +474,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             new Thread(new FailedCleanRunnable(scheduledThreadCountDown)).start();
 
             entityCache.maintenance();
-        } catch (AnomalyDetectionException e) {
+        } catch (TimeSeriesException e) {
             scheduledThreadCountDown.countDown();
         }
 
@@ -536,19 +542,19 @@ public class PriorityCacheTests extends AbstractCacheTest {
     private void replaceInOtherCacheSetUp() {
         Entity entity5 = Entity.createSingleAttributeEntity("attributeName1", "attributeVal5");
         Entity entity6 = Entity.createSingleAttributeEntity("attributeName1", "attributeVal6");
-        ModelState<EntityModel> modelState5 = new ModelState<>(
-            new EntityModel(entity5, new ArrayDeque<>(), null),
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> modelState5 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity5, new ArrayDeque<>(), null),
             entity5.getModelId(detectorId2).get(),
             detectorId2,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );
-        ModelState<EntityModel> modelState6 = new ModelState<>(
-            new EntityModel(entity6, new ArrayDeque<>(), null),
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> modelState6 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity6, new ArrayDeque<>(), null),
             entity6.getModelId(detectorId2).get(),
             detectorId2,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );
@@ -652,13 +658,13 @@ public class PriorityCacheTests extends AbstractCacheTest {
     // the next get method
     public void testLongDetectorInterval() {
         try {
-            EnabledSetting.getInstance().setSettingValue(EnabledSetting.DOOR_KEEPER_IN_CACHE_ENABLED, true);
+            ADEnabledSetting.getInstance().setSettingValue(ADEnabledSetting.DOOR_KEEPER_IN_CACHE_ENABLED, true);
             when(clock.instant()).thenReturn(Instant.ofEpochSecond(1000));
-            when(detector.getDetectionIntervalDuration()).thenReturn(Duration.ofHours(12));
+            when(detector.getIntervalDuration()).thenReturn(Duration.ofHours(12));
             String modelId = entity1.getModelId(detectorId).get();
             // record last access time 1000
             assertTrue(null == entityCache.get(modelId, detector));
-            assertEquals(-1, entityCache.getLastActiveMs(detectorId, modelId));
+            assertEquals(-1, entityCache.getLastActiveTime(detectorId, modelId));
             // 2 hour = 7200 seconds have passed
             long currentTimeEpoch = 8200;
             when(clock.instant()).thenReturn(Instant.ofEpochSecond(currentTimeEpoch));
@@ -667,9 +673,9 @@ public class PriorityCacheTests extends AbstractCacheTest {
             // door keeper still has the record and won't blocks entity state being created
             entityCache.get(modelId, detector);
             // * 1000 to convert to milliseconds
-            assertEquals(currentTimeEpoch * 1000, entityCache.getLastActiveMs(detectorId, modelId));
+            assertEquals(currentTimeEpoch * 1000, entityCache.getLastActiveTime(detectorId, modelId));
         } finally {
-            EnabledSetting.getInstance().setSettingValue(EnabledSetting.DOOR_KEEPER_IN_CACHE_ENABLED, false);
+            ADEnabledSetting.getInstance().setSettingValue(ADEnabledSetting.DOOR_KEEPER_IN_CACHE_ENABLED, false);
         }
     }
 

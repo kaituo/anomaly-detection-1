@@ -21,6 +21,7 @@ import org.junit.Test;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.ad.transport.ADStatsNodeResponse;
 import org.opensearch.ad.transport.ADStatsNodesResponse;
+import org.opensearch.ad.transport.ADStatsResponse;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.xcontent.XContentBuilder;

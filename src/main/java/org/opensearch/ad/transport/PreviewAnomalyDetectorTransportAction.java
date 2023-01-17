@@ -11,14 +11,13 @@
 
 package org.opensearch.ad.transport;
 
-import static org.opensearch.ad.constant.CommonErrorMessages.FAIL_TO_PREVIEW_DETECTOR;
+import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_PREVIEW_DETECTOR;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_ANOMALY_FEATURES;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW;
-import static org.opensearch.ad.util.ParseUtils.getUserContext;
-import static org.opensearch.ad.util.ParseUtils.resolveUserAndExecute;
-import static org.opensearch.ad.util.RestHandlerUtils.wrapRestActionListener;
 import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedToken;
+import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
+import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -35,15 +34,10 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.AnomalyDetectorRunner;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
-import org.opensearch.ad.common.exception.ClientException;
-import org.opensearch.ad.common.exception.LimitExceededException;
-import org.opensearch.ad.constant.CommonErrorMessages;
+import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.RestHandlerUtils;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.CheckedConsumer;
@@ -55,6 +49,14 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.common.exception.ClientException;
+import org.opensearch.timeseries.common.exception.LimitExceededException;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
 public class PreviewAnomalyDetectorTransportAction extends
@@ -66,7 +68,7 @@ public class PreviewAnomalyDetectorTransportAction extends
     private final NamedXContentRegistry xContentRegistry;
     private volatile Integer maxAnomalyFeatures;
     private volatile Boolean filterByEnabled;
-    private final ADCircuitBreakerService adCircuitBreakerService;
+    private final TimeSeriesCircuitBreakerService adCircuitBreakerService;
     private Semaphore lock;
 
     @Inject
@@ -78,7 +80,7 @@ public class PreviewAnomalyDetectorTransportAction extends
         Client client,
         AnomalyDetectorRunner anomalyDetectorRunner,
         NamedXContentRegistry xContentRegistry,
-        ADCircuitBreakerService adCircuitBreakerService
+        TimeSeriesCircuitBreakerService adCircuitBreakerService
     ) {
         super(PreviewAnomalyDetectorAction.NAME, transportService, actionFilters, PreviewAnomalyDetectorRequest::new);
         this.clusterService = clusterService;
@@ -101,7 +103,7 @@ public class PreviewAnomalyDetectorTransportAction extends
         ActionListener<PreviewAnomalyDetectorResponse> actionListener
     ) {
         String detectorId = request.getDetectorId();
-        User user = getUserContext(client);
+        User user = ParseUtils.getUserContext(client);
         ActionListener<PreviewAnomalyDetectorResponse> listener = wrapRestActionListener(actionListener, FAIL_TO_PREVIEW_DETECTOR);
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             resolveUserAndExecute(
@@ -112,7 +114,8 @@ public class PreviewAnomalyDetectorTransportAction extends
                 (anomalyDetector) -> previewExecute(request, context, listener),
                 client,
                 clusterService,
-                xContentRegistry
+                xContentRegistry,
+                GetAnomalyDetectorResponse.class
             );
         } catch (Exception e) {
             logger.error(e);
@@ -127,12 +130,12 @@ public class PreviewAnomalyDetectorTransportAction extends
     ) {
         if (adCircuitBreakerService.isOpen()) {
             listener
-                .onFailure(new LimitExceededException(request.getDetectorId(), CommonErrorMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
+                .onFailure(new LimitExceededException(request.getDetectorId(), CommonMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
             return;
         }
         try {
             if (!lock.tryAcquire()) {
-                listener.onFailure(new ClientException(request.getDetectorId(), CommonErrorMessages.REQUEST_THROTTLED_MSG));
+                listener.onFailure(new ClientException(request.getDetectorId(), ADCommonMessages.REQUEST_THROTTLED_MSG));
                 return;
             }
 
@@ -174,7 +177,7 @@ public class PreviewAnomalyDetectorTransportAction extends
         if (detector.getFeatureAttributes().isEmpty()) {
             return "Can't preview detector without feature";
         } else {
-            return RestHandlerUtils.checkAnomalyDetectorFeaturesSyntax(detector, maxAnomalyFeatures);
+            return RestHandlerUtils.checkFeaturesSyntax(detector, maxAnomalyFeatures);
         }
     }
 
@@ -189,11 +192,11 @@ public class PreviewAnomalyDetectorTransportAction extends
                 listener.onResponse(response);
             }
         }, exception -> {
-            logger.error("Unexpected error running anomaly detector " + detector.getDetectorId(), exception);
+            logger.error("Unexpected error running anomaly detector " + detector.getId(), exception);
             listener
                 .onFailure(
                     new OpenSearchStatusException(
-                        "Unexpected error running anomaly detector " + detector.getDetectorId() + ". " + exception.getMessage(),
+                        "Unexpected error running anomaly detector " + detector.getId() + ". " + exception.getMessage(),
                         RestStatus.INTERNAL_SERVER_ERROR
                     )
                 );
@@ -209,7 +212,7 @@ public class PreviewAnomalyDetectorTransportAction extends
         ThreadContext.StoredContext context
     ) throws IOException {
         if (!StringUtils.isBlank(detectorId)) {
-            GetRequest getRequest = new GetRequest(AnomalyDetector.ANOMALY_DETECTORS_INDEX).id(detectorId);
+            GetRequest getRequest = new GetRequest(CommonName.CONFIG_INDEX).id(detectorId);
             client.get(getRequest, onGetAnomalyDetectorResponse(listener, startTime, endTime, context));
         } else {
             anomalyDetectorRunner
@@ -246,6 +249,6 @@ public class PreviewAnomalyDetectorTransportAction extends
                     listener.onFailure(e);
                 }
             }
-        }, exception -> { listener.onFailure(new AnomalyDetectionException("Could not execute get query to find detector")); });
+        }, exception -> { listener.onFailure(new TimeSeriesException("Could not execute get query to find detector")); });
     }
 }

@@ -12,8 +12,7 @@
 package org.opensearch.ad.transport;
 
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
-import static org.opensearch.ad.util.ParseUtils.checkFilterByBackendRoles;
-import static org.opensearch.ad.util.ParseUtils.getUserContext;
+import static org.opensearch.timeseries.util.ParseUtils.checkFilterByBackendRoles;
 
 import java.time.Clock;
 import java.util.HashMap;
@@ -27,19 +26,12 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
-import org.opensearch.ad.common.exception.ADValidationException;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.feature.SearchFeatureDao;
+import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.DetectorValidationIssue;
-import org.opensearch.ad.model.DetectorValidationIssueType;
-import org.opensearch.ad.model.IntervalTimeConfiguration;
-import org.opensearch.ad.model.ValidationAspect;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
 import org.opensearch.ad.rest.handler.ValidateAnomalyDetectorActionHandler;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -52,6 +44,14 @@ import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.common.exception.ValidationException;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.ValidationAspect;
+import org.opensearch.timeseries.model.ValidationIssueType;
+import org.opensearch.timeseries.rest.handler.TimeSeriesFunction;
+import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
 public class ValidateAnomalyDetectorTransportAction extends
@@ -95,7 +95,7 @@ public class ValidateAnomalyDetectorTransportAction extends
 
     @Override
     protected void doExecute(Task task, ValidateAnomalyDetectorRequest request, ActionListener<ValidateAnomalyDetectorResponse> listener) {
-        User user = getUserContext(client);
+        User user = ParseUtils.getUserContext(client);
         AnomalyDetector anomalyDetector = request.getDetector();
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             resolveUserAndExecute(user, listener, () -> validateExecute(request, user, context, listener));
@@ -108,7 +108,7 @@ public class ValidateAnomalyDetectorTransportAction extends
     private void resolveUserAndExecute(
         User requestedUser,
         ActionListener<ValidateAnomalyDetectorResponse> listener,
-        AnomalyDetectorFunction function
+        TimeSeriesFunction function
     ) {
         try {
             // Check if user has backend roles
@@ -136,9 +136,9 @@ public class ValidateAnomalyDetectorTransportAction extends
             // forcing response to be empty
             listener.onResponse(new ValidateAnomalyDetectorResponse((DetectorValidationIssue) null));
         }, exception -> {
-            if (exception instanceof ADValidationException) {
+            if (exception instanceof ValidationException) {
                 // ADValidationException is converted as validation issues returned as response to user
-                DetectorValidationIssue issue = parseADValidationException((ADValidationException) exception);
+                DetectorValidationIssue issue = parseADValidationException((ValidationException) exception);
                 listener.onResponse(new ValidateAnomalyDetectorResponse(issue));
                 return;
             }
@@ -150,13 +150,13 @@ public class ValidateAnomalyDetectorTransportAction extends
                 clusterService,
                 client,
                 clientUtil,
-                validateListener,
                 anomalyDetectionIndices,
                 detector,
                 request.getRequestTimeout(),
                 request.getMaxSingleEntityAnomalyDetectors(),
                 request.getMaxMultiEntityAnomalyDetectors(),
                 request.getMaxAnomalyFeatures(),
+                request.getMaxCategoricalFields(),
                 RestRequest.Method.POST,
                 xContentRegistry,
                 user,
@@ -166,7 +166,7 @@ public class ValidateAnomalyDetectorTransportAction extends
                 settings
             );
             try {
-                handler.start();
+                handler.start(validateListener);
             } catch (Exception exception) {
                 String errorMessage = String
                     .format(Locale.ROOT, "Unknown exception caught while validating detector %s", request.getDetector());
@@ -176,7 +176,7 @@ public class ValidateAnomalyDetectorTransportAction extends
         }, listener);
     }
 
-    protected DetectorValidationIssue parseADValidationException(ADValidationException exception) {
+    protected DetectorValidationIssue parseADValidationException(ValidationException exception) {
         String originalErrorMessage = exception.getMessage();
         String errorMessage = "";
         Map<String, String> subIssues = null;
@@ -231,7 +231,7 @@ public class ValidateAnomalyDetectorTransportAction extends
 
     private void checkIndicesAndExecute(
         List<String> indices,
-        AnomalyDetectorFunction function,
+        TimeSeriesFunction function,
         ActionListener<ValidateAnomalyDetectorResponse> listener
     ) {
         SearchRequest searchRequest = new SearchRequest()
@@ -243,9 +243,9 @@ public class ValidateAnomalyDetectorTransportAction extends
                 // parsed to a DetectorValidationIssue that is returned to
                 // the user as a response indicating index doesn't exist
                 DetectorValidationIssue issue = parseADValidationException(
-                    new ADValidationException(
-                        CommonErrorMessages.INDEX_NOT_FOUND,
-                        DetectorValidationIssueType.INDICES,
+                    new ValidationException(
+                        ADCommonMessages.INDEX_NOT_FOUND,
+                        ValidationIssueType.INDICES,
                         ValidationAspect.DETECTOR
                     )
                 );

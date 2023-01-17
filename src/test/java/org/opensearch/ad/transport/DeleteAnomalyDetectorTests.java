@@ -13,7 +13,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.model.AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_SEQ_NO;
 
 import java.time.Instant;
@@ -39,8 +38,6 @@ import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
-import org.opensearch.ad.model.IntervalTimeConfiguration;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.client.Client;
@@ -57,6 +54,9 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.index.get.GetResult;
 import org.opensearch.jobscheduler.spi.schedule.IntervalSchedule;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.rest.handler.TimeSeriesFunction;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
 
@@ -199,7 +199,7 @@ public class DeleteAnomalyDetectorTests extends AbstractADTest {
         ImmutableOpenMap<String, IndexMetadata> immutableOpenMap = ImmutableOpenMap
             .<String, IndexMetadata>builder()
             .fPut(
-                ANOMALY_DETECTOR_JOB_INDEX,
+                CommonName.JOB_INDEX,
                 IndexMetadata
                     .builder("test")
                     .settings(
@@ -237,7 +237,7 @@ public class DeleteAnomalyDetectorTests extends AbstractADTest {
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            AnomalyDetectorFunction function = (AnomalyDetectorFunction) args[1];
+            TimeSeriesFunction function = (TimeSeriesFunction) args[1];
 
             function.execute();
             return null;
@@ -269,7 +269,7 @@ public class DeleteAnomalyDetectorTests extends AbstractADTest {
             }
             getResponse = new GetResponse(
                 new GetResult(
-                    AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX,
+                    CommonName.JOB_INDEX,
                     "id",
                     UNASSIGNED_SEQ_NO,
                     0,

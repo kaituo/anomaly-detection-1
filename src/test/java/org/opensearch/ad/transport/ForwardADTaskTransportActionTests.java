@@ -32,14 +32,14 @@ import java.io.IOException;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.ADUnitTestCase;
-import org.opensearch.ad.NodeStateManager;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.feature.FeatureManager;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableList;
@@ -50,7 +50,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
     private ADTaskManager adTaskManager;
     private ADTaskCacheManager adTaskCacheManager;
     private FeatureManager featureManager;
-    private NodeStateManager stateManager;
+    private ADNodeStateManager stateManager;
     private ForwardADTaskTransportAction forwardADTaskTransportAction;
     private Task task;
     private ActionListener<AnomalyDetectorJobResponse> listener;
@@ -64,7 +64,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
         adTaskManager = mock(ADTaskManager.class);
         adTaskCacheManager = mock(ADTaskCacheManager.class);
         featureManager = mock(FeatureManager.class);
-        stateManager = mock(NodeStateManager.class);
+        stateManager = mock(ADNodeStateManager.class);
         forwardADTaskTransportAction = new ForwardADTaskTransportAction(
             actionFilters,
             transportService,

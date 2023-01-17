@@ -24,13 +24,10 @@ import org.junit.Before;
 import org.opensearch.Version;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.NodeStateManager;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADEntityColdStarter;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -42,6 +39,9 @@ import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.caching.EntityCacheProvider;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.transport.TransportService;
 
 import test.org.opensearch.ad.util.JsonDeserializer;
@@ -65,12 +65,12 @@ public class CronTransportActionTests extends AbstractADTest {
 
         TransportService transportService = mock(TransportService.class);
         ActionFilters actionFilters = mock(ActionFilters.class);
-        NodeStateManager tarnsportStatemanager = mock(NodeStateManager.class);
-        ModelManager modelManager = mock(ModelManager.class);
+        ADNodeStateManager tarnsportStatemanager = mock(ADNodeStateManager.class);
+        ADModelManager modelManager = mock(ADModelManager.class);
         FeatureManager featureManager = mock(FeatureManager.class);
-        CacheProvider cacheProvider = mock(CacheProvider.class);
+        EntityCacheProvider cacheProvider = mock(EntityCacheProvider.class);
         EntityCache entityCache = mock(EntityCache.class);
-        EntityColdStarter entityColdStarter = mock(EntityColdStarter.class);
+        ADEntityColdStarter entityColdStarter = mock(ADEntityColdStarter.class);
         when(cacheProvider.get()).thenReturn(entityCache);
         ADTaskManager adTaskManager = mock(ADTaskManager.class);
 

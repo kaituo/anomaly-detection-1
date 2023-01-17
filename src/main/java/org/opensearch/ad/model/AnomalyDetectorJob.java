@@ -17,12 +17,11 @@ import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedT
 import java.io.IOException;
 import java.time.Instant;
 
-import org.opensearch.ad.util.ParseUtils;
+import org.opensearch.core.ParseField;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.common.io.stream.Writeable;
 import org.opensearch.commons.authuser.User;
-import org.opensearch.core.ParseField;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
@@ -32,6 +31,9 @@ import org.opensearch.jobscheduler.spi.schedule.CronSchedule;
 import org.opensearch.jobscheduler.spi.schedule.IntervalSchedule;
 import org.opensearch.jobscheduler.spi.schedule.Schedule;
 import org.opensearch.jobscheduler.spi.schedule.ScheduleParser;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.TimeConfiguration;
+import org.opensearch.timeseries.util.ParseUtils;
 
 import com.google.common.base.Objects;
 
@@ -51,7 +53,6 @@ public class AnomalyDetectorJob implements Writeable, ToXContentObject, Schedule
         it -> parse(it)
     );
 
-    public static final String ANOMALY_DETECTOR_JOB_INDEX = ".opendistro-anomaly-detector-jobs";
     public static final String NAME_FIELD = "name";
     public static final String LAST_UPDATE_TIME_FIELD = "last_update_time";
     public static final String LOCK_DURATION_SECONDS = "lock_duration_seconds";

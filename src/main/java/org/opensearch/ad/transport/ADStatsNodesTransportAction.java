@@ -20,14 +20,14 @@ import java.util.Set;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
-import org.opensearch.ad.stats.ADStats;
-import org.opensearch.ad.stats.InternalStatNames;
+import org.opensearch.timeseries.stats.TimeSeriesStats;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.stats.InternalStatNames;
 import org.opensearch.transport.TransportService;
 
 /**
@@ -36,7 +36,7 @@ import org.opensearch.transport.TransportService;
 public class ADStatsNodesTransportAction extends
     TransportNodesAction<ADStatsRequest, ADStatsNodesResponse, ADStatsNodeRequest, ADStatsNodeResponse> {
 
-    private ADStats adStats;
+    private TimeSeriesStats adStats;
     private final JvmService jvmService;
     private final ADTaskManager adTaskManager;
 
@@ -47,7 +47,7 @@ public class ADStatsNodesTransportAction extends
      * @param clusterService ClusterService
      * @param transportService TransportService
      * @param actionFilters Action Filters
-     * @param adStats ADStats object
+     * @param adStats TimeSeriesStats object
      * @param jvmService ES JVM Service
      * @param adTaskManager AD task manager
      */
@@ -57,7 +57,7 @@ public class ADStatsNodesTransportAction extends
         ClusterService clusterService,
         TransportService transportService,
         ActionFilters actionFilters,
-        ADStats adStats,
+        TimeSeriesStats adStats,
         JvmService jvmService,
         ADTaskManager adTaskManager
     ) {

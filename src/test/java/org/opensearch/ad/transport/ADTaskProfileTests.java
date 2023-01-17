@@ -21,9 +21,8 @@ import java.util.List;
 import org.junit.Ignore;
 import org.opensearch.Version;
 import org.opensearch.action.ActionRequestValidationException;
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.constant.CommonErrorMessages;
+import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.ADTaskProfile;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -35,13 +34,14 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.InternalSettingsPlugin;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
 import com.google.common.collect.ImmutableList;
 
 public class ADTaskProfileTests extends OpenSearchSingleNodeTestCase {
     @Override
     protected Collection<Class<? extends Plugin>> getPlugins() {
-        return pluginList(InternalSettingsPlugin.class, AnomalyDetectorPlugin.class);
+        return pluginList(InternalSettingsPlugin.class, TimeSeriesAnalyticsPlugin.class);
     }
 
     @Override
@@ -63,7 +63,7 @@ public class ADTaskProfileTests extends OpenSearchSingleNodeTestCase {
         DiscoveryNode node = new DiscoveryNode(UUIDs.randomBase64UUID(), buildNewFakeTransportAddress(), Version.CURRENT);
         ADTaskProfileRequest request = new ADTaskProfileRequest(null, node);
         ActionRequestValidationException validationException = request.validate();
-        assertTrue(validationException.getMessage().contains(CommonErrorMessages.AD_ID_MISSING_MSG));
+        assertTrue(validationException.getMessage().contains(ADCommonMessages.AD_ID_MISSING_MSG));
     }
 
     public void testADTaskProfileNodeResponse() throws IOException {

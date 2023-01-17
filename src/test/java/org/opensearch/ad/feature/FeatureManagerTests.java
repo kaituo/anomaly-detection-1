@@ -56,16 +56,20 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.opensearch.action.ActionListener;
-import org.opensearch.ad.AnomalyDetectorPlugin;
-import org.opensearch.ad.common.exception.EndRunException;
-import org.opensearch.ad.dataprocessor.Interpolator;
-import org.opensearch.ad.dataprocessor.LinearUniformInterpolator;
-import org.opensearch.ad.dataprocessor.SingleFeatureLinearUniformInterpolator;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.model.IntervalTimeConfiguration;
 import org.opensearch.ad.util.ArrayEqMatcher;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.common.exception.EndRunException;
+import org.opensearch.timeseries.dataprocessor.Imputer;
+import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.dataprocessor.SingleFeatureLinearUniformInterpolator;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.feature.Features;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.feature.SinglePointFeatures;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 
 @RunWith(JUnitParamsRunner.class)
 @SuppressWarnings("unchecked")
@@ -91,7 +95,7 @@ public class FeatureManagerTests {
     private SearchFeatureDao searchFeatureDao;
 
     @Mock
-    private Interpolator interpolator;
+    private Imputer interpolator;
 
     @Mock
     private Clock clock;
@@ -119,17 +123,17 @@ public class FeatureManagerTests {
         featureBufferTtl = Duration.ofMillis(1_000L);
 
         detectorId = "id";
-        when(detector.getDetectorId()).thenReturn(detectorId);
+        when(detector.getId()).thenReturn(detectorId);
         when(detector.getShingleSize()).thenReturn(shingleSize);
         IntervalTimeConfiguration detectorIntervalTimeConfig = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);
         intervalInMilliseconds = detectorIntervalTimeConfig.toDuration().toMillis();
-        when(detector.getDetectorIntervalInMilliseconds()).thenReturn(intervalInMilliseconds);
+        when(detector.getIntervalInMilliseconds()).thenReturn(intervalInMilliseconds);
 
-        Interpolator interpolator = new LinearUniformInterpolator(new SingleFeatureLinearUniformInterpolator());
+        Imputer interpolator = new LinearUniformImputer(new SingleFeatureLinearUniformInterpolator());
 
         ExecutorService executorService = mock(ExecutorService.class);
 
-        when(threadPool.executor(AnomalyDetectorPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();
@@ -151,7 +155,7 @@ public class FeatureManagerTests {
                 maxPreviewSamples,
                 featureBufferTtl,
                 threadPool,
-                AnomalyDetectorPlugin.AD_THREAD_POOL_NAME
+                TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
             )
         );
     }
@@ -196,7 +200,7 @@ public class FeatureManagerTests {
         double[][] expected
     ) throws Exception {
         long detectionInterval = (new IntervalTimeConfiguration(15, ChronoUnit.MINUTES)).toDuration().toMillis();
-        when(detector.getDetectorIntervalInMilliseconds()).thenReturn(detectionInterval);
+        when(detector.getIntervalInMilliseconds()).thenReturn(detectionInterval);
         when(detector.getShingleSize()).thenReturn(4);
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(1);
@@ -227,7 +231,7 @@ public class FeatureManagerTests {
                 maxPreviewSamples,
                 featureBufferTtl,
                 threadPool,
-                AnomalyDetectorPlugin.AD_THREAD_POOL_NAME
+                TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
             )
         );
         featureManager.getColdStartData(detector, listener);
@@ -336,7 +340,7 @@ public class FeatureManagerTests {
         assertTrue(beforeMaintenance.getUnprocessedFeatures().isPresent());
         assertTrue(beforeMaintenance.getProcessedFeatures().isPresent());
 
-        featureManager.clear(detector.getDetectorId());
+        featureManager.clear(detector.getId());
 
         SinglePointFeatures afterMaintenance = getCurrentFeatures(detector, start, end);
         assertTrue(afterMaintenance.getUnprocessedFeatures().isPresent());
@@ -428,7 +432,7 @@ public class FeatureManagerTests {
         long start = 0L;
         long end = 240_000L;
         long detectionInterval = (new IntervalTimeConfiguration(1, ChronoUnit.MINUTES)).toDuration().toMillis();
-        when(detector.getDetectorIntervalInMilliseconds()).thenReturn(detectionInterval);
+        when(detector.getIntervalInMilliseconds()).thenReturn(detectionInterval);
 
         List<Entry<Long, Long>> sampleRanges = Arrays.asList(new SimpleEntry<>(0L, 60_000L), new SimpleEntry<>(120_000L, 180_000L));
         doAnswer(invocation -> {
@@ -449,11 +453,11 @@ public class FeatureManagerTests {
             return null;
         }).when(searchFeatureDao).getFeatureSamplesForPeriods(eq(detector), eq(sampleRanges), any());
 
-        when(interpolator.interpolate(argThat(new ArrayEqMatcher<>(new double[][] { { 1, 3 } })), eq(3)))
+        when(interpolator.impute(argThat(new ArrayEqMatcher<>(new double[][] { { 1, 3 } })), eq(3)))
             .thenReturn(new double[][] { { 1, 2, 3 } });
-        when(interpolator.interpolate(argThat(new ArrayEqMatcher<>(new double[][] { { 0, 120000 } })), eq(3)))
+        when(interpolator.impute(argThat(new ArrayEqMatcher<>(new double[][] { { 0, 120000 } })), eq(3)))
             .thenReturn(new double[][] { { 0, 60000, 120000 } });
-        when(interpolator.interpolate(argThat(new ArrayEqMatcher<>(new double[][] { { 60000, 180000 } })), eq(3)))
+        when(interpolator.impute(argThat(new ArrayEqMatcher<>(new double[][] { { 60000, 180000 } })), eq(3)))
             .thenReturn(new double[][] { { 60000, 120000, 180000 } });
 
         ActionListener<Features> listener = mock(ActionListener.class);
@@ -991,7 +995,7 @@ public class FeatureManagerTests {
         SinglePointFeatures listenerResponse = getCurrentFeatures(detector, 0, intervalInMilliseconds);
         assertTrue(listenerResponse.getProcessedFeatures().isPresent());
         assertEquals(listenerResponse.getProcessedFeatures().get().length, shingleSize);
-        assertEquals(featureManager.getShingleSize(detector.getDetectorId()), shingleSize);
+        assertEquals(featureManager.getShingleSize(detector.getId()), shingleSize);
     }
 
     @Test

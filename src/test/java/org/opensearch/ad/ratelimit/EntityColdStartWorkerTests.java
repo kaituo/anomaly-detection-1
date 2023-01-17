@@ -29,25 +29,27 @@ import java.util.Random;
 
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.ActionListener;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelState;
+import org.opensearch.ad.ml.ADEntityColdStarter;
+import org.opensearch.ad.ml.ADModelState;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.concurrency.OpenSearchRejectedExecutionException;
 import org.opensearch.rest.RestStatus;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.caching.EntityCacheProvider;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
+import org.opensearch.timeseries.ratelimit.EntityRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 
 import test.org.opensearch.ad.util.MLUtil;
 
 public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
     ClusterService clusterService;
-    EntityColdStartWorker worker;
-    EntityColdStarter entityColdStarter;
-    CacheProvider cacheProvider;
+    ADEntityColdStartWorker worker;
+    ADEntityColdStarter entityColdStarter;
+    EntityCacheProvider cacheProvider;
 
     @Override
     public void setUp() throws Exception {
@@ -68,18 +70,18 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        entityColdStarter = mock(EntityColdStarter.class);
+        entityColdStarter = mock(ADEntityColdStarter.class);
 
-        cacheProvider = mock(CacheProvider.class);
+        cacheProvider = mock(EntityCacheProvider.class);
 
         // Integer.MAX_VALUE makes a huge heap
-        worker = new EntityColdStartWorker(
+        worker = new ADEntityColdStartWorker(
             Integer.MAX_VALUE,
             AnomalyDetectorSettings.ENTITY_REQUEST_SIZE_IN_BYTES,
             AnomalyDetectorSettings.ENTITY_COLD_START_QUEUE_MAX_HEAP_PERCENT,
             clusterService,
             new Random(42),
-            mock(ADCircuitBreakerService.class),
+            mock(TimeSeriesCircuitBreakerService.class),
             threadPool,
             Settings.EMPTY,
             AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
@@ -151,7 +153,7 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
         doAnswer(invocation -> {
             ActionListener<Void> listener = invocation.getArgument(3);
 
-            ModelState<EntityModel> state = invocation.getArgument(2);
+            ADModelState<createFromValueOnlySamples> state = invocation.getArgument(2);
             state.setModel(MLUtil.createNonEmptyModel(detectorId));
             listener.onResponse(null);
 

@@ -22,8 +22,8 @@ import java.util.Map.Entry;
 import java.util.Optional;
 
 import org.mockito.ArgumentCaptor;
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.ratelimit.CheckpointMaintainRequest;
+import org.opensearch.ad.ADMemoryTracker;
+import org.opensearch.timeseries.ratelimit.CheckpointMaintainRequest;
 
 import test.org.opensearch.ad.util.MLUtil;
 import test.org.opensearch.ad.util.RandomModelStateConfig;
@@ -73,17 +73,17 @@ public class CacheBufferTests extends AbstractCacheTest {
 
         ArgumentCaptor<Long> memoryReleased = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Boolean> reserved = ArgumentCaptor.forClass(Boolean.class);
-        ArgumentCaptor<MemoryTracker.Origin> orign = ArgumentCaptor.forClass(MemoryTracker.Origin.class);
+        ArgumentCaptor<ADMemoryTracker.Origin> orign = ArgumentCaptor.forClass(ADMemoryTracker.Origin.class);
         cacheBuffer.clear();
         verify(memoryTracker, times(2)).releaseMemory(memoryReleased.capture(), reserved.capture(), orign.capture());
 
         List<Long> capturedMemoryReleased = memoryReleased.getAllValues();
         List<Boolean> capturedreserved = reserved.getAllValues();
-        List<MemoryTracker.Origin> capturedOrigin = orign.getAllValues();
+        List<ADMemoryTracker.Origin> capturedOrigin = orign.getAllValues();
         assertEquals(3 * memoryPerEntity, capturedMemoryReleased.stream().reduce(0L, (a, b) -> a + b).intValue());
         assertTrue(capturedreserved.get(0));
         assertTrue(!capturedreserved.get(1));
-        assertEquals(MemoryTracker.Origin.HC_DETECTOR, capturedOrigin.get(0));
+        assertEquals(ADMemoryTracker.Origin.HC_DETECTOR, capturedOrigin.get(0));
 
         assertTrue(!cacheBuffer.expired(Duration.ofHours(1)));
     }

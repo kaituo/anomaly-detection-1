@@ -25,11 +25,14 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.monitor.jvm.JvmStats;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.breaker.CircuitBreaker;
+import org.opensearch.timeseries.breaker.MemoryCircuitBreaker;
 
 public class ADCircuitBreakerServiceTests {
 
     @InjectMocks
-    private ADCircuitBreakerService adCircuitBreakerService;
+    private TimeSeriesCircuitBreakerService adCircuitBreakerService;
 
     @Mock
     JvmService jvmService;

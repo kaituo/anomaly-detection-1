@@ -11,14 +11,12 @@
 
 package org.opensearch.ad.transport;
 
-import static org.opensearch.ad.constant.CommonErrorMessages.FAIL_TO_DELETE_DETECTOR;
+import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_DELETE_DETECTOR;
 import static org.opensearch.ad.model.ADTaskType.HISTORICAL_DETECTOR_TASK_TYPES;
-import static org.opensearch.ad.model.AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
-import static org.opensearch.ad.util.ParseUtils.getUserContext;
-import static org.opensearch.ad.util.ParseUtils.resolveUserAndExecute;
-import static org.opensearch.ad.util.RestHandlerUtils.wrapRestActionListener;
 import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedToken;
+import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
+import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
 import java.io.IOException;
 
@@ -34,13 +32,10 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetectorJob;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.RestHandlerUtils;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -52,6 +47,10 @@ import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.rest.handler.TimeSeriesFunction;
+import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
 public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction<DeleteAnomalyDetectorRequest, DeleteResponse> {
@@ -88,7 +87,7 @@ public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction
     protected void doExecute(Task task, DeleteAnomalyDetectorRequest request, ActionListener<DeleteResponse> actionListener) {
         String detectorId = request.getDetectorID();
         LOG.info("Delete anomaly detector job {}", detectorId);
-        User user = getUserContext(client);
+        User user = ParseUtils.getUserContext(client);
         ActionListener<DeleteResponse> listener = wrapRestActionListener(actionListener, FAIL_TO_DELETE_DETECTOR);
         // By the time request reaches here, the user permissions are validated by Security plugin.
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
@@ -120,7 +119,8 @@ public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction
                 }, listener),
                 client,
                 clusterService,
-                xContentRegistry
+                xContentRegistry,
+                GetAnomalyDetectorResponse.class
             );
         } catch (Exception e) {
             LOG.error(e);
@@ -130,7 +130,7 @@ public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction
 
     private void deleteAnomalyDetectorJobDoc(String detectorId, ActionListener<DeleteResponse> listener) {
         LOG.info("Delete anomaly detector job {}", detectorId);
-        DeleteRequest deleteRequest = new DeleteRequest(AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX, detectorId)
+        DeleteRequest deleteRequest = new DeleteRequest(CommonName.JOB_INDEX, detectorId)
             .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
         client.delete(deleteRequest, ActionListener.wrap(response -> {
             if (response.getResult() == DocWriteResponse.Result.DELETED || response.getResult() == DocWriteResponse.Result.NOT_FOUND) {
@@ -153,7 +153,7 @@ public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction
 
     private void deleteDetectorStateDoc(String detectorId, ActionListener<DeleteResponse> listener) {
         LOG.info("Delete detector info {}", detectorId);
-        DeleteRequest deleteRequest = new DeleteRequest(CommonName.DETECTION_STATE_INDEX, detectorId);
+        DeleteRequest deleteRequest = new DeleteRequest(ADCommonName.DETECTION_STATE_INDEX, detectorId);
         client
             .delete(
                 deleteRequest,
@@ -177,7 +177,7 @@ public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction
 
     private void deleteAnomalyDetectorDoc(String detectorId, ActionListener<DeleteResponse> listener) {
         LOG.info("Delete anomaly detector {}", detectorId);
-        DeleteRequest deleteRequest = new DeleteRequest(AnomalyDetector.ANOMALY_DETECTORS_INDEX, detectorId)
+        DeleteRequest deleteRequest = new DeleteRequest(CommonName.CONFIG_INDEX, detectorId)
             .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
         client.delete(deleteRequest, new ActionListener<DeleteResponse>() {
             @Override
@@ -192,9 +192,9 @@ public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction
         });
     }
 
-    private void getDetectorJob(String detectorId, ActionListener<DeleteResponse> listener, AnomalyDetectorFunction function) {
-        if (clusterService.state().metadata().indices().containsKey(ANOMALY_DETECTOR_JOB_INDEX)) {
-            GetRequest request = new GetRequest(ANOMALY_DETECTOR_JOB_INDEX).id(detectorId);
+    private void getDetectorJob(String detectorId, ActionListener<DeleteResponse> listener, TimeSeriesFunction function) {
+        if (clusterService.state().metadata().indices().containsKey(CommonName.JOB_INDEX)) {
+            GetRequest request = new GetRequest(CommonName.JOB_INDEX).id(detectorId);
             client.get(request, ActionListener.wrap(response -> onGetAdJobResponseForWrite(response, listener, function), exception -> {
                 LOG.error("Fail to get anomaly detector job: " + detectorId, exception);
                 listener.onFailure(exception);
@@ -204,7 +204,7 @@ public class DeleteAnomalyDetectorTransportAction extends HandledTransportAction
         }
     }
 
-    private void onGetAdJobResponseForWrite(GetResponse response, ActionListener<DeleteResponse> listener, AnomalyDetectorFunction function)
+    private void onGetAdJobResponseForWrite(GetResponse response, ActionListener<DeleteResponse> listener, TimeSeriesFunction function)
         throws IOException {
         if (response.isExists()) {
             String adJobId = response.getId();

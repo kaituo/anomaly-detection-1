@@ -11,12 +11,10 @@
 
 package org.opensearch.ad.transport.handler;
 
-import static org.opensearch.ad.constant.CommonErrorMessages.FAIL_TO_SEARCH;
+import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_SEARCH;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
-import static org.opensearch.ad.util.ParseUtils.addUserBackendRolesFilter;
-import static org.opensearch.ad.util.ParseUtils.getUserContext;
-import static org.opensearch.ad.util.ParseUtils.isAdmin;
-import static org.opensearch.ad.util.RestHandlerUtils.wrapRestActionListener;
+import static org.opensearch.timeseries.util.ParseUtils.isAdmin;
+import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -29,6 +27,7 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
+import org.opensearch.timeseries.util.ParseUtils;
 
 /**
  * Handle general search request, check user role and return search response.
@@ -52,7 +51,7 @@ public class ADSearchHandler {
      * @param actionListener action listerner
      */
     public void search(SearchRequest request, ActionListener<SearchResponse> actionListener) {
-        User user = getUserContext(client);
+        User user = ParseUtils.getUserContext(client);
         ActionListener<SearchResponse> listener = wrapRestActionListener(actionListener, FAIL_TO_SEARCH);
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             validateRole(request, user, listener);
@@ -72,7 +71,7 @@ public class ADSearchHandler {
         } else {
             // Security is enabled, filter is enabled and user isn't admin
             try {
-                addUserBackendRolesFilter(user, request.source());
+                ParseUtils.addUserBackendRolesFilter(user, request.source());
                 logger.debug("Filtering result by " + user.getBackendRoles());
                 client.search(request, listener);
             } catch (Exception e) {

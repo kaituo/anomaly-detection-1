@@ -21,6 +21,7 @@ import junitparams.Parameters;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.opensearch.timeseries.dataprocessor.IntegerSensitiveSingleFeatureLinearUniformInterpolator;
 
 @RunWith(JUnitParamsRunner.class)
 public class IntegerSensitiveSingleFeatureLinearUniformInterpolatorTests {
@@ -42,6 +43,6 @@ public class IntegerSensitiveSingleFeatureLinearUniformInterpolatorTests {
     @Test
     @Parameters(method = "interpolateData")
     public void interpolate_returnExpected(double[] samples, int num, double[] expected) {
-        assertTrue(Arrays.equals(expected, interpolator.interpolate(samples, num)));
+        assertTrue(Arrays.equals(expected, interpolator.impute(samples, num)));
     }
 }

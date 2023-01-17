@@ -21,6 +21,8 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
 import org.junit.runners.Parameterized.Parameters;
+import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.dataprocessor.SingleFeatureLinearUniformInterpolator;
 
 @RunWith(Parameterized.class)
 public class LinearUniformInterpolatorTests {
@@ -47,7 +49,7 @@ public class LinearUniformInterpolatorTests {
     private double[][] input;
     private int numInterpolants;
     private double[][] expected;
-    private LinearUniformInterpolator interpolator;
+    private LinearUniformImputer interpolator;
 
     public LinearUniformInterpolatorTests(double[][] input, int numInterpolants, double[][] expected) {
         this.input = input;
@@ -57,12 +59,12 @@ public class LinearUniformInterpolatorTests {
 
     @Before
     public void setUp() {
-        this.interpolator = new LinearUniformInterpolator(new SingleFeatureLinearUniformInterpolator());
+        this.interpolator = new LinearUniformImputer(new SingleFeatureLinearUniformInterpolator());
     }
 
     @Test
     public void testInterpolation() {
-        double[][] actual = interpolator.interpolate(input, numInterpolants);
+        double[][] actual = interpolator.impute(input, numInterpolants);
         double delta = 1e-8;
         int numFeatures = expected.length;
 

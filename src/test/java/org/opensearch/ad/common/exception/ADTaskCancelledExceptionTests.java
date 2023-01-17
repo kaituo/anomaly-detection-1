@@ -12,6 +12,7 @@
 package org.opensearch.ad.common.exception;
 
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.common.exception.ADTaskCancelledException;
 
 public class ADTaskCancelledExceptionTests extends OpenSearchTestCase {
 

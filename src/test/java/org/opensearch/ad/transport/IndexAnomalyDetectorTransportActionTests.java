@@ -35,14 +35,12 @@ import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.NodeStateManager;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.feature.SearchFeatureDao;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -61,6 +59,9 @@ import org.opensearch.search.SearchHits;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableMap;
@@ -97,17 +98,17 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
             .put(IndexMetadata.SETTING_VERSION_CREATED, Version.CURRENT)
             .build();
         final Settings.Builder existingSettings = Settings.builder().put(indexSettings).put(IndexMetadata.SETTING_INDEX_UUID, "test2UUID");
-        IndexMetadata indexMetaData = IndexMetadata.builder(AnomalyDetector.ANOMALY_DETECTORS_INDEX).settings(existingSettings).build();
+        IndexMetadata indexMetaData = IndexMetadata.builder(CommonName.CONFIG_INDEX).settings(existingSettings).build();
         final ImmutableOpenMap<String, IndexMetadata> indices = ImmutableOpenMap
             .<String, IndexMetadata>builder()
-            .fPut(AnomalyDetector.ANOMALY_DETECTORS_INDEX, indexMetaData)
+            .fPut(CommonName.CONFIG_INDEX, indexMetaData)
             .build();
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().indices(indices).build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
         adTaskManager = mock(ADTaskManager.class);
         searchFeatureDao = mock(SearchFeatureDao.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         action = new IndexAnomalyDetectorTransportAction(
             mock(TransportService.class),
@@ -124,7 +125,7 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
         task = mock(Task.class);
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
         GetResponse getDetectorResponse = TestHelpers
-            .createGetResponse(detector, detector.getDetectorId(), AnomalyDetector.ANOMALY_DETECTORS_INDEX);
+            .createGetResponse(detector, detector.getId(), CommonName.CONFIG_INDEX);
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             assertTrue(

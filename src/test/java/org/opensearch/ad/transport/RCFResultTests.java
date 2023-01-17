@@ -38,17 +38,12 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.cluster.HashRing;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
-import org.opensearch.ad.common.exception.LimitExceededException;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
-import org.opensearch.ad.stats.ADStat;
 import org.opensearch.ad.stats.ADStats;
-import org.opensearch.ad.stats.StatNames;
 import org.opensearch.ad.stats.suppliers.CounterSupplier;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.Strings;
@@ -59,6 +54,11 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.cluster.HashRing;
+import org.opensearch.timeseries.common.exception.LimitExceededException;
+import org.opensearch.timeseries.stats.StatNames;
+import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
 
@@ -88,10 +88,10 @@ public class RCFResultTests extends OpenSearchTestCase {
         hashRing = mock(HashRing.class);
         node = mock(DiscoveryNode.class);
         doReturn(Optional.of(node)).when(hashRing).getNodeByAddress(any());
-        Map<String, ADStat<?>> statsMap = new HashMap<String, ADStat<?>>() {
+        Map<String, TimeSeriesStat<?>> statsMap = new HashMap<String, TimeSeriesStat<?>>() {
             {
-                put(StatNames.AD_HC_EXECUTE_FAIL_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
-                put(StatNames.MODEL_CORRUTPION_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
+                put(StatNames.AD_HC_EXECUTE_FAIL_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
+                put(StatNames.MODEL_CORRUTPION_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
             }
         };
 
@@ -110,8 +110,8 @@ public class RCFResultTests extends OpenSearchTestCase {
             Collections.emptySet()
         );
 
-        ModelManager manager = mock(ModelManager.class);
-        ADCircuitBreakerService adCircuitBreakerService = mock(ADCircuitBreakerService.class);
+        ADModelManager manager = mock(ADModelManager.class);
+        TimeSeriesCircuitBreakerService adCircuitBreakerService = mock(TimeSeriesCircuitBreakerService.class);
         RCFResultTransportAction action = new RCFResultTransportAction(
             mock(ActionFilters.class),
             transportService,
@@ -168,8 +168,8 @@ public class RCFResultTests extends OpenSearchTestCase {
             Collections.emptySet()
         );
 
-        ModelManager manager = mock(ModelManager.class);
-        ADCircuitBreakerService adCircuitBreakerService = mock(ADCircuitBreakerService.class);
+        ADModelManager manager = mock(ADModelManager.class);
+        TimeSeriesCircuitBreakerService adCircuitBreakerService = mock(TimeSeriesCircuitBreakerService.class);
         RCFResultTransportAction action = new RCFResultTransportAction(
             mock(ActionFilters.class),
             transportService,
@@ -243,7 +243,7 @@ public class RCFResultTests extends OpenSearchTestCase {
 
     public void testEmptyID() {
         ActionRequestValidationException e = new RCFResultRequest(null, "123-rcf-1", new double[] { 0 }).validate();
-        assertThat(e.validationErrors(), Matchers.hasItem(CommonErrorMessages.AD_ID_MISSING_MSG));
+        assertThat(e.validationErrors(), Matchers.hasItem(ADCommonMessages.AD_ID_MISSING_MSG));
     }
 
     public void testFeatureIsNull() {
@@ -268,8 +268,8 @@ public class RCFResultTests extends OpenSearchTestCase {
         request.toXContent(builder, ToXContent.EMPTY_PARAMS);
 
         String json = Strings.toString(builder);
-        assertEquals(JsonDeserializer.getTextValue(json, CommonName.ID_JSON_KEY), request.getAdID());
-        assertArrayEquals(JsonDeserializer.getDoubleArrayValue(json, CommonName.FEATURE_JSON_KEY), request.getFeatures(), 0.001);
+        assertEquals(JsonDeserializer.getTextValue(json, ADCommonName.ID_JSON_KEY), request.getAdID());
+        assertArrayEquals(JsonDeserializer.getDoubleArrayValue(json, ADCommonName.FEATURE_JSON_KEY), request.getFeatures(), 0.001);
     }
 
     @SuppressWarnings("unchecked")
@@ -284,8 +284,8 @@ public class RCFResultTests extends OpenSearchTestCase {
             Collections.emptySet()
         );
 
-        ModelManager manager = mock(ModelManager.class);
-        ADCircuitBreakerService breakerService = mock(ADCircuitBreakerService.class);
+        ADModelManager manager = mock(ADModelManager.class);
+        TimeSeriesCircuitBreakerService breakerService = mock(TimeSeriesCircuitBreakerService.class);
         RCFResultTransportAction action = new RCFResultTransportAction(
             mock(ActionFilters.class),
             transportService,
@@ -335,8 +335,8 @@ public class RCFResultTests extends OpenSearchTestCase {
             Collections.emptySet()
         );
 
-        ModelManager manager = mock(ModelManager.class);
-        ADCircuitBreakerService adCircuitBreakerService = mock(ADCircuitBreakerService.class);
+        ADModelManager manager = mock(ADModelManager.class);
+        TimeSeriesCircuitBreakerService adCircuitBreakerService = mock(TimeSeriesCircuitBreakerService.class);
         RCFResultTransportAction action = new RCFResultTransportAction(
             mock(ActionFilters.class),
             transportService,

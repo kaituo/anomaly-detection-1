@@ -18,6 +18,7 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_MULTI_ENTIT
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_SINGLE_ENTITY_ANOMALY_DETECTORS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.REQUEST_TIMEOUT;
 
+import org.opensearch.ad.settings.ADNumericSetting;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
@@ -31,6 +32,7 @@ public abstract class AbstractAnomalyDetectorAction extends BaseRestHandler {
     protected volatile Integer maxSingleEntityDetectors;
     protected volatile Integer maxMultiEntityDetectors;
     protected volatile Integer maxAnomalyFeatures;
+    protected volatile Integer maxCategoricalFields;
 
     public AbstractAnomalyDetectorAction(Settings settings, ClusterService clusterService) {
         this.requestTimeout = REQUEST_TIMEOUT.get(settings);
@@ -39,6 +41,7 @@ public abstract class AbstractAnomalyDetectorAction extends BaseRestHandler {
         this.maxSingleEntityDetectors = MAX_SINGLE_ENTITY_ANOMALY_DETECTORS.get(settings);
         this.maxMultiEntityDetectors = MAX_MULTI_ENTITY_ANOMALY_DETECTORS.get(settings);
         this.maxAnomalyFeatures = MAX_ANOMALY_FEATURES.get(settings);
+        this.maxCategoricalFields = ADNumericSetting.maxCategoricalFields();
         // TODO: will add more cluster setting consumer later
         // TODO: inject ClusterSettings only if clusterService is only used to get ClusterSettings
         clusterService.getClusterSettings().addSettingsUpdateConsumer(REQUEST_TIMEOUT, it -> requestTimeout = it);

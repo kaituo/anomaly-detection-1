@@ -61,18 +61,9 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
-import org.opensearch.ad.AnomalyDetectorPlugin;
-import org.opensearch.ad.NodeStateManager;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.dataprocessor.Interpolator;
-import org.opensearch.ad.dataprocessor.LinearUniformInterpolator;
-import org.opensearch.ad.dataprocessor.SingleFeatureLinearUniformInterpolator;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.model.IntervalTimeConfiguration;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.ParseUtils;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -103,6 +94,17 @@ import org.opensearch.search.aggregations.metrics.MinAggregationBuilder;
 import org.opensearch.search.aggregations.metrics.Percentile;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.common.exception.EndRunException;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.dataprocessor.Imputer;
+import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.dataprocessor.SingleFeatureLinearUniformInterpolator;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.powermock.api.mockito.PowerMockito;
 import org.powermock.core.classloader.annotations.PowerMockIgnore;
 import org.powermock.core.classloader.annotations.PrepareForTest;
@@ -147,7 +149,7 @@ public class SearchFeatureDaoTests {
     @Mock
     private Max max;
     @Mock
-    private NodeStateManager stateManager;
+    private ADNodeStateManager stateManager;
 
     @Mock
     private AnomalyDetector detector;
@@ -168,7 +170,7 @@ public class SearchFeatureDaoTests {
     private IntervalTimeConfiguration detectionInterval;
     private String detectorId;
     private Gson gson;
-    private Interpolator interpolator;
+    private Imputer interpolator;
     private Settings settings;
 
     @Before
@@ -176,10 +178,10 @@ public class SearchFeatureDaoTests {
         MockitoAnnotations.initMocks(this);
         PowerMockito.mockStatic(ParseUtils.class);
 
-        interpolator = new LinearUniformInterpolator(new SingleFeatureLinearUniformInterpolator());
+        interpolator = new LinearUniformImputer(new SingleFeatureLinearUniformInterpolator());
 
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(AnomalyDetectorPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();
@@ -189,12 +191,12 @@ public class SearchFeatureDaoTests {
         settings = Settings.EMPTY;
 
         when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
         searchFeatureDao = spy(
             new SearchFeatureDao(client, xContent, interpolator, clientUtil, settings, null, AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE)
@@ -203,10 +205,10 @@ public class SearchFeatureDaoTests {
         detectionInterval = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);
         detectorId = "123";
 
-        when(detector.getDetectorId()).thenReturn(detectorId);
+        when(detector.getId()).thenReturn(detectorId);
         when(detector.getTimeField()).thenReturn("testTimeField");
         when(detector.getIndices()).thenReturn(Arrays.asList("testIndices"));
-        when(detector.getDetectionInterval()).thenReturn(detectionInterval);
+        when(detector.getInterval()).thenReturn(detectionInterval);
         when(detector.getFilterQuery()).thenReturn(QueryBuilders.matchAllQuery());
         when(detector.getCategoryField()).thenReturn(Collections.singletonList("a"));
 
@@ -611,7 +613,7 @@ public class SearchFeatureDaoTests {
 
         ActionListener<Optional<Long>> listener = mock(ActionListener.class);
         Entity entity = Entity.createSingleAttributeEntity("field", "app_1");
-        searchFeatureDao.getEntityMinDataTime(detector, entity, listener);
+        searchFeatureDao.getMinDataTime(detector, entity, listener);
 
         ArgumentCaptor<Optional<Long>> captor = ArgumentCaptor.forClass(Optional.class);
         verify(listener).onResponse(captor.capture());

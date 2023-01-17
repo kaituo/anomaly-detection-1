@@ -11,8 +11,8 @@
 
 package org.opensearch.ad.transport;
 
-import static org.opensearch.ad.constant.CommonErrorMessages.FAIL_TO_GET_STATS;
-import static org.opensearch.ad.util.RestHandlerUtils.wrapRestActionListener;
+import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_GET_STATS;
+import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
 import java.util.HashMap;
 import java.util.List;
@@ -28,10 +28,7 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorType;
-import org.opensearch.ad.stats.ADStats;
-import org.opensearch.ad.stats.ADStatsResponse;
-import org.opensearch.ad.stats.StatNames;
-import org.opensearch.ad.util.MultiResponsesDelegateActionListener;
+import org.opensearch.timeseries.stats.TimeSeriesStats;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -42,6 +39,9 @@ import org.opensearch.search.aggregations.bucket.terms.StringTerms;
 import org.opensearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.stats.StatNames;
+import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.transport.TransportService;
 
 public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<ADStatsRequest, StatsAnomalyDetectorResponse> {
@@ -49,7 +49,7 @@ public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<
     private final Logger logger = LogManager.getLogger(StatsAnomalyDetectorTransportAction.class);
 
     private final Client client;
-    private final ADStats adStats;
+    private final TimeSeriesStats adStats;
     private final ClusterService clusterService;
 
     @Inject
@@ -57,7 +57,7 @@ public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<
         TransportService transportService,
         ActionFilters actionFilters,
         Client client,
-        ADStats adStats,
+        TimeSeriesStats adStats,
         ClusterService clusterService
 
     ) {
@@ -129,11 +129,11 @@ public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<
         if ((adStatsRequest.getStatsToBeRetrieved().contains(StatNames.DETECTOR_COUNT.getName())
             || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName())
             || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.MULTI_ENTITY_DETECTOR_COUNT.getName()))
-            && clusterService.state().getRoutingTable().hasIndex(AnomalyDetector.ANOMALY_DETECTORS_INDEX)) {
+            && clusterService.state().getRoutingTable().hasIndex(CommonName.CONFIG_INDEX)) {
 
             TermsAggregationBuilder termsAgg = AggregationBuilders.terms(DETECTOR_TYPE_AGG).field(AnomalyDetector.DETECTOR_TYPE_FIELD);
             SearchRequest request = new SearchRequest()
-                .indices(AnomalyDetector.ANOMALY_DETECTORS_INDEX)
+                .indices(CommonName.CONFIG_INDEX)
                 .source(new SearchSourceBuilder().aggregation(termsAgg).size(0).trackTotalHits(true));
 
             client.search(request, ActionListener.wrap(r -> {

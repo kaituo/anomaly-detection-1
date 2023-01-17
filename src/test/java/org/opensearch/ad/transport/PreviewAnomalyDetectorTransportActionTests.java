@@ -47,16 +47,11 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.AnomalyDetectorRunner;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.feature.Features;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.RestHandlerUtils;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -75,6 +70,12 @@ import org.opensearch.rest.RestStatus;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.feature.Features;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableMap;
@@ -85,9 +86,9 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     private AnomalyDetectorRunner runner;
     private ClusterService clusterService;
     private FeatureManager featureManager;
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private Task task;
-    private ADCircuitBreakerService circuitBreaker;
+    private TimeSeriesCircuitBreakerService circuitBreaker;
 
     @Override
     @Before
@@ -120,18 +121,18 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
             .put(IndexMetadata.SETTING_VERSION_CREATED, Version.CURRENT)
             .build();
         final Settings.Builder existingSettings = Settings.builder().put(indexSettings).put(IndexMetadata.SETTING_INDEX_UUID, "test2UUID");
-        IndexMetadata indexMetaData = IndexMetadata.builder(AnomalyDetector.ANOMALY_DETECTORS_INDEX).settings(existingSettings).build();
+        IndexMetadata indexMetaData = IndexMetadata.builder(CommonName.CONFIG_INDEX).settings(existingSettings).build();
         final ImmutableOpenMap<String, IndexMetadata> indices = ImmutableOpenMap
             .<String, IndexMetadata>builder()
-            .fPut(AnomalyDetector.ANOMALY_DETECTORS_INDEX, indexMetaData)
+            .fPut(CommonName.CONFIG_INDEX, indexMetaData)
             .build();
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().indices(indices).build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
         featureManager = mock(FeatureManager.class);
-        modelManager = mock(ModelManager.class);
+        modelManager = mock(ADModelManager.class);
         runner = new AnomalyDetectorRunner(modelManager, featureManager, AnomalyDetectorSettings.MAX_PREVIEW_RESULTS);
-        circuitBreaker = mock(ADCircuitBreakerService.class);
+        circuitBreaker = mock(TimeSeriesCircuitBreakerService.class);
         when(circuitBreaker.isOpen()).thenReturn(false);
         action = new PreviewAnomalyDetectorTransportAction(
             Settings.EMPTY,
@@ -152,7 +153,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
         PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
             detector,
-            detector.getDetectorId(),
+            detector.getId(),
             Instant.now(),
             Instant.now()
         );
@@ -199,7 +200,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(Collections.emptyList());
         PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
             detector,
-            detector.getDetectorId(),
+            detector.getId(),
             Instant.now(),
             Instant.now()
         );
@@ -267,7 +268,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(null, "1234", Instant.now(), Instant.now());
         Settings indexSettings = Settings.builder().put("index.number_of_shards", 5).put("index.number_of_replicas", 1).build();
-        CreateIndexRequest indexRequest = new CreateIndexRequest(AnomalyDetector.ANOMALY_DETECTORS_INDEX, indexSettings);
+        CreateIndexRequest indexRequest = new CreateIndexRequest(CommonName.CONFIG_INDEX, indexSettings);
         client().admin().indices().create(indexRequest).actionGet();
         ActionListener<PreviewAnomalyDetectorResponse> previewResponse = new ActionListener<PreviewAnomalyDetectorResponse>() {
             @Override
@@ -309,13 +310,13 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
         PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
             detector,
-            detector.getDetectorId(),
+            detector.getId(),
             Instant.now(),
             Instant.now()
         );
 
         GetResponse getDetectorResponse = TestHelpers
-            .createGetResponse(detector, detector.getDetectorId(), AnomalyDetector.ANOMALY_DETECTORS_INDEX);
+            .createGetResponse(detector, detector.getId(), CommonName.CONFIG_INDEX);
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             assertTrue(
@@ -352,11 +353,11 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportActionWithDetector() throws IOException, InterruptedException {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         CreateIndexResponse createResponse = TestHelpers
-            .createIndex(client().admin(), AnomalyDetector.ANOMALY_DETECTORS_INDEX, AnomalyDetectionIndices.getAnomalyDetectorMappings());
+            .createIndex(client().admin(), CommonName.CONFIG_INDEX, AnomalyDetectionIndices.getConfigMappings());
         Assert.assertNotNull(createResponse);
 
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
-        IndexRequest indexRequest = new IndexRequest(AnomalyDetector.ANOMALY_DETECTORS_INDEX)
+        IndexRequest indexRequest = new IndexRequest(CommonName.CONFIG_INDEX)
             .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE)
             .source(detector.toXContent(XContentFactory.jsonBuilder(), RestHandlerUtils.XCONTENT_WITH_TYPE));
         IndexResponse indexResponse = client().index(indexRequest).actionGet(5_000);
@@ -409,7 +410,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
         AnomalyDetector detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(null, Arrays.asList("a"));
         PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
             detector,
-            detector.getDetectorId(),
+            detector.getId(),
             Instant.now(),
             Instant.now()
         );
@@ -426,7 +427,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
             @Override
             public void onFailure(Exception e) {
                 Assert.assertTrue("actual class: " + e.getClass(), e instanceof OpenSearchStatusException);
-                Assert.assertTrue(e.getMessage().contains(CommonErrorMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG));
+                Assert.assertTrue(e.getMessage().contains(CommonMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG));
                 inProgressLatch.countDown();
             }
         };

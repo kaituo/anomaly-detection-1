@@ -43,9 +43,8 @@ import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.action.support.master.AcknowledgedResponse;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
+import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -61,6 +60,7 @@ import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.TransportService;
 
 import test.org.opensearch.ad.util.ClusterCreation;
@@ -150,12 +150,12 @@ public class DeleteTests extends AbstractADTest {
 
     public void testEmptyIDDeleteModel() {
         ActionRequestValidationException e = new DeleteModelRequest("").validate();
-        assertThat(e.validationErrors(), Matchers.hasItem(CommonErrorMessages.AD_ID_MISSING_MSG));
+        assertThat(e.validationErrors(), Matchers.hasItem(ADCommonMessages.AD_ID_MISSING_MSG));
     }
 
     public void testEmptyIDStopDetector() {
         ActionRequestValidationException e = new StopDetectorRequest().validate();
-        assertThat(e.validationErrors(), hasItem(CommonErrorMessages.AD_ID_MISSING_MSG));
+        assertThat(e.validationErrors(), hasItem(ADCommonMessages.AD_ID_MISSING_MSG));
     }
 
     public void testValidIDStopDetector() {
@@ -187,7 +187,7 @@ public class DeleteTests extends AbstractADTest {
         request.toXContent(builder, ToXContent.EMPTY_PARAMS);
 
         String json = Strings.toString(builder);
-        assertEquals(JsonDeserializer.getTextValue(json, CommonName.ID_JSON_KEY), requestSupplier.get());
+        assertEquals(JsonDeserializer.getTextValue(json, ADCommonName.ID_JSON_KEY), requestSupplier.get());
     }
 
     public void testJsonRequestStopDetector() throws IOException, JsonPathNotFoundException {

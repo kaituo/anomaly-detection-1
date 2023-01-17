@@ -23,16 +23,16 @@ import java.util.Optional;
 
 import org.opensearch.action.ActionListener;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.NodeStateManager;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.model.Entity;
 
 public class AbstractRateLimitingTest extends AbstractADTest {
     Clock clock;
     AnomalyDetector detector;
-    NodeStateManager nodeStateManager;
+    ADNodeStateManager nodeStateManager;
     String detectorId;
     String categoryField;
     Entity entity, entity2, entity3;
@@ -52,12 +52,12 @@ public class AbstractRateLimitingTest extends AbstractADTest {
         detectorId = "123";
         detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(detectorId, Arrays.asList(categoryField));
 
-        nodeStateManager = mock(NodeStateManager.class);
+        nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
 
         entity = Entity.createSingleAttributeEntity(categoryField, "value");
         entity2 = Entity.createSingleAttributeEntity(categoryField, "value2");
