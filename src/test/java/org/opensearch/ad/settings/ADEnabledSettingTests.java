@@ -19,6 +19,7 @@ import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.settings.TimeSeriesEnabledSetting;
 
 public class ADEnabledSettingTests extends OpenSearchTestCase {
 
@@ -30,9 +31,9 @@ public class ADEnabledSettingTests extends OpenSearchTestCase {
     }
 
     public void testIsADBreakerEnabled() {
-        assertTrue(ADEnabledSetting.isADBreakerEnabled());
+        assertTrue(TimeSeriesEnabledSetting.isBreakerEnabled());
         ADEnabledSetting.getInstance().setSettingValue(ADEnabledSetting.AD_BREAKER_ENABLED, false);
-        assertTrue(!ADEnabledSetting.isADBreakerEnabled());
+        assertTrue(!TimeSeriesEnabledSetting.isBreakerEnabled());
     }
 
     public void testIsInterpolationInColdStartEnabled() {

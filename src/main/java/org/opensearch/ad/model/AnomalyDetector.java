@@ -47,9 +47,11 @@ import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.ShingleGetter;
 import org.opensearch.timeseries.model.TimeConfiguration;
 import org.opensearch.timeseries.model.ValidationAspect;
 import org.opensearch.timeseries.model.ValidationIssueType;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ParseUtils;
 
 /**
@@ -59,6 +61,33 @@ import org.opensearch.timeseries.util.ParseUtils;
  *      in code rather than config it in anomaly-detection-state.json file.
  */
 public class AnomalyDetector extends Config {
+     static class ADShingleGetter implements ShingleGetter {
+         private Integer seasonIntervals;
+         public ADShingleGetter(Integer seasonIntervals) {
+             this.seasonIntervals = seasonIntervals;
+         }
+
+        /**
+         * If the given shingle size not null, return given shingle size;
+         * if seasonality not null, return max(seasonality hint / 2, horizon / 3);
+         * otherwise, return default shingle size.
+         *
+         * @param customShingleSize Given shingle size
+         * @return Shingle size
+         */
+        @Override
+        public Integer getShingleSize(Integer customShingleSize) {
+            if (customShingleSize != null) {
+                return customShingleSize;
+            }
+
+            if (seasonIntervals != null) {
+                return seasonIntervals / TimeSeriesSettings.SEASONALITY_TO_SHINGLE_RATIO;
+            }
+
+            return TimeSeriesSettings.DEFAULT_SHINGLE_SIZE;
+        }
+    }
 
     public static final String PARSE_FIELD_NAME = "AnomalyDetector";
     public static final NamedXContentRegistry.Entry XCONTENT_REGISTRY = new NamedXContentRegistry.Entry(
@@ -105,6 +134,8 @@ public class AnomalyDetector extends Config {
      * @param user              user to which detector is associated
      * @param resultIndex       result index
      * @param imputationOption interpolation method and optional default values
+     * @param recencyEmphasis Aggregation period to smooth the emphasis on the most recent data.
+     * @param seasonIntervals seasonality in terms of intervals
      */
     public AnomalyDetector(
         String detectorId,
@@ -124,7 +155,9 @@ public class AnomalyDetector extends Config {
         List<String> categoryFields,
         User user,
         String resultIndex,
-        ImputationOption imputationOption
+        ImputationOption imputationOption,
+        Integer recencyEmphasis,
+        Integer seasonIntervals
     ) {
         super(
             detectorId,
@@ -144,7 +177,10 @@ public class AnomalyDetector extends Config {
             user,
             resultIndex,
             detectionInterval,
-            imputationOption
+            imputationOption,
+            recencyEmphasis,
+            seasonIntervals,
+            new ADShingleGetter(seasonIntervals)
         );
 
         checkAndThrowValidationErrors(ValidationAspect.DETECTOR);
@@ -211,6 +247,8 @@ public class AnomalyDetector extends Config {
             this.imputationOption = null;
         }
         this.imputer = createImputer();
+        this.recencyEmphasis = input.readInt();
+        this.seasonIntervals = input.readInt();
     }
 
     public XContentBuilder toXContent(XContentBuilder builder) throws IOException {
@@ -264,6 +302,8 @@ public class AnomalyDetector extends Config {
         } else {
             output.writeBoolean(false);
         }
+        output.writeInt(recencyEmphasis);
+        output.writeInt(seasonIntervals);
     }
 
     @Override
@@ -350,6 +390,8 @@ public class AnomalyDetector extends Config {
 
         List<String> categoryField = null;
         ImputationOption imputationOption = null;
+        Integer recencyEmphasis = null;
+        Integer seasonality = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -460,6 +502,12 @@ public class AnomalyDetector extends Config {
                 case IMPUTATION_OPTION_FIELD:
                     imputationOption = ImputationOption.parse(parser);
                     break;
+                case RECENCY_EMPHASIS_FIELD:
+                    recencyEmphasis = parser.intValue();
+                    break;
+                case SEASONALITY_FIELD:
+                    seasonality = parser.intValue();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -476,14 +524,16 @@ public class AnomalyDetector extends Config {
             filterQuery,
             detectionInterval,
             windowDelay,
-            getShingleSize(shingleSize),
+            shingleSize,
             uiMetadata,
             schemaVersion,
             lastUpdateTime,
             categoryField,
             user,
             resultIndex,
-            imputationOption
+            imputationOption,
+            recencyEmphasis,
+            seasonality
         );
         detector.setDetectionDateRange(detectionDateRange);
         return detector;

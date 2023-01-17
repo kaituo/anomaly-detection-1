@@ -11,6 +11,9 @@
 
 package org.opensearch.ad.rest;
 
+import static org.opensearch.test.OpenSearchTestCase.randomInt;
+import static org.opensearch.test.OpenSearchTestCase.randomIntBetween;
+
 import java.io.IOException;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -38,6 +41,7 @@ import org.opensearch.commons.rest.SecureRestClientBuilder;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import com.google.common.collect.ImmutableList;
 
@@ -262,7 +266,9 @@ public class SecureADRestIT extends AnomalyDetectorRestTestCase {
                 ImmutableList.of(randomAlphaOfLength(5))
             ),
             null,
-            aliceDetector.getImputationOption()
+            aliceDetector.getImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
         // User client has admin all access, and has "opensearch" backend role so client should be able to update detector
         // But the detector's backend role should not be replaced as client's backend roles (all_access).
@@ -309,7 +315,9 @@ public class SecureADRestIT extends AnomalyDetectorRestTestCase {
                 ImmutableList.of(randomAlphaOfLength(5))
             ),
             null,
-            aliceDetector.getImputationOption()
+            aliceDetector.getImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
         enableFilterBy();
         // User Fish has AD full access, and has "odfe" backend role which is one of Alice's backend role, so

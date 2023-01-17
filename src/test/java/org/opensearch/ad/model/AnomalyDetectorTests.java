@@ -11,10 +11,10 @@
 
 package org.opensearch.ad.model;
 
-import static org.opensearch.ad.constant.ADCommonMessages.INVALID_RESULT_INDEX_PREFIX;
 import static org.opensearch.ad.constant.ADCommonName.CUSTOM_RESULT_INDEX_PREFIX;
 import static org.opensearch.ad.model.AnomalyDetector.MAX_RESULT_INDEX_NAME_SIZE;
-import static org.opensearch.timeseries.constant.CommonMessages.INVALID_CHAR_IN_RESULT_INDEX_NAME;
+import static org.opensearch.test.OpenSearchTestCase.randomInt;
+import static org.opensearch.test.OpenSearchTestCase.randomIntBetween;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -30,6 +30,8 @@ import org.opensearch.index.query.MatchAllQueryBuilder;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.ValidationException;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
@@ -316,7 +318,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                     null,
                     TestHelpers.randomUser(),
                     null,
-                    TestHelpers.randomImputationOption()
+                    TestHelpers.randomImputationOption(),
+                    randomIntBetween(1, 10000),
+                    randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
                 )
             );
     }
@@ -343,8 +347,10 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                     null,
                     TestHelpers.randomUser(),
                     null,
-                    TestHelpers.randomImputationOption()
-                )
+                    TestHelpers.randomImputationOption(),
+                    randomIntBetween(1, 10000),
+                    randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
+                    )
             );
     }
 
@@ -370,7 +376,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                     null,
                     TestHelpers.randomUser(),
                     null,
-                    TestHelpers.randomImputationOption()
+                    TestHelpers.randomImputationOption(),
+                    randomIntBetween(1, 10000),
+                    randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
                 )
             );
     }
@@ -397,7 +405,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                     null,
                     TestHelpers.randomUser(),
                     null,
-                    TestHelpers.randomImputationOption()
+                    TestHelpers.randomImputationOption(),
+                    randomIntBetween(1, 10000),
+                    randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
                 )
             );
     }
@@ -424,7 +434,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                     null,
                     TestHelpers.randomUser(),
                     null,
-                    TestHelpers.randomImputationOption()
+                    TestHelpers.randomImputationOption(),
+                    randomIntBetween(1, 10000),
+                    randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
                 )
             );
     }
@@ -451,7 +463,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                     null,
                     TestHelpers.randomUser(),
                     null,
-                    TestHelpers.randomImputationOption()
+                    TestHelpers.randomImputationOption(),
+                    randomIntBetween(1, 10000),
+                    randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
                 )
             );
     }
@@ -478,7 +492,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                     null,
                     TestHelpers.randomUser(),
                     null,
-                    TestHelpers.randomImputationOption()
+                    TestHelpers.randomImputationOption(),
+                    randomIntBetween(1, 10000),
+                    randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
                 )
             );
     }
@@ -504,7 +520,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                 null,
                 null,
                 null,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                randomInt(),
+                randomInt()
             )
         );
         assertEquals("Detection interval must be a positive integer", exception.getMessage());
@@ -531,7 +549,9 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
                 null,
                 null,
                 null,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                randomInt(),
+                randomInt()
             )
         );
         assertEquals("Interval -1 should be non-negative", exception.getMessage());
@@ -553,7 +573,7 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     public void testGetShingleSize() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
+        Config anomalyDetector = new AnomalyDetector(
             randomAlphaOfLength(5),
             randomLong(),
             randomAlphaOfLength(5),
@@ -571,13 +591,15 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             null,
             TestHelpers.randomUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
         assertEquals((int) anomalyDetector.getShingleSize(), 5);
     }
 
     public void testGetShingleSizeReturnsDefaultValue() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
+        Config anomalyDetector = new AnomalyDetector(
             randomAlphaOfLength(5),
             randomLong(),
             randomAlphaOfLength(5),
@@ -595,13 +617,15 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             null,
             TestHelpers.randomUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
         assertEquals((int) anomalyDetector.getShingleSize(), TimeSeriesSettings.DEFAULT_SHINGLE_SIZE);
     }
 
     public void testNullFeatureAttributes() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
+        Config anomalyDetector = new AnomalyDetector(
             randomAlphaOfLength(5),
             randomLong(),
             randomAlphaOfLength(5),
@@ -619,21 +643,23 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             null,
             TestHelpers.randomUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
         assertNotNull(anomalyDetector.getFeatureAttributes());
         assertEquals(0, anomalyDetector.getFeatureAttributes().size());
     }
 
     public void testValidateResultIndex() throws IOException {
-        AnomalyDetector anomalyDetector = new AnomalyDetector(
+        Config anomalyDetector = new AnomalyDetector(
             randomAlphaOfLength(5),
             randomLong(),
             randomAlphaOfLength(5),
             randomAlphaOfLength(5),
             randomAlphaOfLength(5),
             ImmutableList.of(randomAlphaOfLength(5)),
-            ImmutableList.of(TestHelpers.randomFeature()),
+            null,
             TestHelpers.randomQuery(),
             TestHelpers.randomIntervalTimeConfiguration(),
             TestHelpers.randomIntervalTimeConfiguration(),
@@ -644,11 +670,12 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             null,
             TestHelpers.randomUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomInt(),
+            randomInt()
         );
-
         String errorMessage = anomalyDetector.validateCustomResultIndex("abc");
-        assertEquals(INVALID_RESULT_INDEX_PREFIX, errorMessage);
+        assertEquals(ADCommonMessages.INVALID_RESULT_INDEX_PREFIX, errorMessage);
 
         StringBuilder resultIndexNameBuilder = new StringBuilder(CUSTOM_RESULT_INDEX_PREFIX);
         for (int i = 0; i < MAX_RESULT_INDEX_NAME_SIZE - CUSTOM_RESULT_INDEX_PREFIX.length(); i++) {
@@ -658,10 +685,10 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
         resultIndexNameBuilder.append("a");
 
         errorMessage = anomalyDetector.validateCustomResultIndex(resultIndexNameBuilder.toString());
-        assertEquals(AnomalyDetector.INVALID_RESULT_INDEX_NAME_SIZE, errorMessage);
+        assertEquals(Config.INVALID_RESULT_INDEX_NAME_SIZE, errorMessage);
 
         errorMessage = anomalyDetector.validateCustomResultIndex(CUSTOM_RESULT_INDEX_PREFIX + "abc#");
-        assertEquals(INVALID_CHAR_IN_RESULT_INDEX_NAME, errorMessage);
+        assertEquals(CommonMessages.INVALID_CHAR_IN_RESULT_INDEX_NAME, errorMessage);
     }
 
     public void testParseAnomalyDetectorWithNoDescription() throws IOException {

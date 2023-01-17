@@ -22,10 +22,8 @@ import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.rest.handler.IndexAnomalyDetectorJobActionHandler;
+import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.transport.AnomalyDetectorJobRequest;
-import org.opensearch.ad.transport.AnomalyDetectorJobResponse;
 import org.opensearch.ad.transport.AnomalyDetectorJobTransportAction;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
@@ -37,12 +35,14 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.transport.JobRequest;
+import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
-public class MockAnomalyDetectorJobTransportActionWithUser extends
-    HandledTransportAction<AnomalyDetectorJobRequest, AnomalyDetectorJobResponse> {
+public class MockAnomalyDetectorJobTransportActionWithUser extends HandledTransportAction<JobRequest, JobResponse> {
     private final Logger logger = LogManager.getLogger(AnomalyDetectorJobTransportAction.class);
 
     private final Client client;
@@ -55,6 +55,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
     private final ADTaskManager adTaskManager;
     private final TransportService transportService;
     private final ExecuteADResultResponseRecorder recorder;
+    private final NodeStateManager nodeStateManager;
 
     @Inject
     public MockAnomalyDetectorJobTransportActionWithUser(
@@ -66,9 +67,10 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         ADIndexManagement anomalyDetectionIndices,
         NamedXContentRegistry xContentRegistry,
         ADTaskManager adTaskManager,
-        ExecuteADResultResponseRecorder recorder
+        ExecuteADResultResponseRecorder recorder,
+        NodeStateManager nodeStateManager
     ) {
-        super(MockAnomalyDetectorJobAction.NAME, transportService, actionFilters, AnomalyDetectorJobRequest::new);
+        super(MockAnomalyDetectorJobAction.NAME, transportService, actionFilters, JobRequest::new);
         this.transportService = transportService;
         this.client = client;
         this.clusterService = clusterService;
@@ -82,15 +84,14 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         ThreadContext threadContext = new ThreadContext(settings);
         context = threadContext.stashContext();
         this.recorder = recorder;
+        this.nodeStateManager = nodeStateManager;
     }
 
     @Override
-    protected void doExecute(Task task, AnomalyDetectorJobRequest request, ActionListener<AnomalyDetectorJobResponse> listener) {
-        String detectorId = request.getDetectorID();
-        DateRange detectionDateRange = request.getDetectionDateRange();
+    protected void doExecute(Task task, JobRequest request, ActionListener<JobResponse> listener) {
+        String detectorId = request.getConfigID();
+        DateRange detectionDateRange = request.getDateRange();
         boolean historical = request.isHistorical();
-        long seqNo = request.getSeqNo();
-        long primaryTerm = request.getPrimaryTerm();
         String rawPath = request.getRawPath();
         TimeValue requestTimeout = AD_REQUEST_TIMEOUT.get(settings);
         String userStr = "user_name|backendrole1,backendrole2|roles1,role2";
@@ -102,17 +103,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
                 detectorId,
                 filterByEnabled,
                 listener,
-                (anomalyDetector) -> executeDetector(
-                    listener,
-                    detectorId,
-                    seqNo,
-                    primaryTerm,
-                    rawPath,
-                    requestTimeout,
-                    user,
-                    detectionDateRange,
-                    historical
-                ),
+                (anomalyDetector) -> executeDetector(listener, detectorId, rawPath, requestTimeout, user, detectionDateRange, historical),
                 client,
                 clusterService,
                 xContentRegistry,
@@ -125,33 +116,28 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
     }
 
     private void executeDetector(
-        ActionListener<AnomalyDetectorJobResponse> listener,
+        ActionListener<JobResponse> listener,
         String detectorId,
-        long seqNo,
-        long primaryTerm,
         String rawPath,
         TimeValue requestTimeout,
         User user,
         DateRange detectionDateRange,
         boolean historical
     ) {
-        IndexAnomalyDetectorJobActionHandler handler = new IndexAnomalyDetectorJobActionHandler(
+        ADIndexJobActionHandler handler = new ADIndexJobActionHandler(
             client,
             anomalyDetectionIndices,
-            detectorId,
-            seqNo,
-            primaryTerm,
-            requestTimeout,
             xContentRegistry,
-            transportService,
             adTaskManager,
-            recorder
+            recorder,
+            nodeStateManager,
+            Settings.EMPTY
         );
         if (rawPath.endsWith(RestHandlerUtils.START_JOB)) {
-            adTaskManager.startDetector(detectorId, detectionDateRange, handler, user, transportService, context, listener);
+            handler.startConfig(detectorId, detectionDateRange, user, transportService, context, listener);
         } else if (rawPath.endsWith(RestHandlerUtils.STOP_JOB)) {
             // Stop detector
-            adTaskManager.stopDetector(detectorId, historical, handler, user, transportService, listener);
+            handler.stopConfig(detectorId, historical, user, transportService, listener);
         }
     }
 }

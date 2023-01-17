@@ -54,6 +54,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
     User user = new User("testUser", Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     String resultIndex = null;
     Integer horizon = 1;
+    int recencyEmphasis = 20;
+    int seasonality = 20;
 
     public void testForecasterConstructor() {
         ImputationOption imputationOption = TestHelpers.randomImputationOption();
@@ -77,7 +79,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
             user,
             resultIndex,
             horizon,
-            imputationOption
+            imputationOption,
+            recencyEmphasis,
+            seasonality
         );
 
         assertEquals(forecasterId, forecaster.getId());
@@ -124,7 +128,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 user,
                 resultIndex,
                 horizon,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                recencyEmphasis,
+                seasonality
             );
         });
 
@@ -156,7 +162,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 user,
                 resultIndex,
                 horizon,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                recencyEmphasis,
+                seasonality
             );
         });
 
@@ -188,7 +196,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 user,
                 resultIndex,
                 horizon,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                recencyEmphasis,
+                seasonality
             );
         });
 
@@ -220,7 +230,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 user,
                 resultIndex,
                 horizon,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                recencyEmphasis,
+                seasonality
             );
         });
 
@@ -252,7 +264,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 user,
                 resultIndex,
                 horizon,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                recencyEmphasis,
+                seasonality
             );
         });
 
@@ -283,7 +297,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
             user,
             resultIndex,
             horizon,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            recencyEmphasis,
+            seasonality
         );
 
         assertEquals(resultIndex, forecaster.getCustomResultIndex());
@@ -312,7 +328,9 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 user,
                 resultIndex,
                 horizon,
-                TestHelpers.randomImputationOption()
+                TestHelpers.randomImputationOption(),
+                recencyEmphasis,
+                seasonality
             );
         });
 

@@ -192,9 +192,9 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             assertTrue(
-                String.format(Locale.ROOT, "The size of args is %d.  Its content is %s", args.length, Arrays.toString(args)),
-                args.length >= 2
-            );
+                    String.format(Locale.ROOT, "The size of args is %d.  Its content is %s", args.length, Arrays.toString(args)),
+                    args.length >= 2
+                    );
 
             GetRequest request = null;
             ActionListener<GetResponse> listener = null;

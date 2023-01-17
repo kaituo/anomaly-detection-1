@@ -29,7 +29,6 @@ import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.transport.AnomalyResultTests;
-import org.opensearch.ad.util.IndexUtils;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterState;
 import org.opensearch.cluster.metadata.IndexMetadata;
@@ -42,6 +41,7 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 
 public abstract class AbstractIndexHandlerTest extends AbstractTimeSeriesTest {
     enum IndexCreation {
@@ -92,7 +92,7 @@ public abstract class AbstractIndexHandlerTest extends AbstractTimeSeriesTest {
         setWriteBlockAdResultIndex(false);
         context = TestHelpers.createThreadPool();
         clientUtil = new ClientUtil(client);
-        indexUtil = new IndexUtils(client, clientUtil, clusterService, indexNameResolver);
+        indexUtil = new IndexUtils(clusterService, indexNameResolver);
     }
 
     protected void setWriteBlockAdResultIndex(boolean blocked) {

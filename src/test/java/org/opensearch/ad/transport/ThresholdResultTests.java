@@ -29,7 +29,7 @@ import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.settings.Settings;
@@ -38,6 +38,7 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.telemetry.tracing.noop.NoopTracer;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
@@ -55,10 +56,11 @@ public class ThresholdResultTests extends OpenSearchTestCase {
             TransportService.NOOP_TRANSPORT_INTERCEPTOR,
             x -> null,
             null,
-            Collections.emptySet()
+            Collections.emptySet(),
+            NoopTracer.INSTANCE
         );
 
-        ModelManager manager = mock(ModelManager.class);
+        ADModelManager manager = mock(ADModelManager.class);
         ThresholdResultTransportAction action = new ThresholdResultTransportAction(mock(ActionFilters.class), transportService, manager);
         doAnswer(invocation -> {
             ActionListener<ThresholdingResult> listener = invocation.getArgument(3);
@@ -84,10 +86,11 @@ public class ThresholdResultTests extends OpenSearchTestCase {
             TransportService.NOOP_TRANSPORT_INTERCEPTOR,
             x -> null,
             null,
-            Collections.emptySet()
+            Collections.emptySet(),
+            NoopTracer.INSTANCE
         );
 
-        ModelManager manager = mock(ModelManager.class);
+        ADModelManager manager = mock(ADModelManager.class);
         ThresholdResultTransportAction action = new ThresholdResultTransportAction(mock(ActionFilters.class), transportService, manager);
         doThrow(NullPointerException.class)
             .when(manager)

@@ -38,7 +38,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
-import org.opensearch.ad.feature.AbstractRetriever;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
@@ -79,11 +78,10 @@ import org.opensearch.timeseries.util.SecurityClientUtil;
  * DAO for features from search.
  */
 public class SearchFeatureDao extends AbstractRetriever {
-
-    protected static final String AGG_NAME_MIN = "min_timefield";
-    protected static final String AGG_NAME_TOP = "top_agg";
-
     private static final Logger logger = LogManager.getLogger(SearchFeatureDao.class);
+
+    protected static final String AGG_NAME_TOP = "top_agg";
+    protected static final String AGG_NAME_MIN = "min_timefield";
 
     // Dependencies
     private final Client client;
@@ -166,14 +164,23 @@ public class SearchFeatureDao extends AbstractRetriever {
     /**
      * Returns to listener the epoch time of the latset data under the detector.
      *
-     * @param detector info about the data
+     * @param config info about the data
      * @param listener onResponse is called with the epoch time of the latset data under the detector
      */
-    public void getLatestDataTime(AnomalyDetector detector, ActionListener<Optional<Long>> listener) {
+    public void getLatestDataTime(Config config, Optional<Entity> entity, AnalysisType context, ActionListener<Optional<Long>> listener) {
+        BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery();
+
+        if (entity.isPresent()) {
+            for (TermQueryBuilder term : entity.get().getTermQueryForCustomerIndex()) {
+                internalFilterQuery.filter(term);
+            }
+        }
+
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
-            .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(detector.getTimeField()))
+            .query(internalFilterQuery)
+            .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(config.getTimeField()))
             .size(0);
-        SearchRequest searchRequest = new SearchRequest().indices(detector.getIndices().toArray(new String[0])).source(searchSourceBuilder);
+        SearchRequest searchRequest = new SearchRequest().indices(config.getIndices().toArray(new String[0])).source(searchSourceBuilder);
         final ActionListener<SearchResponse> searchResponseListener = ActionListener
             .wrap(response -> listener.onResponse(ParseUtils.getLatestDataTime(response)), listener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
@@ -182,9 +189,9 @@ public class SearchFeatureDao extends AbstractRetriever {
             .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
                 searchRequest,
                 client::search,
-                detector.getId(),
+                config.getId(),
                 client,
-                AnalysisType.AD,
+                context,
                 searchResponseListener
             );
     }
@@ -484,7 +491,7 @@ public class SearchFeatureDao extends AbstractRetriever {
         BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery();
 
         if (entity.isPresent()) {
-            for (TermQueryBuilder term : entity.get().getTermQueryBuilders()) {
+            for (TermQueryBuilder term : entity.get().getTermQueryForCustomerIndex()) {
                 internalFilterQuery.filter(term);
             }
         }

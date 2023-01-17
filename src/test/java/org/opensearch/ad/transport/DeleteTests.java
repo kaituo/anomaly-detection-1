@@ -58,6 +58,11 @@ import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.transport.DeleteModelNodeResponse;
+import org.opensearch.timeseries.transport.DeleteModelRequest;
+import org.opensearch.timeseries.transport.DeleteModelResponse;
+import org.opensearch.timeseries.transport.StopConfigRequest;
+import org.opensearch.timeseries.transport.StopConfigResponse;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.TransportService;
 
@@ -139,7 +144,7 @@ public class DeleteTests extends AbstractTimeSeriesTest {
         response.writeTo(output);
 
         StreamInput streamInput = output.bytes().streamInput();
-        DeleteModelResponse readResponse = DeleteModelAction.INSTANCE.getResponseReader().read(streamInput);
+        DeleteModelResponse readResponse = DeleteADModelAction.INSTANCE.getResponseReader().read(streamInput);
         assertTrue(readResponse.hasFailures());
 
         assertEquals(failures.size(), readResponse.failures().size());
@@ -152,12 +157,12 @@ public class DeleteTests extends AbstractTimeSeriesTest {
     }
 
     public void testEmptyIDStopDetector() {
-        ActionRequestValidationException e = new StopDetectorRequest().validate();
+        ActionRequestValidationException e = new StopConfigRequest().validate();
         assertThat(e.validationErrors(), hasItem(ADCommonMessages.AD_ID_MISSING_MSG));
     }
 
     public void testValidIDStopDetector() {
-        ActionRequestValidationException e = new StopDetectorRequest().adID("foo").validate();
+        ActionRequestValidationException e = new StopConfigRequest().adID("foo").validate();
         assertThat(e, is(nullValue()));
     }
 
@@ -171,12 +176,12 @@ public class DeleteTests extends AbstractTimeSeriesTest {
     }
 
     public void testSerialzationRequestStopDetector() throws IOException {
-        StopDetectorRequest request = new StopDetectorRequest().adID("123");
+        StopConfigRequest request = new StopConfigRequest().adID("123");
         BytesStreamOutput output = new BytesStreamOutput();
         request.writeTo(output);
         StreamInput streamInput = output.bytes().streamInput();
-        StopDetectorRequest readRequest = new StopDetectorRequest(streamInput);
-        assertThat(request.getAdID(), equalTo(readRequest.getAdID()));
+        StopConfigRequest readRequest = new StopConfigRequest(streamInput);
+        assertThat(request.getConfigID(), equalTo(readRequest.getConfigID()));
     }
 
     public <R extends ToXContent> void testJsonRequestTemplate(R request, Supplier<String> requestSupplier) throws IOException,
@@ -189,8 +194,8 @@ public class DeleteTests extends AbstractTimeSeriesTest {
     }
 
     public void testJsonRequestStopDetector() throws IOException, JsonPathNotFoundException {
-        StopDetectorRequest request = new StopDetectorRequest().adID("123");
-        testJsonRequestTemplate(request, request::getAdID);
+        StopConfigRequest request = new StopConfigRequest().adID("123");
+        testJsonRequestTemplate(request, request::getConfigID);
     }
 
     public void testJsonRequestDeleteModel() throws IOException, JsonPathNotFoundException {
@@ -223,7 +228,7 @@ public class DeleteTests extends AbstractTimeSeriesTest {
             }
 
             return null;
-        }).when(client).execute(eq(DeleteModelAction.INSTANCE), any(), any());
+        }).when(client).execute(eq(DeleteADModelAction.INSTANCE), any(), any());
 
         BulkByScrollResponse deleteByQueryResponse = mock(BulkByScrollResponse.class);
         when(deleteByQueryResponse.getDeleted()).thenReturn(10L);
@@ -233,11 +238,11 @@ public class DeleteTests extends AbstractTimeSeriesTest {
         DiscoveryNodeFilterer nodeFilter = mock(DiscoveryNodeFilterer.class);
         StopDetectorTransportAction action = new StopDetectorTransportAction(transportService, nodeFilter, actionFilters, client);
 
-        StopDetectorRequest request = new StopDetectorRequest().adID(detectorID);
-        PlainActionFuture<StopDetectorResponse> listener = new PlainActionFuture<>();
+        StopConfigRequest request = new StopConfigRequest().adID(detectorID);
+        PlainActionFuture<StopConfigResponse> listener = new PlainActionFuture<>();
         action.doExecute(task, request, listener);
 
-        StopDetectorResponse response = listener.actionGet();
+        StopConfigResponse response = listener.actionGet();
         assertTrue(!response.success());
 
     }

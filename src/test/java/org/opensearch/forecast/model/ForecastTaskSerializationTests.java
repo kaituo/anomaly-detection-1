@@ -49,7 +49,7 @@ public class ForecastTaskSerializationTests extends OpenSearchSingleNodeTestCase
 
         assertEquals("task123", readTask.getTaskId());
         assertEquals("FORECAST_HISTORICAL_HC_ENTITY", readTask.getTaskType());
-        assertTrue(readTask.isEntityTask());
+        assertTrue(readTask.isHistoricalEntityTask());
         assertEquals("config123", readTask.getConfigId());
         assertEquals(originalTask.getForecaster(), readTask.getForecaster());
         assertEquals("Running", readTask.getState());
@@ -93,7 +93,7 @@ public class ForecastTaskSerializationTests extends OpenSearchSingleNodeTestCase
 
         assertEquals("task123", readTask.getTaskId());
         assertEquals("FORECAST_HISTORICAL_HC_ENTITY", readTask.getTaskType());
-        assertTrue(readTask.isEntityTask());
+        assertTrue(readTask.isHistoricalEntityTask());
         assertEquals("config123", readTask.getConfigId());
         assertEquals(null, readTask.getForecaster());
         assertEquals("Running", readTask.getState());

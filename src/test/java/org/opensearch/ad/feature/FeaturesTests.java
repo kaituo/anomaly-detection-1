@@ -20,6 +20,7 @@ import java.util.Map.Entry;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.opensearch.timeseries.feature.Features;
 
 import junitparams.JUnitParamsRunner;
 import junitparams.Parameters;

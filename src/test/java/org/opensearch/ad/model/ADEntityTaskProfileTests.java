@@ -19,6 +19,7 @@ import org.opensearch.test.OpenSearchSingleNodeTestCase;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.EntityTaskProfile;
 
 public class ADEntityTaskProfileTests extends OpenSearchSingleNodeTestCase {
 
@@ -32,9 +33,9 @@ public class ADEntityTaskProfileTests extends OpenSearchSingleNodeTestCase {
         return getInstanceFromNode(NamedWriteableRegistry.class);
     }
 
-    private ADEntityTaskProfile createADEntityTaskProfile() {
+    private EntityTaskProfile createADEntityTaskProfile() {
         Entity entity = createEntityAndAttributes();
-        return new ADEntityTaskProfile(1, 23L, false, 1, 2L, "1234", entity, "4321", ADTaskType.HISTORICAL_HC_ENTITY.name());
+        return new EntityTaskProfile(1, 23L, false, 1, 2L, "1234", entity, "4321", ADTaskType.HISTORICAL_HC_ENTITY.name());
     }
 
     private Entity createEntityAndAttributes() {
@@ -49,24 +50,24 @@ public class ADEntityTaskProfileTests extends OpenSearchSingleNodeTestCase {
     }
 
     public void testADEntityTaskProfileSerialization() throws IOException {
-        ADEntityTaskProfile entityTask = createADEntityTaskProfile();
+        EntityTaskProfile entityTask = createADEntityTaskProfile();
         BytesStreamOutput output = new BytesStreamOutput();
         entityTask.writeTo(output);
         NamedWriteableAwareStreamInput input = new NamedWriteableAwareStreamInput(output.bytes().streamInput(), writableRegistry());
-        ADEntityTaskProfile parsedEntityTask = new ADEntityTaskProfile(input);
+        EntityTaskProfile parsedEntityTask = new EntityTaskProfile(input);
         assertEquals(entityTask, parsedEntityTask);
     }
 
     public void testParseADEntityTaskProfile() throws IOException {
-        ADEntityTaskProfile entityTask = createADEntityTaskProfile();
+        EntityTaskProfile entityTask = createADEntityTaskProfile();
         String adEntityTaskProfileString = TestHelpers
             .xContentBuilderToString(entityTask.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        ADEntityTaskProfile parsedEntityTask = ADEntityTaskProfile.parse(TestHelpers.parser(adEntityTaskProfileString));
+        EntityTaskProfile parsedEntityTask = EntityTaskProfile.parse(TestHelpers.parser(adEntityTaskProfileString));
         assertEquals(entityTask, parsedEntityTask);
     }
 
     public void testParseADEntityTaskProfileWithNullEntity() throws IOException {
-        ADEntityTaskProfile entityTask = new ADEntityTaskProfile(
+        EntityTaskProfile entityTask = new EntityTaskProfile(
             1,
             23L,
             false,
@@ -82,14 +83,14 @@ public class ADEntityTaskProfileTests extends OpenSearchSingleNodeTestCase {
         assertNull(entityTask.getEntity());
         String adEntityTaskProfileString = TestHelpers
             .xContentBuilderToString(entityTask.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        ADEntityTaskProfile parsedEntityTask = ADEntityTaskProfile.parse(TestHelpers.parser(adEntityTaskProfileString));
+        EntityTaskProfile parsedEntityTask = EntityTaskProfile.parse(TestHelpers.parser(adEntityTaskProfileString));
         assertEquals(entityTask, parsedEntityTask);
     }
 
     public void testADEntityTaskProfileEqual() {
-        ADEntityTaskProfile entityTaskOne = createADEntityTaskProfile();
-        ADEntityTaskProfile entityTaskTwo = createADEntityTaskProfile();
-        ADEntityTaskProfile entityTaskThree = new ADEntityTaskProfile(
+        EntityTaskProfile entityTaskOne = createADEntityTaskProfile();
+        EntityTaskProfile entityTaskTwo = createADEntityTaskProfile();
+        EntityTaskProfile entityTaskThree = new EntityTaskProfile(
             null,
             null,
             false,
@@ -106,7 +107,7 @@ public class ADEntityTaskProfileTests extends OpenSearchSingleNodeTestCase {
 
     public void testParseADEntityTaskProfileWithMultipleNullFields() throws IOException {
         Entity entity = createEntityAndAttributes();
-        ADEntityTaskProfile entityTask = new ADEntityTaskProfile(
+        EntityTaskProfile entityTask = new EntityTaskProfile(
             null,
             null,
             false,
@@ -119,7 +120,7 @@ public class ADEntityTaskProfileTests extends OpenSearchSingleNodeTestCase {
         );
         String adEntityTaskProfileString = TestHelpers
             .xContentBuilderToString(entityTask.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        ADEntityTaskProfile parsedEntityTask = ADEntityTaskProfile.parse(TestHelpers.parser(adEntityTaskProfileString));
+        EntityTaskProfile parsedEntityTask = EntityTaskProfile.parse(TestHelpers.parser(adEntityTaskProfileString));
         assertEquals(entityTask, parsedEntityTask);
     }
 }

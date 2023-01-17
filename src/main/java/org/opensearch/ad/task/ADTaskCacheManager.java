@@ -142,7 +142,7 @@ public class ADTaskCacheManager extends TaskCacheManager {
             throw new DuplicateTaskException(DETECTOR_IS_RUNNING);
         }
         // It's possible that multiple entity tasks of one detector run on same data node.
-        if (!adTask.isEntityTask() && containsTaskOfDetector(detectorId)) {
+        if (!adTask.isHistoricalEntityTask() && containsTaskOfDetector(detectorId)) {
             throw new DuplicateTaskException(DETECTOR_IS_RUNNING);
         }
         checkRunningTaskLimit();
@@ -154,7 +154,7 @@ public class ADTaskCacheManager extends TaskCacheManager {
         ADBatchTaskCache taskCache = new ADBatchTaskCache(adTask);
         taskCache.getCacheMemorySize().set(neededCacheSize);
         batchTaskCaches.put(taskId, taskCache);
-        if (adTask.isEntityTask()) {
+        if (adTask.isHistoricalEntityTask()) {
             ADHCBatchTaskRunState hcBatchTaskRunState = getHCBatchTaskRunState(detectorId, adTask.getConfigLevelTaskId());
             if (hcBatchTaskRunState != null) {
                 hcBatchTaskRunState.setLastTaskRunTimeInMillis(Instant.now().toEpochMilli());

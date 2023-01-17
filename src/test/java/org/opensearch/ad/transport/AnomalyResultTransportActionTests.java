@@ -11,6 +11,8 @@
 
 package org.opensearch.ad.transport;
 
+import static org.opensearch.test.OpenSearchTestCase.randomInt;
+import static org.opensearch.test.OpenSearchTestCase.randomIntBetween;
 import static org.opensearch.timeseries.TestHelpers.randomQuery;
 
 import java.io.IOException;
@@ -32,6 +34,7 @@ import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ExceptionUtil;
 
 import com.google.common.collect.ImmutableList;
@@ -220,7 +223,9 @@ public class AnomalyResultTransportActionTests extends ADIntegTestCase {
             null,
             null,
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
     }
 
@@ -243,7 +248,9 @@ public class AnomalyResultTransportActionTests extends ADIntegTestCase {
             ImmutableList.of(categoryField),
             null,
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
     }
 

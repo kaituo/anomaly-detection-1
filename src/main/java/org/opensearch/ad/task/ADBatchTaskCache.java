@@ -11,11 +11,6 @@
 
 package org.opensearch.ad.task;
 
-import static org.opensearch.timeseries.settings.TimeSeriesSettings.NUM_MIN_SAMPLES;
-import static org.opensearch.timeseries.settings.TimeSeriesSettings.NUM_SAMPLES_PER_TREE;
-import static org.opensearch.timeseries.settings.TimeSeriesSettings.NUM_TREES;
-import static org.opensearch.timeseries.settings.TimeSeriesSettings.TIME_DECAY;
-
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Map;
@@ -62,7 +57,7 @@ public class ADBatchTaskCache {
         this.entity = adTask.getEntity();
 
         AnomalyDetector detector = adTask.getDetector();
-        int numberOfTrees = NUM_TREES;
+        int numberOfTrees = TimeSeriesSettings.NUM_TREES;
         int shingleSize = detector.getShingleSize();
         this.shingle = new ArrayDeque<>(shingleSize);
         int dimensions = detector.getShingleSize() * detector.getEnabledFeatureIds().size();
@@ -71,10 +66,10 @@ public class ADBatchTaskCache {
             .builder()
             .dimensions(dimensions)
             .numberOfTrees(numberOfTrees)
-            .timeDecay(TIME_DECAY)
-            .sampleSize(NUM_SAMPLES_PER_TREE)
-            .outputAfter(NUM_MIN_SAMPLES)
-            .initialAcceptFraction(NUM_MIN_SAMPLES * 1.0d / NUM_SAMPLES_PER_TREE)
+            .timeDecay(detector.getTimeDecay())
+            .sampleSize(TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
+            .outputAfter(TimeSeriesSettings.NUM_MIN_SAMPLES)
+            .initialAcceptFraction(TimeSeriesSettings.NUM_MIN_SAMPLES * 1.0d / TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
             .parallelExecutionEnabled(false)
             .compact(true)
             .precision(Precision.FLOAT_32)

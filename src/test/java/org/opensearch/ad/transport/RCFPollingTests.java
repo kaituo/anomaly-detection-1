@@ -28,10 +28,9 @@ import org.junit.BeforeClass;
 import org.opensearch.Version;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
-import org.opensearch.ad.cluster.HashRing;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -41,8 +40,10 @@ import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.core.transport.TransportResponse;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.tasks.Task;
+import org.opensearch.telemetry.tracing.noop.NoopTracer;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
 import org.opensearch.transport.ConnectTransportException;
@@ -69,7 +70,7 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
     private ClusterService clusterService;
     private HashRing hashRing;
     private TransportAddress transportAddress1;
-    private ModelManager manager;
+    private ADModelManager manager;
     private TransportService transportService;
     private PlainActionFuture<RCFPollingResponse> future;
     private RCFPollingTransportAction action;
@@ -104,7 +105,7 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
         clusterService = mock(ClusterService.class);
         hashRing = mock(HashRing.class);
         transportAddress1 = new TransportAddress(new InetSocketAddress(InetAddress.getByName("1.2.3.4"), 9300));
-        manager = mock(ModelManager.class);
+        manager = mock(ADModelManager.class);
         transportService = new TransportService(
             Settings.EMPTY,
             mock(Transport.class),
@@ -112,7 +113,8 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
             TransportService.NOOP_TRANSPORT_INTERCEPTOR,
             x -> null,
             null,
-            Collections.emptySet()
+            Collections.emptySet(),
+            NoopTracer.INSTANCE
         );
         future = new PlainActionFuture<>();
 
@@ -189,7 +191,7 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
 
     public void testNormal() {
         DiscoveryNode localNode = new DiscoveryNode(nodeId, transportAddress1, Version.CURRENT.minimumCompatibilityVersion());
-        when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class))).thenReturn(Optional.of(localNode));
+        when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class))).thenReturn(Optional.of(localNode));
 
         when(clusterService.localNode()).thenReturn(localNode);
 
@@ -208,15 +210,15 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
     }
 
     public void testNoNodeFoundForModel() {
-        when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class))).thenReturn(Optional.empty());
+        when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class))).thenReturn(Optional.empty());
         action = new RCFPollingTransportAction(
-            mock(ActionFilters.class),
-            transportService,
-            Settings.EMPTY,
-            manager,
-            hashRing,
-            clusterService
-        );
+                mock(ActionFilters.class),
+                transportService,
+                Settings.EMPTY,
+                manager,
+                hashRing,
+                clusterService
+                );
         action.doExecute(mock(Task.class), request, future);
         assertException(future, TimeSeriesException.class, RCFPollingTransportAction.NO_NODE_FOUND_MSG);
     }
@@ -305,7 +307,7 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
                 clusterService
             );
 
-            when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class)))
+            when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class)))
                 .thenReturn(Optional.of(testNodes[1].discoveryNode()));
             registerHandler(testNodes[1]);
 
@@ -333,7 +335,7 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
                 clusterService
             );
 
-            when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class)))
+            when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class)))
                 .thenReturn(Optional.of(testNodes[1].discoveryNode()));
             registerHandler(testNodes[1]);
 

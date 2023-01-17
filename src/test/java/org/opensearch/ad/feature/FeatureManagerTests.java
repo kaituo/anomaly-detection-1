@@ -61,7 +61,10 @@ import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.feature.Features;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.feature.SinglePointFeatures;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 
@@ -142,8 +145,6 @@ public class FeatureManagerTests {
                 searchFeatureDao,
                 imputer,
                 clock,
-                maxTrainSamples,
-                maxSampleStride,
                 trainSampleTimeRangeInHours,
                 minTrainSamples,
                 maxMissingPointsRate,
@@ -203,7 +204,7 @@ public class FeatureManagerTests {
             ActionListener<Optional<Long>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.ofNullable(latestTime));
             return null;
-        }).when(searchFeatureDao).getLatestDataTime(eq(detector), any(ActionListener.class));
+        }).when(searchFeatureDao).getLatestDataTime(eq(detector), eq(Optional.empty()), eq(AnalysisType.AD), any(ActionListener.class));
         if (latestTime != null) {
             doAnswer(invocation -> {
                 ActionListener<List<Optional<double[]>>> listener = invocation.getArgument(3);
@@ -220,8 +221,6 @@ public class FeatureManagerTests {
                 searchFeatureDao,
                 imputer,
                 clock,
-                maxTrainSamples,
-                maxSampleStride,
                 trainSampleTimeRangeInHours,
                 minTrainSamples,
                 0.5, /*maxMissingPointsRate*/
@@ -248,7 +247,7 @@ public class FeatureManagerTests {
             ActionListener<Optional<Long>> listener = invocation.getArgument(1);
             listener.onFailure(new RuntimeException());
             return null;
-        }).when(searchFeatureDao).getLatestDataTime(eq(detector), any(ActionListener.class));
+        }).when(searchFeatureDao).getLatestDataTime(eq(detector), eq(Optional.empty()), eq(AnalysisType.AD), any(ActionListener.class));
 
         ActionListener<Optional<double[][]>> listener = mock(ActionListener.class);
         featureManager.getColdStartData(detector, listener);
@@ -263,7 +262,7 @@ public class FeatureManagerTests {
             ActionListener<Optional<Long>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.ofNullable(0L));
             return null;
-        }).when(searchFeatureDao).getLatestDataTime(eq(detector), any(ActionListener.class));
+        }).when(searchFeatureDao).getLatestDataTime(eq(detector), eq(Optional.empty()), eq(AnalysisType.AD), any(ActionListener.class));
         doThrow(IOException.class)
             .when(searchFeatureDao)
             .getFeatureSamplesForPeriods(eq(detector), any(), eq(AnalysisType.AD), any(ActionListener.class));

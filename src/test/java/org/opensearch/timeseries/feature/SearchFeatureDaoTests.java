@@ -263,7 +263,7 @@ public class SearchFeatureDaoTests {
         when(searchResponse.getAggregations()).thenReturn(internalAggregations);
 
         ActionListener<Optional<Long>> listener = mock(ActionListener.class);
-        searchFeatureDao.getLatestDataTime(detector, listener);
+        searchFeatureDao.getLatestDataTime(detector, Optional.empty(), AnalysisType.AD, listener);
 
         ArgumentCaptor<Optional<Long>> captor = ArgumentCaptor.forClass(Optional.class);
         verify(listener).onResponse(captor.capture());

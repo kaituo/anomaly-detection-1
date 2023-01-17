@@ -18,25 +18,25 @@ package org.opensearch.timeseries.dataprocessor;
 public class PreviousValueImputer extends Imputer {
 
     @Override
-    protected double[] singleFeatureImpute(double[] samples, int numInterpolants) {
+    protected double[] singleFeatureImpute(double[] samples, int numImputants) {
         int numSamples = samples.length;
-        double[] interpolants = new double[numSamples];
+        double[] imputants = new double[numSamples];
 
         if (numSamples > 0) {
-            System.arraycopy(samples, 0, interpolants, 0, samples.length);
+            System.arraycopy(samples, 0, imputants, 0, samples.length);
             if (numSamples > 1) {
                 double lastKnownValue = Double.NaN;
                 for (int interpolantIndex = 0; interpolantIndex < numSamples; interpolantIndex++) {
-                    if (Double.isNaN(interpolants[interpolantIndex])) {
+                    if (Double.isNaN(imputants[interpolantIndex])) {
                         if (!Double.isNaN(lastKnownValue)) {
-                            interpolants[interpolantIndex] = lastKnownValue;
+                            imputants[interpolantIndex] = lastKnownValue;
                         }
                     } else {
-                        lastKnownValue = interpolants[interpolantIndex];
+                        lastKnownValue = imputants[interpolantIndex];
                     }
                 }
             }
         }
-        return interpolants;
+        return imputants;
     }
 }

@@ -31,15 +31,17 @@ import java.io.IOException;
 
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.ADUnitTestCase;
-import org.opensearch.ad.feature.FeatureManager;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
+import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableList;
@@ -53,7 +55,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
     private NodeStateManager stateManager;
     private ForwardADTaskTransportAction forwardADTaskTransportAction;
     private Task task;
-    private ActionListener<AnomalyDetectorJobResponse> listener;
+    private ActionListener<JobResponse> listener;
 
     @SuppressWarnings("unchecked")
     @Override
@@ -71,7 +73,8 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
             adTaskManager,
             adTaskCacheManager,
             featureManager,
-            stateManager
+            stateManager,
+            mock(ADIndexJobActionHandler.class)
         );
 
         task = mock(Task.class);

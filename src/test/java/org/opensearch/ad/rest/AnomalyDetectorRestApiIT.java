@@ -14,7 +14,8 @@ package org.opensearch.ad.rest;
 import static org.hamcrest.Matchers.containsString;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.DUPLICATE_DETECTOR_MSG;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.NO_DOCS_IN_USER_INDEX_MSG;
-import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
+import static org.opensearch.test.OpenSearchTestCase.randomInt;
+import static org.opensearch.test.OpenSearchTestCase.randomIntBetween;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -37,7 +38,6 @@ import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
 import org.opensearch.ad.model.AnomalyResult;
-import org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.client.Response;
 import org.opensearch.client.ResponseException;
@@ -54,6 +54,7 @@ import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.rest.handler.AbstractTimeSeriesActionHandler;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import com.google.common.collect.ImmutableList;
@@ -145,7 +146,9 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             TestHelpers.randomUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
 
         TestHelpers
@@ -218,7 +221,9 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             ImmutableList.of(randomAlphaOfLength(5)),
             detector.getUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
         Exception ex = expectThrows(
             ResponseException.class,
@@ -275,7 +280,9 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
 
         updateClusterSettings(ADEnabledSetting.AD_ENABLED, false);
@@ -337,7 +344,9 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector1.getUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
 
         TestHelpers
@@ -376,7 +385,9 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
 
         TestHelpers
@@ -422,7 +433,9 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
 
         deleteIndexWithAdminClient(CommonName.CONFIG_INDEX);
@@ -785,7 +798,9 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
 
         TestHelpers
@@ -895,7 +910,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                FAIL_TO_FIND_CONFIG_MSG,
+                CommonMessages.FAIL_TO_FIND_CONFIG_MSG,
                 () -> TestHelpers
                     .makeRequest(
                         client(),
@@ -997,7 +1012,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                FAIL_TO_FIND_CONFIG_MSG,
+                CommonMessages.FAIL_TO_FIND_CONFIG_MSG,
                 () -> TestHelpers
                     .makeRequest(
                         client(),
@@ -1055,7 +1070,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                "Can't start detector job as no features configured",
+                "Can't start job as no features configured",
                 () -> TestHelpers
                     .makeRequest(
                         client(),
@@ -1076,7 +1091,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                "Can't start detector job as no features configured",
+                "Can't start job as no features configured",
                 () -> TestHelpers
                     .makeRequest(
                         client(),
@@ -1161,7 +1176,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             ResponseException.class,
             () -> startAnomalyDetector(detector.getId(), new DateRange(now.minus(10, ChronoUnit.DAYS), now), client())
         );
-        assertTrue(e.getMessage().contains("Can't start detector job as no enabled features configured"));
+        assertTrue(e.getMessage().contains("Can't start job as no enabled features configured"));
     }
 
     public void testDeleteAnomalyDetectorWhileRunning() throws Exception {
@@ -1332,7 +1347,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                ADCommonMessages.NOT_EXISTENT_VALIDATION_TYPE,
+                CommonMessages.NOT_EXISTENT_VALIDATION_TYPE,
                 () -> TestHelpers
                     .makeRequest(
                         client(),
@@ -1475,7 +1490,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             .extractValue("detector", responseMap);
         assertEquals(
             "non-existing category",
-            String.format(Locale.ROOT, AbstractAnomalyDetectorActionHandler.CATEGORY_NOT_FOUND_ERR_MSG, "host.keyword"),
+            String.format(Locale.ROOT, AbstractTimeSeriesActionHandler.CATEGORY_NOT_FOUND_ERR_MSG, "host.keyword"),
             messageMap.get("category_field").get("message")
         );
 

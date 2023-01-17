@@ -141,7 +141,7 @@ public class ADTask extends TimeSeriesTask {
     }
 
     @Override
-    public boolean isEntityTask() {
+    public boolean isHistoricalEntityTask() {
         return ADTaskType.HISTORICAL_HC_ENTITY.name().equals(taskType);
     }
 
@@ -337,7 +337,9 @@ public class ADTask extends TimeSeriesTask {
                 detector.getCategoryFields(),
                 detector.getUser(),
                 detector.getCustomResultIndex(),
-                detector.getImputationOption()
+                detector.getImputationOption(),
+                detector.getRecencyEmphasis(),
+                detector.getSeasonIntervals()
             );
         return new Builder()
             .taskId(parsedTaskId)

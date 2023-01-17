@@ -14,6 +14,8 @@ package org.opensearch.ad.transport;
 import static org.opensearch.ad.model.ADTaskAction.CLEAN_CACHE;
 import static org.opensearch.ad.model.ADTaskAction.CLEAN_STALE_RUNNING_ENTITIES;
 import static org.opensearch.ad.model.ADTaskAction.START;
+import static org.opensearch.test.OpenSearchTestCase.randomInt;
+import static org.opensearch.test.OpenSearchTestCase.randomIntBetween;
 import static org.opensearch.timeseries.TestHelpers.randomIntervalTimeConfiguration;
 import static org.opensearch.timeseries.TestHelpers.randomQuery;
 import static org.opensearch.timeseries.TestHelpers.randomUser;
@@ -78,7 +80,9 @@ public class ForwardADTaskRequestTests extends OpenSearchSingleNodeTestCase {
             null,
             randomUser(),
             null,
-            TestHelpers.randomImputationOption()
+            TestHelpers.randomImputationOption(),
+            randomIntBetween(1, 10000),
+            randomInt(TimeSeriesSettings.MAX_SHINGLE_SIZE/2)
         );
         ForwardADTaskRequest request = new ForwardADTaskRequest(detector, null, null, null, null, Version.V_2_1_0);
         ActionRequestValidationException validate = request.validate();

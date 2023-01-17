@@ -51,11 +51,8 @@ import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager.ModelType;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.ratelimit.CheckpointWriteWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -71,7 +68,11 @@ import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.ml.ModelManager;
+import org.opensearch.timeseries.ml.ModelState;
+import org.opensearch.timeseries.ml.Sample;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
@@ -91,7 +92,7 @@ import test.org.opensearch.ad.util.RandomModelStateConfig;
 @SuppressWarnings("unchecked")
 public class ModelManagerTests {
 
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
 
     @Mock
     private AnomalyDetector anomalyDetector;
@@ -103,7 +104,7 @@ public class ModelManagerTests {
     private JvmService jvmService;
 
     @Mock
-    private CheckpointDao checkpointDao;
+    private ADCheckpointDao checkpointDao;
 
     @Mock
     private Clock clock;
@@ -112,16 +113,10 @@ public class ModelManagerTests {
     private FeatureManager featureManager;
 
     @Mock
-    private EntityColdStarter entityColdStarter;
+    private ADEntityColdStart entityColdStarter;
 
     @Mock
-    private EntityCache cache;
-
-    @Mock
-    private ModelState<EntityModel> modelState;
-
-    @Mock
-    private EntityModel entityModel;
+    private ModelState<ThresholdedRandomCutForest> modelState;
 
     @Mock
     private ThresholdedRandomCutForest trcf;
@@ -225,12 +220,11 @@ public class ModelManagerTests {
             .build();
 
         modelManager = spy(
-            new ModelManager(
+            new ADModelManager(
                 checkpointDao,
                 clock,
                 numTrees,
                 numSamples,
-                rcfTimeDecay,
                 numMinSamples,
                 thresholdMinPvalue,
                 minPreviewSize,
@@ -248,8 +242,7 @@ public class ModelManagerTests {
         rcfModelId = "detectorId_model_rcf_1";
         thresholdModelId = "detectorId_model_threshold";
 
-        when(this.modelState.getModel()).thenReturn(this.entityModel);
-        when(this.entityModel.getTrcf()).thenReturn(Optional.of(this.trcf));
+        when(this.modelState.getModel()).thenReturn(Optional.of(this.trcf));
 
         when(anomalyDetector.getShingleSize()).thenReturn(shingleSize);
     }
@@ -267,7 +260,7 @@ public class ModelManagerTests {
     @Test
     @Parameters(method = "getDetectorIdForModelIdData")
     public void getDetectorIdForModelId_returnExpectedId(String modelId, String expectedDetectorId) {
-        assertEquals(expectedDetectorId, SingleStreamModelIdMapper.getDetectorIdForModelId(modelId));
+        assertEquals(expectedDetectorId, SingleStreamModelIdMapper.getConfigIdForModelId(modelId));
     }
 
     private Object[] getDetectorIdForModelIdIllegalArgument() {
@@ -277,7 +270,7 @@ public class ModelManagerTests {
     @Test(expected = IllegalArgumentException.class)
     @Parameters(method = "getDetectorIdForModelIdIllegalArgument")
     public void getDetectorIdForModelId_throwIllegalArgument_forInvalidId(String modelId) {
-        SingleStreamModelIdMapper.getDetectorIdForModelId(modelId);
+        SingleStreamModelIdMapper.getConfigIdForModelId(modelId);
     }
 
     private Map<String, DiscoveryNode> createDataNodes(int numDataNodes) {
@@ -415,12 +408,11 @@ public class ModelManagerTests {
 
         // use new memoryTracker
         modelManager = spy(
-            new ModelManager(
+            new ADModelManager(
                 checkpointDao,
                 clock,
                 numTrees,
                 numSamples,
-                rcfTimeDecay,
                 numMinSamples,
                 thresholdMinPvalue,
                 minPreviewSize,
@@ -844,7 +836,7 @@ public class ModelManagerTests {
         int numPoints = 1000;
         double[][] points = Stream.generate(() -> new double[] { 0 }).limit(numPoints).toArray(double[][]::new);
 
-        List<ThresholdingResult> results = modelManager.getPreviewResults(points, shingleSize);
+        List<ThresholdingResult> results = modelManager.getPreviewResults(points, shingleSize, 0.0001);
 
         assertEquals(numPoints, results.size());
         assertTrue(results.stream().noneMatch(r -> r.getGrade() > 0));
@@ -856,7 +848,7 @@ public class ModelManagerTests {
         double[][] points = Stream.generate(() -> new double[] { 0 }).limit(numPoints).toArray(double[][]::new);
         points[points.length - 1] = new double[] { 1. };
 
-        List<ThresholdingResult> results = modelManager.getPreviewResults(points, shingleSize);
+        List<ThresholdingResult> results = modelManager.getPreviewResults(points, shingleSize, 0.0001);
 
         assertEquals(numPoints, results.size());
         assertTrue(results.stream().limit(numPoints - 1).noneMatch(r -> r.getGrade() > 0));
@@ -865,37 +857,15 @@ public class ModelManagerTests {
 
     @Test(expected = IllegalArgumentException.class)
     public void getPreviewResults_throwIllegalArgument_forInvalidInput() {
-        modelManager.getPreviewResults(new double[0][0], shingleSize);
-    }
-
-    @Test
-    public void processEmptyCheckpoint() {
-        ModelState<EntityModel> modelState = modelManager.processEntityCheckpoint(Optional.empty(), null, "", "", shingleSize);
-        assertEquals(Instant.MIN, modelState.getLastCheckpointTime());
-    }
-
-    @Test
-    public void processNonEmptyCheckpoint() {
-        String modelId = "abc";
-        String detectorId = "123";
-        EntityModel model = MLUtil.createNonEmptyModel(modelId);
-        Instant checkpointTime = Instant.ofEpochMilli(1000);
-        ModelState<EntityModel> modelState = modelManager
-            .processEntityCheckpoint(
-                Optional.of(new SimpleImmutableEntry<>(model, checkpointTime)),
-                null,
-                modelId,
-                detectorId,
-                shingleSize
-            );
-        assertEquals(checkpointTime, modelState.getLastCheckpointTime());
-        assertEquals(model.getSamples().size(), modelState.getModel().getSamples().size());
-        assertEquals(now, modelState.getLastUsedTime());
+        modelManager.getPreviewResults(new double[0][0], shingleSize, 0.0001);
     }
 
     @Test
     public void getNullState() {
-        assertEquals(new ThresholdingResult(0, 0, 0), modelManager.getAnomalyResultForEntity(new double[] {}, null, "", null, shingleSize));
+        assertEquals(
+            new ThresholdingResult(0, 0, 0),
+            modelManager.getResult(new Sample(new double[] {}, Instant.now(), Instant.now()), null, "", null, anomalyDetector, "")
+        );
     }
 
     @Test
@@ -909,10 +879,8 @@ public class ModelManagerTests {
             searchFeatureDao,
             interpolator,
             clock,
-            AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
-            AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
-            AnomalyDetectorSettings.TRAIN_SAMPLE_TIME_RANGE_IN_HOURS,
-            AnomalyDetectorSettings.MIN_TRAIN_SAMPLES,
+            TimeSeriesSettings.TRAIN_SAMPLE_TIME_RANGE_IN_HOURS,
+            TimeSeriesSettings.MIN_TRAIN_SAMPLES,
             AnomalyDetectorSettings.MAX_SHINGLE_PROPORTION_MISSING,
             AnomalyDetectorSettings.MAX_IMPUTATION_NEIGHBOR_DISTANCE,
             AnomalyDetectorSettings.PREVIEW_SAMPLE_RATE,
@@ -922,35 +890,32 @@ public class ModelManagerTests {
             TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
         );
 
-        CheckpointWriteWorker checkpointWriteQueue = mock(CheckpointWriteWorker.class);
+        ADCheckpointWriteWorker checkpointWriteQueue = mock(ADCheckpointWriteWorker.class);
 
-        entityColdStarter = new EntityColdStarter(
+        entityColdStarter = new ADEntityColdStart(
             clock,
             threadPool,
             stateManager,
             TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             TimeSeriesSettings.NUM_TREES,
-            TimeSeriesSettings.TIME_DECAY,
             numMinSamples,
             AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
             AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
-            interpolator,
             searchFeatureDao,
             TimeSeriesSettings.THRESHOLD_MIN_PVALUE,
             featureManager,
-            settings,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             checkpointWriteQueue,
-            TimeSeriesSettings.MAX_COLD_START_ROUNDS
+            TimeSeriesSettings.MAX_COLD_START_ROUNDS,
+            1
         );
 
         modelManager = spy(
-            new ModelManager(
+            new ADModelManager(
                 checkpointDao,
                 clock,
                 numTrees,
                 numSamples,
-                rcfTimeDecay,
                 numMinSamples,
                 thresholdMinPvalue,
                 minPreviewSize,
@@ -964,50 +929,60 @@ public class ModelManagerTests {
             )
         );
 
-        ModelState<EntityModel> state = MLUtil
+        ModelState<ThresholdedRandomCutForest> state = MLUtil
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(false).sampleSize(numMinSamples).build());
-        EntityModel model = state.getModel();
-        assertTrue(!model.getTrcf().isPresent());
-        ThresholdingResult result = modelManager.getAnomalyResultForEntity(new double[] { -1 }, state, "", null, shingleSize);
+        Optional<ThresholdedRandomCutForest> model = state.getModel();
+        assertTrue(model.isEmpty());
+        ThresholdingResult result = modelManager
+            .getResult(new Sample(new double[] { -1 }, Instant.now(), Instant.now()), state, "", Optional.empty(), anomalyDetector, "");
         // model outputs scores
         assertTrue(result.getRcfScore() != 0);
         // added the sample to score since our model is empty
-        assertEquals(0, model.getSamples().size());
+        assertEquals(0, state.getSamples().size());
     }
 
     @Test
     public void getAnomalyResultForEntityNoModel() {
-        ModelState<EntityModel> modelState = new ModelState<>(null, modelId, detectorId, ModelType.ENTITY.getName(), clock, 0);
+        ModelState<ThresholdedRandomCutForest> modelState = new ModelState<>(
+            null,
+            modelId,
+            detectorId,
+            ModelManager.ModelType.TRCF.getName(),
+            clock,
+            null
+        );
         ThresholdingResult result = modelManager
-            .getAnomalyResultForEntity(
-                new double[] { -1 },
+            .getResult(
+                new Sample(new double[] { -1 }, Instant.now(), Instant.now()),
                 modelState,
                 modelId,
-                Entity.createSingleAttributeEntity("field", "val"),
-                shingleSize
+                Optional.of(Entity.createSingleAttributeEntity("field", "val")),
+                anomalyDetector,
+                ""
             );
         // model outputs scores
         assertEquals(new ThresholdingResult(0, 0, 0), result);
         // added the sample to score since our model is empty
-        assertEquals(1, modelState.getModel().getSamples().size());
+        assertEquals(1, modelState.getSamples().size());
     }
 
     @Test
     public void getEmptyStateNotFullSamples() {
-        ModelState<EntityModel> state = MLUtil
+        ModelState<ThresholdedRandomCutForest> state = MLUtil
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(false).sampleSize(numMinSamples - 1).build());
         assertEquals(
             new ThresholdingResult(0, 0, 0),
-            modelManager.getAnomalyResultForEntity(new double[] { -1 }, state, "", null, shingleSize)
+            modelManager.getResult(new Sample(new double[] { -1 }, Instant.now(), Instant.now()), state, "", null, anomalyDetector, "")
         );
-        assertEquals(numMinSamples, state.getModel().getSamples().size());
+        assertEquals(numMinSamples, state.getSamples().size());
     }
 
     @Test
     public void scoreSamples() {
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
-        modelManager.getAnomalyResultForEntity(new double[] { -1 }, state, "", null, shingleSize);
-        assertEquals(0, state.getModel().getSamples().size());
+        ModelState<ThresholdedRandomCutForest> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        modelManager.getResult(new Sample(new double[] { -1 }, Instant.now(), Instant.now()), state, "", null, anomalyDetector, "");
+        assertEquals(0, state.getSamples().size());
         assertEquals(now, state.getLastUsedTime());
     }
 
@@ -1019,7 +994,7 @@ public class ModelManagerTests {
         when(this.trcf.process(this.point, 0)).thenReturn(anomalyDescriptor);
 
         ThresholdingResult result = modelManager
-            .getAnomalyResultForEntity(this.point, this.modelState, this.detectorId, null, this.shingleSize);
+            .getResult(new Sample(this.point, Instant.now(), Instant.now()), this.modelState, this.detectorId, null, anomalyDetector, "");
         assertEquals(
             new ThresholdingResult(
                 anomalyDescriptor.getAnomalyGrade(),
@@ -1042,9 +1017,11 @@ public class ModelManagerTests {
         when(rcf.getDimensions()).thenReturn(40);
         when(this.trcf.getForest()).thenReturn(rcf);
         when(this.trcf.process(this.point, 0)).thenReturn(anomalyDescriptor);
-        when(this.entityModel.getSamples()).thenReturn(new ArrayDeque<>(Arrays.asList(this.point)));
+        when(this.modelState.getSamples())
+            .thenReturn(new ArrayDeque<>(Arrays.asList(new Sample(this.point, Instant.now(), Instant.now()))));
 
-        ThresholdingResult result = modelManager.score(this.point, this.detectorId, this.modelState);
+        ThresholdingResult result = modelManager
+            .score(new Sample(this.point, Instant.now(), Instant.now()), this.modelId, this.modelState, anomalyDetector);
         assertEquals(
             new ThresholdingResult(
                 anomalyDescriptor.getAnomalyGrade(),
@@ -1075,7 +1052,8 @@ public class ModelManagerTests {
         when(rcf.getDimensions()).thenReturn(40);
         when(this.trcf.getForest()).thenReturn(rcf);
         doThrow(new IllegalArgumentException()).when(trcf).process(any(), anyLong());
-        when(this.entityModel.getSamples()).thenReturn(new ArrayDeque<>(Arrays.asList(this.point)));
-        modelManager.score(this.point, this.detectorId, this.modelState);
+        when(this.modelState.getSamples())
+            .thenReturn(new ArrayDeque<>(Arrays.asList(new Sample(this.point, Instant.now(), Instant.now()))));
+        modelManager.score(new Sample(this.point, Instant.now(), Instant.now()), this.modelId, this.modelState, anomalyDetector);
     }
 }

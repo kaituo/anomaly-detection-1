@@ -42,13 +42,13 @@ import org.junit.Before;
 import org.opensearch.ad.mock.model.MockSimpleLog;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
-import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.ADRestTestUtils;
 import org.opensearch.client.Response;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.test.rest.OpenSearchRestTestCase;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.RestHandlerUtils;
@@ -435,7 +435,7 @@ public class ADBackwardsCompatibilityIT extends OpenSearchRestTestCase {
         Map<String, Object> responseMap = entityAsMap(response);
         String detectorId = (String) responseMap.get("_id");
         int version = (int) responseMap.get("_version");
-        assertNotEquals("response is missing Id", AnomalyDetector.NO_ID, detectorId);
+        assertNotEquals("response is missing Id", Config.NO_ID, detectorId);
         assertTrue("incorrect version", version > 0);
 
         Response startDetectorResponse = TestHelpers
