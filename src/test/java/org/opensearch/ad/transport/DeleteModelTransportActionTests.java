@@ -27,13 +27,10 @@ import org.junit.Before;
 import org.opensearch.Version;
 import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.constant.ADCommonMessages;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADEntityColdStart;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -47,6 +44,12 @@ import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.task.TaskCacheManager;
+import org.opensearch.timeseries.transport.DeleteModelNodeRequest;
+import org.opensearch.timeseries.transport.DeleteModelNodeResponse;
+import org.opensearch.timeseries.transport.DeleteModelRequest;
+import org.opensearch.timeseries.transport.DeleteModelResponse;
 import org.opensearch.transport.TransportService;
 
 import test.org.opensearch.ad.util.JsonDeserializer;
@@ -54,7 +57,7 @@ import test.org.opensearch.ad.util.JsonDeserializer;
 import com.google.gson.JsonElement;
 
 public class DeleteModelTransportActionTests extends AbstractTimeSeriesTest {
-    private DeleteModelTransportAction action;
+    private DeleteADModelTransportAction action;
     private String localNodeID;
 
     @Override
@@ -70,16 +73,16 @@ public class DeleteModelTransportActionTests extends AbstractTimeSeriesTest {
 
         TransportService transportService = mock(TransportService.class);
         ActionFilters actionFilters = mock(ActionFilters.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        ModelManager modelManager = mock(ModelManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
+        ADModelManager modelManager = mock(ADModelManager.class);
         FeatureManager featureManager = mock(FeatureManager.class);
-        CacheProvider cacheProvider = mock(CacheProvider.class);
+        HCCacheProvider cacheProvider = mock(HCCacheProvider.class);
         EntityCache entityCache = mock(EntityCache.class);
         when(cacheProvider.get()).thenReturn(entityCache);
-        ADTaskCacheManager adTaskCacheManager = mock(ADTaskCacheManager.class);
-        EntityColdStarter coldStarter = mock(EntityColdStarter.class);
+        TaskCacheManager adTaskCacheManager = mock(ADTaskCacheManager.class);
+        ADEntityColdStart coldStarter = mock(ADEntityColdStart.class);
 
-        action = new DeleteModelTransportAction(
+        action = new DeleteADModelTransportAction(
             threadPool,
             clusterService,
             transportService,

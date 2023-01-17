@@ -15,6 +15,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.transport.SearchADTasksAction;
+import org.opensearch.timeseries.AbstractSearchAction;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
 import com.google.common.collect.ImmutableList;
@@ -22,7 +23,7 @@ import com.google.common.collect.ImmutableList;
 /**
  * This class consists of the REST handler to search AD tasks.
  */
-public class RestSearchADTasksAction extends AbstractSearchAction<ADTask> {
+public class RestSearchADTasksAction extends AbstractADSearchAction<ADTask> {
 
     private static final String LEGACY_URL_PATH = TimeSeriesAnalyticsPlugin.LEGACY_OPENDISTRO_AD_BASE_URI + "/tasks/_search";
     private static final String URL_PATH = TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI + "/tasks/_search";

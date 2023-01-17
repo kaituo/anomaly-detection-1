@@ -64,6 +64,7 @@ import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.transport.GetConfigRequest;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableMap;
@@ -219,7 +220,7 @@ public class SearchTopAnomalyResultTransportAction extends
     @Override
     protected void doExecute(Task task, SearchTopAnomalyResultRequest request, ActionListener<SearchTopAnomalyResultResponse> listener) {
 
-        GetAnomalyDetectorRequest getAdRequest = new GetAnomalyDetectorRequest(
+        GetConfigRequest getAdRequest = new GetConfigRequest(
             request.getId(),
             // The default version value used in org.opensearch.rest.action.RestActions.parseVersion()
             -3L,

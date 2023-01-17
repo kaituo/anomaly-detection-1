@@ -50,6 +50,9 @@ import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 
+import com.carrotsearch.hppc.BitMixer;
+
+
 /**
  * Run tests in ES package since InternalCardinality has only package private constructors
  * and we cannot mock it since it is a final class.
@@ -71,7 +74,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
         throws IOException {
         detector = TestHelpers
             .randomAnomalyDetectorWithInterval(new IntervalTimeConfiguration(detectorIntervalMin, ChronoUnit.MINUTES), true);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));

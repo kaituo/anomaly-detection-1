@@ -13,6 +13,7 @@ package org.opensearch.timeseries.model;
 
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.forecast.model.Forecaster;
+import org.opensearch.forecast.transport.SearchTopForecastResultRequest;
 import org.opensearch.timeseries.Name;
 
 public enum ValidationIssueType implements Name {
@@ -32,7 +33,8 @@ public enum ValidationIssueType implements Name {
     IMPUTATION(Config.IMPUTATION_OPTION_FIELD),
     DETECTION_INTERVAL(AnomalyDetector.DETECTION_INTERVAL_FIELD),
     FORECAST_INTERVAL(Forecaster.FORECAST_INTERVAL_FIELD),
-    HORIZON_SIZE(Forecaster.HORIZON_FIELD);
+    HORIZON_SIZE(Forecaster.HORIZON_FIELD),
+    SUBAGGREGATION(SearchTopForecastResultRequest.SUBAGGREGATIONS_FIELD);
 
     private String name;
 

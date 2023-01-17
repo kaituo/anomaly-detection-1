@@ -68,6 +68,7 @@ public class ForecastResult extends IndexableResult {
     private final Instant forecastDataEndTime;
     private final Integer horizonIndex;
     protected final Double dataQuality;
+    private final String entityId;
 
     // used when indexing exception or error or an empty result
     public ForecastResult(
@@ -81,8 +82,7 @@ public class ForecastResult extends IndexableResult {
         String error,
         Optional<Entity> entity,
         User user,
-        Integer schemaVersion,
-        String modelId
+        Integer schemaVersion
     ) {
         this(
             forecasterId,
@@ -97,7 +97,6 @@ public class ForecastResult extends IndexableResult {
             entity,
             user,
             schemaVersion,
-            modelId,
             null,
             null,
             null,
@@ -121,7 +120,6 @@ public class ForecastResult extends IndexableResult {
         Optional<Entity> entity,
         User user,
         Integer schemaVersion,
-        String modelId,
         String featureId,
         Float forecastValue,
         Float lowerBound,
@@ -141,7 +139,6 @@ public class ForecastResult extends IndexableResult {
             entity,
             user,
             schemaVersion,
-            modelId,
             taskId
         );
         this.featureId = featureId;
@@ -153,6 +150,7 @@ public class ForecastResult extends IndexableResult {
         this.forecastDataStartTime = forecastDataStartTime;
         this.forecastDataEndTime = forecastDataEndTime;
         this.horizonIndex = horizonIndex;
+        this.entityId = getEntityId(entity, configId);
     }
 
     public static List<ForecastResult> fromRawRCFCasterResult(
@@ -175,9 +173,13 @@ public class ForecastResult extends IndexableResult {
         String taskId
     ) {
         int inputLength = featureData.size();
-        int numberOfForecasts = forecastsValues.length / inputLength;
+        int numberOfForecasts = 0;
+        if (forecastsValues != null) {
+            numberOfForecasts = forecastsValues.length / inputLength;
+        }
 
-        List<ForecastResult> convertedForecastValues = new ArrayList<>(numberOfForecasts);
+        // +1 for actual value
+        List<ForecastResult> convertedForecastValues = new ArrayList<>(numberOfForecasts + 1);
 
         // store feature data and forecast value separately for easy query on feature data
         // we can join them using forecasterId, entityId, and executionStartTime/executionEndTime
@@ -196,7 +198,6 @@ public class ForecastResult extends IndexableResult {
                     entity,
                     user,
                     schemaVersion,
-                    modelId,
                     null,
                     null,
                     null,
@@ -227,7 +228,6 @@ public class ForecastResult extends IndexableResult {
                             entity,
                             user,
                             schemaVersion,
-                            modelId,
                             featureData.get(j).getFeatureId(),
                             forecastsValues[k],
                             forecastsLowers[k],
@@ -255,6 +255,7 @@ public class ForecastResult extends IndexableResult {
         this.forecastDataStartTime = input.readOptionalInstant();
         this.forecastDataEndTime = input.readOptionalInstant();
         this.horizonIndex = input.readOptionalInt();
+        this.entityId = input.readOptionalString();
     }
 
     @Override
@@ -290,9 +291,6 @@ public class ForecastResult extends IndexableResult {
         }
         if (user != null) {
             xContentBuilder.field(CommonName.USER_FIELD, user);
-        }
-        if (modelId != null) {
-            xContentBuilder.field(CommonName.MODEL_ID_FIELD, modelId);
         }
         if (dataQuality != null && !dataQuality.isNaN()) {
             xContentBuilder.field(CommonName.DATA_QUALITY_FIELD, dataQuality);
@@ -440,7 +438,6 @@ public class ForecastResult extends IndexableResult {
             Optional.ofNullable(entity),
             user,
             schemaVersion,
-            modelId,
             featureId,
             forecastValue,
             lowerBound,
@@ -469,7 +466,8 @@ public class ForecastResult extends IndexableResult {
             && Objects.equal(confidenceIntervalWidth, that.confidenceIntervalWidth)
             && Objects.equal(forecastDataStartTime, that.forecastDataStartTime)
             && Objects.equal(forecastDataEndTime, that.forecastDataEndTime)
-            && Objects.equal(horizonIndex, that.horizonIndex);
+            && Objects.equal(horizonIndex, that.horizonIndex)
+            && Objects.equal(entityId, that.entityId);
     }
 
     @Generated
@@ -487,7 +485,8 @@ public class ForecastResult extends IndexableResult {
                 confidenceIntervalWidth,
                 forecastDataStartTime,
                 forecastDataEndTime,
-                horizonIndex
+                horizonIndex,
+                entityId
             );
         return result;
     }
@@ -507,6 +506,7 @@ public class ForecastResult extends IndexableResult {
                 .append("forecastDataStartTime", forecastDataStartTime)
                 .append("forecastDataEndTime", forecastDataEndTime)
                 .append("horizonIndex", horizonIndex)
+                .append("entityId", entityId)
                 .toString();
     }
 
@@ -523,6 +523,7 @@ public class ForecastResult extends IndexableResult {
         out.writeOptionalInstant(forecastDataStartTime);
         out.writeOptionalInstant(forecastDataEndTime);
         out.writeOptionalInt(horizonIndex);
+        out.writeOptionalString(entityId);
     }
 
     public static ForecastResult getDummyResult() {
@@ -537,8 +538,7 @@ public class ForecastResult extends IndexableResult {
             null,
             Optional.empty(),
             null,
-            CommonValue.NO_SCHEMA_VERSION,
-            null
+            CommonValue.NO_SCHEMA_VERSION
         );
     }
 
@@ -586,5 +586,9 @@ public class ForecastResult extends IndexableResult {
 
     public Integer getHorizonIndex() {
         return horizonIndex;
+    }
+
+    public String getEntityId() {
+        return entityId;
     }
 }

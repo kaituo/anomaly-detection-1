@@ -25,15 +25,15 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchSecurityException;
 import org.opensearch.action.ActionListener;
-import org.opensearch.ad.constant.CommonValue;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.feature.Features;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.EntityAnomalyResult;
 import org.opensearch.common.util.concurrent.ThreadContext;
+import org.opensearch.timeseries.constant.CommonValue;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.feature.Features;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.FeatureData;
@@ -45,11 +45,11 @@ import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 public final class AnomalyDetectorRunner {
 
     private final Logger logger = LogManager.getLogger(AnomalyDetectorRunner.class);
-    private final ModelManager modelManager;
+    private final ADModelManager modelManager;
     private final FeatureManager featureManager;
     private final int maxPreviewResults;
 
-    public AnomalyDetectorRunner(ModelManager modelManager, FeatureManager featureManager, int maxPreviewResults) {
+    public AnomalyDetectorRunner(ADModelManager modelManager, FeatureManager featureManager, int maxPreviewResults) {
         this.modelManager = modelManager;
         this.featureManager = featureManager;
         this.maxPreviewResults = maxPreviewResults;
@@ -168,24 +168,24 @@ public final class AnomalyDetectorRunner {
 
                 AnomalyResult result;
                 if (results != null && results.size() > i) {
-                    ThresholdingResult thresholdingResult = results.get(i);
-                    List<AnomalyResult> resultsToSave = thresholdingResult
-                        .toIndexableResults(
-                            detector,
-                            Instant.ofEpochMilli(timeRange.getKey()),
-                            Instant.ofEpochMilli(timeRange.getValue()),
-                            null,
-                            null,
-                            featureDatas,
-                            Optional.ofNullable(entity),
-                            CommonValue.NO_SCHEMA_VERSION,
-                            null,
-                            null,
-                            null
+                    anomalyResults
+                        .addAll(
+                            results
+                                .get(i)
+                                .toIndexableResults(
+                                    detector,
+                                    Instant.ofEpochMilli(timeRange.getKey()),
+                                    Instant.ofEpochMilli(timeRange.getValue()),
+                                    null,
+                                    null,
+                                    featureDatas,
+                                    Optional.ofNullable(entity),
+                                    CommonValue.NO_SCHEMA_VERSION,
+                                    null,
+                                    null,
+                                    null
+                                )
                         );
-                    for (AnomalyResult r : resultsToSave) {
-                        anomalyResults.add(r);
-                    }
                 } else {
                     result = new AnomalyResult(
                         detector.getId(),

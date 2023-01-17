@@ -47,6 +47,7 @@ import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.model.TimeSeriesTask;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -260,12 +261,12 @@ public class ADRestTestUtils {
         for (Object adTaskResponse : adTaskResponses) {
             String id = (String) ((Map<String, Object>) adTaskResponse).get("_id");
             Map<String, Object> source = (Map<String, Object>) ((Map<String, Object>) adTaskResponse).get("_source");
-            String state = (String) source.get(ADTask.STATE_FIELD);
+            String state = (String) source.get(TimeSeriesTask.STATE_FIELD);
             String parsedDetectorId = (String) source.get(ADTask.DETECTOR_ID_FIELD);
-            Double taskProgress = (Double) source.get(ADTask.TASK_PROGRESS_FIELD);
-            Double initProgress = (Double) source.get(ADTask.INIT_PROGRESS_FIELD);
-            String parsedTaskType = (String) source.get(ADTask.TASK_TYPE_FIELD);
-            String coordinatingNode = (String) source.get(ADTask.COORDINATING_NODE_FIELD);
+            Double taskProgress = (Double) source.get(TimeSeriesTask.TASK_PROGRESS_FIELD);
+            Double initProgress = (Double) source.get(TimeSeriesTask.INIT_PROGRESS_FIELD);
+            String parsedTaskType = (String) source.get(TimeSeriesTask.TASK_TYPE_FIELD);
+            String coordinatingNode = (String) source.get(TimeSeriesTask.COORDINATING_NODE_FIELD);
             ADTask adTask = ADTask
                 .builder()
                 .taskId(id)
@@ -387,13 +388,13 @@ public class ADRestTestUtils {
     }
 
     private static ADTask parseAdTask(Map<String, Object> taskMap) {
-        String id = (String) taskMap.get(ADTask.TASK_ID_FIELD);
-        String state = (String) taskMap.get(ADTask.STATE_FIELD);
+        String id = (String) taskMap.get(TimeSeriesTask.TASK_ID_FIELD);
+        String state = (String) taskMap.get(TimeSeriesTask.STATE_FIELD);
         String parsedDetectorId = (String) taskMap.get(ADTask.DETECTOR_ID_FIELD);
-        Double taskProgress = (Double) taskMap.get(ADTask.TASK_PROGRESS_FIELD);
-        Double initProgress = (Double) taskMap.get(ADTask.INIT_PROGRESS_FIELD);
-        String parsedTaskType = (String) taskMap.get(ADTask.TASK_TYPE_FIELD);
-        String coordinatingNode = (String) taskMap.get(ADTask.COORDINATING_NODE_FIELD);
+        Double taskProgress = (Double) taskMap.get(TimeSeriesTask.TASK_PROGRESS_FIELD);
+        Double initProgress = (Double) taskMap.get(TimeSeriesTask.INIT_PROGRESS_FIELD);
+        String parsedTaskType = (String) taskMap.get(TimeSeriesTask.TASK_TYPE_FIELD);
+        String coordinatingNode = (String) taskMap.get(TimeSeriesTask.COORDINATING_NODE_FIELD);
         return ADTask
             .builder()
             .taskId(id)

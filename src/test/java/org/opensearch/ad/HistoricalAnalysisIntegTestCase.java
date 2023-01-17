@@ -12,9 +12,6 @@
 package org.opensearch.ad;
 
 import static org.opensearch.ad.model.ADTask.DETECTOR_ID_FIELD;
-import static org.opensearch.ad.model.ADTask.EXECUTION_START_TIME_FIELD;
-import static org.opensearch.ad.model.ADTask.IS_LATEST_FIELD;
-import static org.opensearch.ad.model.ADTask.PARENT_TASK_ID_FIELD;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_PRIMARY_TERM;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_SEQ_NO;
 import static org.opensearch.timeseries.util.RestHandlerUtils.START_JOB;
@@ -37,12 +34,9 @@ import org.opensearch.action.search.SearchResponse;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.mock.plugin.MockReindexPlugin;
 import org.opensearch.ad.model.ADTask;
-import org.opensearch.ad.model.ADTaskState;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.transport.AnomalyDetectorJobAction;
-import org.opensearch.ad.transport.AnomalyDetectorJobRequest;
-import org.opensearch.ad.transport.AnomalyDetectorJobResponse;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.TermQueryBuilder;
@@ -57,6 +51,10 @@ import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.model.TaskState;
+import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.transport.JobRequest;
+import org.opensearch.timeseries.transport.JobResponse;
 
 import com.google.common.collect.ImmutableList;
 
@@ -120,6 +118,7 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
         }
     }
 
+    @Override
     public Feature maxValueFeature() throws IOException {
         AggregationBuilder aggregationBuilder = TestHelpers.parseAggregation("{\"test\":{\"max\":{\"field\":\"" + valueField + "\"}}}");
         return new Feature(randomAlphaOfLength(5), randomAlphaOfLength(10), true, aggregationBuilder);
@@ -135,20 +134,14 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
     }
 
     public ADTask randomCreatedADTask(String taskId, AnomalyDetector detector, String detectorId, DateRange detectionDateRange) {
-        return randomADTask(taskId, detector, detectorId, detectionDateRange, ADTaskState.CREATED);
+        return randomADTask(taskId, detector, detectorId, detectionDateRange, TaskState.CREATED);
     }
 
-    public ADTask randomADTask(
-        String taskId,
-        AnomalyDetector detector,
-        String detectorId,
-        DateRange detectionDateRange,
-        ADTaskState state
-    ) {
+    public ADTask randomADTask(String taskId, AnomalyDetector detector, String detectorId, DateRange detectionDateRange, TaskState state) {
         ADTask.Builder builder = ADTask
             .builder()
             .taskId(taskId)
-            .taskType(ADTaskType.HISTORICAL_SINGLE_ENTITY.name())
+            .taskType(ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR.name())
             .detectorId(detectorId)
             .detectionDateRange(detectionDateRange)
             .detector(detector)
@@ -158,12 +151,12 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
             .isLatest(true)
             .startedBy(randomAlphaOfLength(5))
             .executionStartTime(Instant.now().minus(randomLongBetween(10, 100), ChronoUnit.MINUTES));
-        if (ADTaskState.FINISHED == state) {
+        if (TaskState.FINISHED == state) {
             setPropertyForNotRunningTask(builder);
-        } else if (ADTaskState.FAILED == state) {
+        } else if (TaskState.FAILED == state) {
             setPropertyForNotRunningTask(builder);
             builder.error(randomAlphaOfLength(5));
-        } else if (ADTaskState.STOPPED == state) {
+        } else if (TaskState.STOPPED == state) {
             setPropertyForNotRunningTask(builder);
             builder.error(randomAlphaOfLength(5));
             builder.stoppedBy(randomAlphaOfLength(5));
@@ -185,14 +178,14 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
         BoolQueryBuilder query = new BoolQueryBuilder();
         query.filter(new TermQueryBuilder(DETECTOR_ID_FIELD, detectorId));
         if (isLatest != null) {
-            query.filter(new TermQueryBuilder(IS_LATEST_FIELD, isLatest));
+            query.filter(new TermQueryBuilder(TimeSeriesTask.IS_LATEST_FIELD, isLatest));
         }
         if (parentTaskId != null) {
-            query.filter(new TermQueryBuilder(PARENT_TASK_ID_FIELD, parentTaskId));
+            query.filter(new TermQueryBuilder(TimeSeriesTask.PARENT_TASK_ID_FIELD, parentTaskId));
         }
         SearchRequest searchRequest = new SearchRequest();
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
-        sourceBuilder.query(query).sort(EXECUTION_START_TIME_FIELD, SortOrder.DESC).trackTotalHits(true).size(size);
+        sourceBuilder.query(query).sort(TimeSeriesTask.EXECUTION_START_TIME_FIELD, SortOrder.DESC).trackTotalHits(true).size(size);
         searchRequest.source(sourceBuilder).indices(ADCommonName.DETECTION_STATE_INDEX);
         SearchResponse searchResponse = client().search(searchRequest).actionGet();
         Iterator<SearchHit> iterator = searchResponse.getHits().iterator();
@@ -229,29 +222,15 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
         AnomalyDetector detector = TestHelpers
             .randomDetector(ImmutableList.of(maxValueFeature()), testIndex, detectionIntervalInMinutes, timeField);
         String detectorId = createDetector(detector);
-        AnomalyDetectorJobRequest request = new AnomalyDetectorJobRequest(
-            detectorId,
-            dateRange,
-            true,
-            UNASSIGNED_SEQ_NO,
-            UNASSIGNED_PRIMARY_TERM,
-            START_JOB
-        );
-        AnomalyDetectorJobResponse response = client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000);
+        JobRequest request = new JobRequest(detectorId, dateRange, true, UNASSIGNED_SEQ_NO, UNASSIGNED_PRIMARY_TERM, START_JOB);
+        JobResponse response = client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000);
         return getADTask(response.getId());
     }
 
     public ADTask startHistoricalAnalysis(String detectorId, Instant startTime, Instant endTime) throws IOException {
         DateRange dateRange = new DateRange(startTime, endTime);
-        AnomalyDetectorJobRequest request = new AnomalyDetectorJobRequest(
-            detectorId,
-            dateRange,
-            true,
-            UNASSIGNED_SEQ_NO,
-            UNASSIGNED_PRIMARY_TERM,
-            START_JOB
-        );
-        AnomalyDetectorJobResponse response = client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000);
+        JobRequest request = new JobRequest(detectorId, dateRange, true, UNASSIGNED_SEQ_NO, UNASSIGNED_PRIMARY_TERM, START_JOB);
+        JobResponse response = client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000);
         return getADTask(response.getId());
     }
 }

@@ -103,6 +103,7 @@ import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import com.google.common.collect.ImmutableList;
 
@@ -163,13 +164,13 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             Settings.EMPTY,
             Collections
                 .unmodifiableSet(
-                    new HashSet<>(Arrays.asList(AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW, AnomalyDetectorSettings.PAGE_SIZE))
+                    new HashSet<>(Arrays.asList(AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW, AnomalyDetectorSettings.AD_PAGE_SIZE))
                 )
         );
         clusterService = mock(ClusterService.class);
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         clock = mock(Clock.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));
@@ -184,7 +185,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             clientUtil,
             settings,
             clusterService,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
             1,
             1,
@@ -371,7 +372,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             clientUtil,
             settings,
             clusterService,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
             2,
             1,
@@ -417,7 +418,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             clientUtil,
             settings,
             clusterService,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
             2,
             1,

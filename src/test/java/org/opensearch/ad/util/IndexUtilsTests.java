@@ -20,6 +20,9 @@ import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.util.IndexUtils;
 
 public class IndexUtilsTests extends OpenSearchIntegTestCase {
 

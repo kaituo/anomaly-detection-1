@@ -20,6 +20,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_BACKOFF_MINUTES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -242,7 +244,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         String detectorId = setupDetector();
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        stateManager.getConfig(detectorId, AnalysisType.AD, ActionListener.wrap(asDetector -> {
+        stateManager.getConfig(detectorId, ActionListener.wrap(asDetector -> {
             assertEquals(detectorToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {

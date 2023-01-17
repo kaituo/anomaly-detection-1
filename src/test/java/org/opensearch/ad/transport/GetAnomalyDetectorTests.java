@@ -40,9 +40,13 @@ import org.opensearch.action.get.MultiGetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.indices.ADIndex;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
+import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
+import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
@@ -55,19 +59,21 @@ import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.transport.BaseGetConfigTransportAction;
+import org.opensearch.timeseries.transport.GetConfigRequest;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
 
 public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
-    private GetAnomalyDetectorTransportAction action;
+    private BaseGetConfigTransportAction<GetAnomalyDetectorResponse, ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement, ADTaskManager, AnomalyDetector> action;
     private TransportService transportService;
     private DiscoveryNodeFilterer nodeFilter;
     private ActionFilters actionFilters;
     private Client client;
     private SecurityClientUtil clientUtil;
-    private GetAnomalyDetectorRequest request;
+    private GetConfigRequest request;
     private String detectorId = "yecrdnUBqurvo9uKU_d8";
     private String entityValue = "app_0";
     private String categoryField = "categoryField";
@@ -93,7 +99,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
         ClusterService clusterService = mock(ClusterService.class);
         ClusterSettings clusterSettings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
@@ -139,7 +145,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
 
         rawPath = "_opendistro/_anomaly_detection/detectors/T4c3dXUBj-2IZN7itix_/_profile";
 
-        request = new GetAnomalyDetectorRequest(detectorId, 0L, false, false, typeStr, rawPath, false, entity);
+        request = new GetConfigRequest(detectorId, 0L, false, false, typeStr, rawPath, false, entity);
 
         future = new PlainActionFuture<>();
         action.doExecute(null, request, future);
@@ -164,7 +170,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
 
         rawPath = "_opendistro/_anomaly_detection/detectors/T4c3dXUBj-2IZN7itix_/_profile";
 
-        request = new GetAnomalyDetectorRequest(detectorId, 0L, false, false, typeStr, rawPath, false, entity);
+        request = new GetConfigRequest(detectorId, 0L, false, false, typeStr, rawPath, false, entity);
 
         future = new PlainActionFuture<>();
         action.doExecute(null, request, future);
@@ -180,17 +186,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
             return null;
         })
             .when(adTaskManager)
-            .getAndExecuteOnLatestADTasks(
-                anyString(),
-                eq(null),
-                eq(null),
-                anyList(),
-                any(),
-                eq(transportService),
-                eq(true),
-                anyInt(),
-                any()
-            );
+            .getAndExecuteOnLatestTasks(anyString(), eq(null), eq(null), anyList(), any(), eq(transportService), eq(true), anyInt(), any());
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
@@ -202,7 +198,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
 
         rawPath = "_opendistro/_anomaly_detection/detectors/T4c3dXUBj-2IZN7itix_";
 
-        request = new GetAnomalyDetectorRequest(detectorId, 0L, false, true, typeStr, rawPath, false, entity);
+        request = new GetConfigRequest(detectorId, 0L, false, true, typeStr, rawPath, false, entity);
         future = new PlainActionFuture<>();
         action.getExecute(request, future);
 
@@ -228,11 +224,11 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     private List<ADTask> createADTaskList() {
-        ADTask adTask1 = new ADTask.Builder().taskId("test1").taskType(ADTaskType.REALTIME_SINGLE_ENTITY.name()).build();
-        ADTask adTask2 = new ADTask.Builder().taskId("test2").taskType(ADTaskType.REALTIME_SINGLE_ENTITY.name()).build();
+        ADTask adTask1 = new ADTask.Builder().taskId("test1").taskType(ADTaskType.REALTIME_SINGLE_STREAM_DETECTOR.name()).build();
+        ADTask adTask2 = new ADTask.Builder().taskId("test2").taskType(ADTaskType.REALTIME_SINGLE_STREAM_DETECTOR.name()).build();
         ADTask adTask3 = new ADTask.Builder().taskId("test3").taskType(ADTaskType.REALTIME_HC_DETECTOR.name()).build();
         ADTask adTask4 = new ADTask.Builder().taskId("test4").taskType(ADTaskType.HISTORICAL_HC_DETECTOR.name()).build();
-        ADTask adTask5 = new ADTask.Builder().taskId("test5").taskType(ADTaskType.HISTORICAL_SINGLE_ENTITY.name()).build();
+        ADTask adTask5 = new ADTask.Builder().taskId("test5").taskType(ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR.name()).build();
 
         return Arrays.asList(adTask1, adTask2, adTask3, adTask4, adTask5);
     }

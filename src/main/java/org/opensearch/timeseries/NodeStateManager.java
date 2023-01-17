@@ -133,7 +133,11 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
     /**
      * Used in delete workflow
      *
+<<<<<<< HEAD
      * @param configId config ID
+=======
+     * @param configId detector ID
+>>>>>>> 0e9805df (test)
      */
     @Override
     public void clear(String configId) {

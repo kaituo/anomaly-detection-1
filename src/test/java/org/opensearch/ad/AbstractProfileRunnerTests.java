@@ -178,7 +178,7 @@ public class AbstractProfileRunnerTests extends AbstractTimeSeriesTest {
             Consumer<Optional<ADTask>> function = (Consumer<Optional<ADTask>>) args[2];
             function.accept(Optional.of(TestHelpers.randomAdTask()));
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestDetectorLevelTask(any(), any(), any(), any(), anyBoolean(), any());
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), any(), any(), any(), anyBoolean(), any());
 
         detectorIntervalMin = 3;
         detectorGetReponse = mock(GetResponse.class);

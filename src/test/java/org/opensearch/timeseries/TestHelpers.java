@@ -67,7 +67,6 @@ import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.mock.model.MockSimpleLog;
 import org.opensearch.ad.model.ADTask;
-import org.opensearch.ad.model.ADTaskState;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
@@ -76,8 +75,6 @@ import org.opensearch.ad.model.AnomalyResultBucket;
 import org.opensearch.ad.model.DetectorInternalState;
 import org.opensearch.ad.model.DetectorValidationIssue;
 import org.opensearch.ad.model.ExpectedValueList;
-import org.opensearch.ad.ratelimit.RequestPriority;
-import org.opensearch.ad.ratelimit.ResultWriteRequest;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.client.Request;
@@ -160,12 +157,12 @@ public class TestHelpers {
     public static final String AD_BASE_PREVIEW_URI = AD_BASE_DETECTORS_URI + "/%s/_preview";
     public static final String AD_BASE_STATS_URI = "/_plugins/_anomaly_detection/stats";
     public static ImmutableSet<String> HISTORICAL_ANALYSIS_RUNNING_STATS = ImmutableSet
-        .of(ADTaskState.CREATED.name(), ADTaskState.INIT.name(), ADTaskState.RUNNING.name());
+        .of(TaskState.CREATED.name(), TaskState.INIT.name(), TaskState.RUNNING.name());
     // Task may fail if memory circuit breaker triggered.
     public static final Set<String> HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS = ImmutableSet
-        .of(ADTaskState.FINISHED.name(), ADTaskState.FAILED.name());
+        .of(TaskState.FINISHED.name(), TaskState.FAILED.name());
     public static ImmutableSet<String> HISTORICAL_ANALYSIS_DONE_STATS = ImmutableSet
-        .of(ADTaskState.FAILED.name(), ADTaskState.FINISHED.name(), ADTaskState.STOPPED.name());
+        .of(TaskState.FAILED.name(), TaskState.FINISHED.name(), TaskState.STOPPED.name());
     private static final Logger logger = LogManager.getLogger(TestHelpers.class);
     public static final Random random = new Random(42);
 
@@ -1261,7 +1258,7 @@ public class TestHelpers {
     public static ADTask randomAdTask() throws IOException {
         return randomAdTask(
             randomAlphaOfLength(5),
-            ADTaskState.RUNNING,
+            TaskState.RUNNING,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             randomAlphaOfLength(5),
             true
@@ -1271,7 +1268,7 @@ public class TestHelpers {
     public static ADTask randomAdTask(ADTaskType adTaskType) throws IOException {
         return randomAdTask(
             randomAlphaOfLength(5),
-            ADTaskState.RUNNING,
+            TaskState.RUNNING,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             randomAlphaOfLength(5),
             true,
@@ -1281,7 +1278,7 @@ public class TestHelpers {
 
     public static ADTask randomAdTask(
         String taskId,
-        ADTaskState state,
+        TaskState state,
         Instant executionEndTime,
         String stoppedBy,
         String detectorId,
@@ -1326,14 +1323,14 @@ public class TestHelpers {
         return task;
     }
 
-    public static ADTask randomAdTask(String taskId, ADTaskState state, Instant executionEndTime, String stoppedBy, boolean withDetector)
+    public static ADTask randomAdTask(String taskId, TaskState state, Instant executionEndTime, String stoppedBy, boolean withDetector)
         throws IOException {
-        return randomAdTask(taskId, state, executionEndTime, stoppedBy, withDetector, ADTaskType.HISTORICAL_SINGLE_ENTITY);
+        return randomAdTask(taskId, state, executionEndTime, stoppedBy, withDetector, ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR);
     }
 
     public static ADTask randomAdTask(
         String taskId,
-        ADTaskState state,
+        TaskState state,
         Instant executionEndTime,
         String stoppedBy,
         boolean withDetector,
@@ -1386,7 +1383,7 @@ public class TestHelpers {
 
     public static ADTask randomAdTask(
         String taskId,
-        ADTaskState state,
+        TaskState state,
         Instant executionEndTime,
         String stoppedBy,
         AnomalyDetector detector
@@ -1402,7 +1399,7 @@ public class TestHelpers {
                 entity = Entity.createEntityByReordering(ImmutableMap.of(detector.getCategoryFields().get(0), randomAlphaOfLength(5)));
             }
         }
-        String taskType = entity == null ? ADTaskType.HISTORICAL_SINGLE_ENTITY.name() : ADTaskType.HISTORICAL_HC_ENTITY.name();
+        String taskType = entity == null ? ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR.name() : ADTaskType.HISTORICAL_HC_ENTITY.name();
         ADTask task = ADTask
             .builder()
             .taskId(taskId)
@@ -1529,10 +1526,9 @@ public class TestHelpers {
     }
 
     public static ClusterState createClusterState() {
-        final Map<String, IndexMetadata> mappings = new HashMap<>();
-
-        mappings
-            .put(
+        ImmutableOpenMap<String, IndexMetadata> immutableOpenMap = ImmutableOpenMap
+            .<String, IndexMetadata>builder()
+            .fPut(
                 CommonName.JOB_INDEX,
                 IndexMetadata
                     .builder("test")

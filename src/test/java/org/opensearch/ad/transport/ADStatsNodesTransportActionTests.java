@@ -13,7 +13,7 @@ package org.opensearch.ad.transport;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_MODEL_SIZE_PER_NODE;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_MODEL_SIZE_PER_NODE;
 
 import java.time.Clock;
 import java.util.Arrays;
@@ -26,18 +26,9 @@ import java.util.Set;
 import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.stats.ADStat;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.stats.ADStats;
-import org.opensearch.ad.stats.InternalStatNames;
-import org.opensearch.ad.stats.suppliers.CounterSupplier;
-import org.opensearch.ad.stats.suppliers.IndexStatusSupplier;
-import org.opensearch.ad.stats.suppliers.ModelsOnNodeSupplier;
-import org.opensearch.ad.stats.suppliers.SettableSupplier;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.IndexUtils;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
@@ -47,14 +38,23 @@ import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.monitor.jvm.JvmStats;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.caching.HCCacheProvider;
+import org.opensearch.timeseries.stats.InternalStatNames;
+import org.opensearch.timeseries.stats.TimeSeriesStat;
+import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
+import org.opensearch.timeseries.stats.suppliers.IndexStatusSupplier;
+import org.opensearch.timeseries.stats.suppliers.ModelsOnNodeSupplier;
+import org.opensearch.timeseries.stats.suppliers.SettableSupplier;
 import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 import org.opensearch.transport.TransportService;
 
 public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
 
     private ADStatsNodesTransportAction action;
     private ADStats adStats;
-    private Map<String, ADStat<?>> statsMap;
+    private Map<String, TimeSeriesStat<?>> statsMap;
     private String clusterStatName1, clusterStatName2;
     private String nodeStatName1, nodeStatName2;
     private ADTaskManager adTaskManager;
@@ -68,9 +68,14 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
         Clock clock = mock(Clock.class);
         ThreadPool threadPool = mock(ThreadPool.class);
         IndexNameExpressionResolver indexNameResolver = mock(IndexNameExpressionResolver.class);
-        IndexUtils indexUtils = new IndexUtils(client, new ClientUtil(client), clusterService(), indexNameResolver);
-        ModelManager modelManager = mock(ModelManager.class);
-        CacheProvider cacheProvider = mock(CacheProvider.class);
+        IndexUtils indexUtils = new IndexUtils(
+            client,
+            new ClientUtil(Settings.EMPTY, client, throttler, threadPool),
+            clusterService(),
+            indexNameResolver
+        );
+        ADModelManager modelManager = mock(ADModelManager.class);
+        HCCacheProvider cacheProvider = mock(HCCacheProvider.class);
         EntityCache cache = mock(EntityCache.class);
         when(cacheProvider.get()).thenReturn(cache);
 
@@ -79,21 +84,24 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
         nodeStatName1 = "nodeStat1";
         nodeStatName2 = "nodeStat2";
 
-        Settings settings = Settings.builder().put(MAX_MODEL_SIZE_PER_NODE.getKey(), 10).build();
+        Settings settings = Settings.builder().put(AD_MAX_MODEL_SIZE_PER_NODE.getKey(), 10).build();
         ClusterService clusterService = mock(ClusterService.class);
         ClusterSettings clusterSettings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(MAX_MODEL_SIZE_PER_NODE)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AD_MAX_MODEL_SIZE_PER_NODE)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        statsMap = new HashMap<String, ADStat<?>>() {
+        statsMap = new HashMap<String, TimeSeriesStat<?>>() {
             {
-                put(nodeStatName1, new ADStat<>(false, new CounterSupplier()));
-                put(nodeStatName2, new ADStat<>(false, new ModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService)));
-                put(clusterStatName1, new ADStat<>(true, new IndexStatusSupplier(indexUtils, "index1")));
-                put(clusterStatName2, new ADStat<>(true, new IndexStatusSupplier(indexUtils, "index2")));
-                put(InternalStatNames.JVM_HEAP_USAGE.getName(), new ADStat<>(true, new SettableSupplier()));
+                put(nodeStatName1, new TimeSeriesStat<>(false, new CounterSupplier()));
+                put(
+                    nodeStatName2,
+                    new TimeSeriesStat<>(false, new ModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService))
+                );
+                put(clusterStatName1, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index1")));
+                put(clusterStatName2, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index2")));
+                put(InternalStatNames.JVM_HEAP_USAGE.getName(), new TimeSeriesStat<>(true, new SettableSupplier()));
             }
         };
 

@@ -28,8 +28,6 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorType;
-import org.opensearch.ad.stats.ADStats;
-import org.opensearch.ad.stats.ADStatsResponse;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -42,6 +40,7 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.stats.StatNames;
+import org.opensearch.timeseries.stats.Stats;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.transport.TransportService;
 
@@ -50,7 +49,7 @@ public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<
     private final Logger logger = LogManager.getLogger(StatsAnomalyDetectorTransportAction.class);
 
     private final Client client;
-    private final ADStats adStats;
+    private final Stats adStats;
     private final ClusterService clusterService;
 
     @Inject
@@ -58,7 +57,7 @@ public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<
         TransportService transportService,
         ActionFilters actionFilters,
         Client client,
-        ADStats adStats,
+        Stats adStats,
         ClusterService clusterService
 
     ) {
@@ -128,8 +127,8 @@ public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<
     ) {
         ADStatsResponse adStatsResponse = new ADStatsResponse();
         if ((adStatsRequest.getStatsToBeRetrieved().contains(StatNames.DETECTOR_COUNT.getName())
-            || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName())
-            || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.MULTI_ENTITY_DETECTOR_COUNT.getName()))
+            || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName())
+            || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.HC_DETECTOR_COUNT.getName()))
             && clusterService.state().getRoutingTable().hasIndex(CommonName.CONFIG_INDEX)) {
 
             TermsAggregationBuilder termsAgg = AggregationBuilders.terms(DETECTOR_TYPE_AGG).field(AnomalyDetector.DETECTOR_TYPE_FIELD);
@@ -158,11 +157,11 @@ public class StatsAnomalyDetectorTransportAction extends HandledTransportAction<
                 if (adStatsRequest.getStatsToBeRetrieved().contains(StatNames.DETECTOR_COUNT.getName())) {
                     adStats.getStat(StatNames.DETECTOR_COUNT.getName()).setValue(totalDetectors);
                 }
-                if (adStatsRequest.getStatsToBeRetrieved().contains(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName())) {
-                    adStats.getStat(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName()).setValue(totalSingleEntityDetectors);
+                if (adStatsRequest.getStatsToBeRetrieved().contains(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName())) {
+                    adStats.getStat(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName()).setValue(totalSingleEntityDetectors);
                 }
-                if (adStatsRequest.getStatsToBeRetrieved().contains(StatNames.MULTI_ENTITY_DETECTOR_COUNT.getName())) {
-                    adStats.getStat(StatNames.MULTI_ENTITY_DETECTOR_COUNT.getName()).setValue(totalMultiEntityDetectors);
+                if (adStatsRequest.getStatsToBeRetrieved().contains(StatNames.HC_DETECTOR_COUNT.getName())) {
+                    adStats.getStat(StatNames.HC_DETECTOR_COUNT.getName()).setValue(totalMultiEntityDetectors);
                 }
                 adStatsResponse.setClusterStats(getClusterStatsMap(adStatsRequest));
                 listener.onResponse(adStatsResponse);

@@ -34,8 +34,6 @@ import org.junit.Test;
 import org.opensearch.Version;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelState;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.Strings;
@@ -51,6 +49,7 @@ import org.opensearch.timeseries.stats.StatNames;
 
 import test.org.opensearch.ad.util.JsonDeserializer;
 
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 
@@ -140,17 +139,18 @@ public class ADStatsTests extends OpenSearchTestCase {
         attributes.put(name2, val2);
         String detectorId = "detectorId";
         Entity entity = Entity.createEntityFromOrderedMap(attributes);
-        EntityModel entityModel = new EntityModel(entity, null, null);
+        EntityModel<ThresholdedRandomCutForest> entityModel = new EntityModel<>(entity, null, null);
         Clock clock = mock(Clock.class);
         when(clock.instant()).thenReturn(Instant.now());
-        ModelState<EntityModel> state = new ModelState<EntityModel>(
-            entityModel,
-            entity.getModelId(detectorId).get(),
-            detectorId,
-            "entity",
-            clock,
-            0.1f
-        );
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> state =
+            new ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>>(
+                entityModel,
+                entity.getModelId(detectorId).get(),
+                detectorId,
+                "entity",
+                clock,
+                0.1f
+            );
         Map<String, Object> stats = state.getModelStateAsMap();
 
         // Test serialization
@@ -167,7 +167,7 @@ public class ADStatsTests extends OpenSearchTestCase {
         String json = Strings.toString(builder);
 
         for (Map.Entry<String, Object> stat : stats.entrySet()) {
-            if (stat.getKey().equals(ModelState.LAST_CHECKPOINT_TIME_KEY) || stat.getKey().equals(ModelState.LAST_USED_TIME_KEY)) {
+            if (stat.getKey().equals(ADModelState.LAST_CHECKPOINT_TIME_KEY) || stat.getKey().equals(ADModelState.LAST_USED_TIME_KEY)) {
                 assertEquals("toXContent does not work", JsonDeserializer.getLongValue(json, stat.getKey()), stat.getValue());
             } else if (stat.getKey().equals(CommonName.ENTITY_KEY)) {
                 JsonArray array = JsonDeserializer.getArrayValue(json, stat.getKey());

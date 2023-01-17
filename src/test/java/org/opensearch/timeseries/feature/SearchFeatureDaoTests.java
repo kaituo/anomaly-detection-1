@@ -96,6 +96,7 @@ import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.powermock.api.mockito.PowerMockito;
@@ -136,7 +137,7 @@ public class SearchFeatureDaoTests {
     @Mock
     private Max max;
     @Mock
-    private NodeStateManager stateManager;
+    private ADNodeStateManager stateManager;
 
     @Mock
     private AnomalyDetector detector;
@@ -174,7 +175,7 @@ public class SearchFeatureDaoTests {
         settings = Settings.EMPTY;
 
         when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));
@@ -182,7 +183,7 @@ public class SearchFeatureDaoTests {
         }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
         searchFeatureDao = spy(
-            new SearchFeatureDao(client, xContent, imputer, clientUtil, settings, null, AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE)
+            new SearchFeatureDao(client, xContent, imputer, clientUtil, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
         );
 
         detectionInterval = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);

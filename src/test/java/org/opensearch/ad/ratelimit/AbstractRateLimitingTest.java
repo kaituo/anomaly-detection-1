@@ -34,7 +34,7 @@ import org.opensearch.timeseries.model.Entity;
 public class AbstractRateLimitingTest extends AbstractTimeSeriesTest {
     Clock clock;
     AnomalyDetector detector;
-    NodeStateManager nodeStateManager;
+    ADNodeStateManager nodeStateManager;
     String detectorId;
     String categoryField;
     Entity entity, entity2, entity3;
@@ -54,7 +54,7 @@ public class AbstractRateLimitingTest extends AbstractTimeSeriesTest {
         detectorId = "123";
         detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(detectorId, Arrays.asList(categoryField));
 
-        nodeStateManager = mock(NodeStateManager.class);
+        nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));

@@ -113,4 +113,9 @@ public class CommonName {
     public static final String TIME_SERIES_PLUGIN_NAME = "opensearch-time-series-analytics";
     public static final String TIME_SERIES_PLUGIN_NAME_FOR_TEST = "org.opensearch.timeseries.TimeSeriesAnalyticsPlugin";
     public static final String TIME_SERIES_PLUGIN_VERSION_FOR_TEST = "NA";
+
+    // ======================================
+    // Profile name
+    // ======================================
+    public static final String CATEGORICAL_FIELD = "category_field";
 }

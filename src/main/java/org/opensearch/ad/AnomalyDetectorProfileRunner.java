@@ -15,7 +15,6 @@ import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_PARSE_DETECTOR
 import static org.opensearch.core.rest.RestStatus.BAD_REQUEST;
 import static org.opensearch.core.rest.RestStatus.INTERNAL_SERVER_ERROR;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
-import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
 
 import java.util.List;
 import java.util.Map;
@@ -37,7 +36,6 @@ import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.DetectorProfile;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.DetectorState;
 import org.opensearch.ad.model.InitProgressProfile;
 import org.opensearch.ad.settings.ADNumericSetting;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
@@ -65,9 +63,12 @@ import org.opensearch.search.aggregations.metrics.CardinalityAggregationBuilder;
 import org.opensearch.search.aggregations.metrics.InternalCardinality;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.ProfileUtil;
 import org.opensearch.timeseries.common.exception.NotSerializedExceptionName;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
+import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.ConfigState;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
@@ -137,11 +138,11 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
                     listener.onFailure(new OpenSearchStatusException(FAIL_TO_PARSE_DETECTOR_MSG + detectorId, BAD_REQUEST));
                 }
             } else {
-                listener.onFailure(new OpenSearchStatusException(FAIL_TO_FIND_CONFIG_MSG + detectorId, BAD_REQUEST));
+                listener.onFailure(new OpenSearchStatusException(CommonMessages.FAIL_TO_FIND_CONFIG_MSG + detectorId, BAD_REQUEST));
             }
         }, exception -> {
-            logger.error(FAIL_TO_FIND_CONFIG_MSG + detectorId, exception);
-            listener.onFailure(new OpenSearchStatusException(FAIL_TO_FIND_CONFIG_MSG + detectorId, INTERNAL_SERVER_ERROR));
+            logger.error(CommonMessages.FAIL_TO_FIND_CONFIG_MSG + detectorId, exception);
+            listener.onFailure(new OpenSearchStatusException(CommonMessages.FAIL_TO_FIND_CONFIG_MSG + detectorId, INTERNAL_SERVER_ERROR));
         }));
     }
 
@@ -212,7 +213,7 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
                             false
                         );
                     if (profilesToCollect.contains(DetectorProfileName.ERROR)) {
-                        adTaskManager.getAndExecuteOnLatestDetectorLevelTask(detectorId, ADTaskType.REALTIME_TASK_TYPES, adTask -> {
+                        adTaskManager.getAndExecuteOnLatestConfigLevelTask(detectorId, ADTaskType.REALTIME_TASK_TYPES, adTask -> {
                             DetectorProfile.Builder profileBuilder = new DetectorProfile.Builder();
                             if (adTask.isPresent()) {
                                 long lastUpdateTimeMs = adTask.get().getLastUpdateTime().toEpochMilli();
@@ -381,7 +382,7 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
     private void onGetDetectorForPrepare(String detectorId, ActionListener<DetectorProfile> listener, Set<DetectorProfileName> profiles) {
         DetectorProfile.Builder profileBuilder = new DetectorProfile.Builder();
         if (profiles.contains(DetectorProfileName.STATE)) {
-            profileBuilder.state(DetectorState.DISABLED);
+            profileBuilder.state(ConfigState.DISABLED);
         }
         if (profiles.contains(DetectorProfileName.AD_TASK)) {
             adTaskManager.getLatestHistoricalTaskProfile(detectorId, transportService, profileBuilder.build(), listener);
@@ -412,7 +413,7 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
         } else {
             DetectorProfile.Builder builder = new DetectorProfile.Builder();
             if (profilesToCollect.contains(DetectorProfileName.STATE)) {
-                builder.state(DetectorState.DISABLED);
+                builder.state(ConfigState.DISABLED);
             }
             listener.onResponse(builder.build());
         }
@@ -481,10 +482,11 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
                 long enabledTime = job.getEnabledTime().toEpochMilli();
                 long totalUpdates = profileResponse.getTotalUpdates();
                 ProfileUtil
-                    .confirmDetectorRealtimeInitStatus(
+                    .confirmRealtimeInitStatus(
                         detector,
                         enabledTime,
                         client,
+                        AnalysisType.AD,
                         onInittedEver(enabledTime, profileBuilder, profilesToCollect, detector, totalUpdates, listener)
                     );
             } else {
@@ -493,7 +495,7 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
             }
         } else {
             if (profilesToCollect.contains(DetectorProfileName.STATE)) {
-                profileBuilder.state(DetectorState.DISABLED);
+                profileBuilder.state(ConfigState.DISABLED);
             }
             listener.onResponse(profileBuilder.build());
         }
@@ -580,7 +582,7 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
 
     private void createRunningStateAndInitProgress(Set<DetectorProfileName> profilesToCollect, DetectorProfile.Builder builder) {
         if (profilesToCollect.contains(DetectorProfileName.STATE)) {
-            builder.state(DetectorState.RUNNING).build();
+            builder.state(ConfigState.RUNNING).build();
         }
 
         if (profilesToCollect.contains(DetectorProfileName.INIT_PROGRESS)) {
@@ -598,7 +600,7 @@ public class AnomalyDetectorProfileRunner extends AbstractProfileRunner {
         MultiResponsesDelegateActionListener<DetectorProfile> listener
     ) {
         if (profilesToCollect.contains(DetectorProfileName.STATE)) {
-            builder.state(DetectorState.INIT);
+            builder.state(ConfigState.INIT);
         }
 
         if (profilesToCollect.contains(DetectorProfileName.INIT_PROGRESS)) {

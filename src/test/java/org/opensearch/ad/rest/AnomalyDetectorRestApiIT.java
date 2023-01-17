@@ -14,7 +14,6 @@ package org.opensearch.ad.rest;
 import static org.hamcrest.Matchers.containsString;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.DUPLICATE_DETECTOR_MSG;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.NO_DOCS_IN_USER_INDEX_MSG;
-import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -510,7 +509,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
                 .makeRequest(
                     client(),
                     "POST",
-                    String.format(Locale.ROOT, TestHelpers.AD_BASE_PREVIEW_URI, input.getDetectorId()),
+                    String.format(Locale.ROOT, TestHelpers.AD_BASE_PREVIEW_URI, input.getConfigId()),
                     ImmutableMap.of(),
                     TestHelpers.toHttpEntity(input),
                     null
@@ -895,7 +894,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                FAIL_TO_FIND_CONFIG_MSG,
+                CommonMessages.FAIL_TO_FIND_CONFIG_MSG,
                 () -> TestHelpers
                     .makeRequest(
                         client(),
@@ -997,7 +996,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
         TestHelpers
             .assertFailWith(
                 ResponseException.class,
-                FAIL_TO_FIND_CONFIG_MSG,
+                CommonMessages.FAIL_TO_FIND_CONFIG_MSG,
                 () -> TestHelpers
                     .makeRequest(
                         client(),

@@ -59,7 +59,6 @@ public class ADCommonName {
     public static final String MODELS = "models";
     public static final String MODEL = "model";
     public static final String INIT_PROGRESS = "init_progress";
-    public static final String CATEGORICAL_FIELD = "category_field";
     public static final String TOTAL_ENTITIES = "total_entities";
     public static final String ACTIVE_ENTITIES = "active_entities";
     public static final String ENTITY_INFO = "entity_info";
@@ -87,11 +86,8 @@ public class ADCommonName {
     public static final String CONFIDENCE_JSON_KEY = "confidence";
     public static final String ANOMALY_GRADE_JSON_KEY = "anomalyGrade";
     public static final String QUEUE_JSON_KEY = "queue";
-    // ======================================
-    // Used for backward-compatibility in messaging
-    // ======================================
-    public static final String EMPTY_FIELD = "";
 
+    // ======================================
     // Validation
     // ======================================
     // detector validation aspect

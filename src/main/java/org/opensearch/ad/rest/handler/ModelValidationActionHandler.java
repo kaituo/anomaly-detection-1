@@ -75,6 +75,7 @@ import org.opensearch.timeseries.model.MergeableList;
 import org.opensearch.timeseries.model.TimeConfiguration;
 import org.opensearch.timeseries.model.ValidationAspect;
 import org.opensearch.timeseries.model.ValidationIssueType;
+import org.opensearch.timeseries.rest.handler.ConfigUpdateConfirmer;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.SecurityClientUtil;
@@ -95,7 +96,7 @@ public class ModelValidationActionHandler {
     protected final ClusterService clusterService;
     protected final Logger logger = LogManager.getLogger(AbstractAnomalyDetectorActionHandler.class);
     protected final TimeValue requestTimeout;
-    protected final AnomalyDetectorActionHandler handler = new AnomalyDetectorActionHandler();
+    protected final ConfigUpdateConfirmer handler = new ConfigUpdateConfirmer();
     protected final Client client;
     protected final SecurityClientUtil clientUtil;
     protected final NamedXContentRegistry xContentRegistry;
@@ -105,6 +106,7 @@ public class ModelValidationActionHandler {
     protected final String validationType;
     protected final Settings settings;
     protected final User user;
+    protected final AnalysisType context;
 
     /**
      * Constructor function.
@@ -148,6 +150,7 @@ public class ModelValidationActionHandler {
         this.clock = clock;
         this.settings = settings;
         this.user = user;
+        this.context = AnalysisType.AD;
     }
 
     // Need to first check if multi entity detector or not before doing any sort of validation.
@@ -254,7 +257,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
-                AnalysisType.AD,
+                context,
                 searchResponseListener
             );
     }
@@ -346,7 +349,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
-                AnalysisType.AD,
+                context,
                 searchResponseListener
             );
     }
@@ -464,7 +467,7 @@ public class ModelValidationActionHandler {
                             client::search,
                             user,
                             client,
-                            AnalysisType.AD,
+                            context,
                             this
                         );
                     // In this case decreasingInterval has to be true already, so we will stop
@@ -499,7 +502,7 @@ public class ModelValidationActionHandler {
                     client::search,
                     user,
                     client,
-                    AnalysisType.AD,
+                    context,
                     this
                 );
         }
@@ -576,7 +579,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
-                AnalysisType.AD,
+                context,
                 searchResponseListener
             );
     }
@@ -637,7 +640,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
-                AnalysisType.AD,
+                context,
                 searchResponseListener
             );
     }
@@ -700,7 +703,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
-                AnalysisType.AD,
+                context,
                 searchResponseListener
             );
     }
@@ -791,7 +794,7 @@ public class ModelValidationActionHandler {
                     client::search,
                     user,
                     client,
-                    AnalysisType.AD,
+                    context,
                     searchResponseListener
                 );
         }

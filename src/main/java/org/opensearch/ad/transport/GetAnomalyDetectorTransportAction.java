@@ -12,19 +12,11 @@
 package org.opensearch.ad.transport;
 
 import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_GET_DETECTOR;
-import static org.opensearch.ad.model.ADTaskType.ALL_DETECTOR_TASK_TYPES;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
-import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
-import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
-import static org.opensearch.timeseries.util.ParseUtils.getUserContext;
 import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
-import static org.opensearch.timeseries.util.RestHandlerUtils.PROFILE;
 import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -34,15 +26,12 @@ import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.ActionListener;
-import org.opensearch.action.get.MultiGetItemResponse;
-import org.opensearch.action.get.MultiGetRequest;
-import org.opensearch.action.get.MultiGetResponse;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.AnomalyDetectorProfileRunner;
 import org.opensearch.ad.EntityProfileRunner;
+import org.opensearch.ad.indices.ADIndex;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
@@ -50,6 +39,7 @@ import org.opensearch.ad.model.DetectorProfile;
 import org.opensearch.ad.model.DetectorProfileName;
 import org.opensearch.ad.model.EntityProfileName;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
+import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
@@ -61,37 +51,32 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.common.Strings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.Name;
-import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
+import org.opensearch.timeseries.task.TaskManager;
+import org.opensearch.timeseries.transport.BaseGetConfigTransportAction;
+import org.opensearch.timeseries.transport.GetConfigRequest;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.RestHandlerUtils;
+import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.Sets;
 
-public class GetAnomalyDetectorTransportAction extends HandledTransportAction<GetAnomalyDetectorRequest, GetAnomalyDetectorResponse> {
+public class GetAnomalyDetectorTransportAction extends
+    BaseGetConfigTransportAction<GetAnomalyDetectorResponse, ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement, ADTaskManager, AnomalyDetector> {
 
-    private static final Logger LOG = LogManager.getLogger(GetAnomalyDetectorTransportAction.class);
+    public static final Logger LOG = LogManager.getLogger(GetAnomalyDetectorTransportAction.class);
 
-    private final ClusterService clusterService;
-    private final Client client;
-    private final SecurityClientUtil clientUtil;
     private final Set<String> allProfileTypeStrs;
     private final Set<DetectorProfileName> allProfileTypes;
     private final Set<DetectorProfileName> defaultDetectorProfileTypes;
     private final Set<String> allEntityProfileTypeStrs;
     private final Set<EntityProfileName> allEntityProfileTypes;
     private final Set<EntityProfileName> defaultEntityProfileTypes;
-    private final NamedXContentRegistry xContentRegistry;
-    private final DiscoveryNodeFilterer nodeFilter;
-    private final TransportService transportService;
-    private volatile Boolean filterByEnabled;
-    private final ADTaskManager adTaskManager;
 
     @Inject
     public GetAnomalyDetectorTransportAction(
@@ -105,10 +90,27 @@ public class GetAnomalyDetectorTransportAction extends HandledTransportAction<Ge
         NamedXContentRegistry xContentRegistry,
         ADTaskManager adTaskManager
     ) {
-        super(GetAnomalyDetectorAction.NAME, transportService, actionFilters, GetAnomalyDetectorRequest::new);
-        this.clusterService = clusterService;
-        this.client = client;
-        this.clientUtil = clientUtil;
+        super(
+            transportService,
+            nodeFilter,
+            actionFilters,
+            clusterService,
+            client,
+            clientUtil,
+            settings,
+            xContentRegistry,
+            adTaskManager,
+            GetAnomalyDetectorAction.NAME,
+            AnomalyDetector.class,
+            AnomalyDetector.PARSE_FIELD_NAME,
+            ADTaskType.ALL_DETECTOR_TASK_TYPES,
+            ADTaskType.AD_REALTIME_HC_DETECTOR.name(),
+            ADTaskType.AD_REALTIME_SINGLE_STREAM.name(),
+            ADTaskType.AD_HISTORICAL_HC_DETECTOR.name(),
+            ADTaskType.AD_HISTORICAL_SINGLE_STREAM.name(),
+            AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES
+        );
+
         List<DetectorProfileName> allProfiles = Arrays.asList(DetectorProfileName.values());
         this.allProfileTypes = EnumSet.copyOf(allProfiles);
         this.allProfileTypeStrs = getProfileListStrs(allProfiles);
@@ -120,19 +122,12 @@ public class GetAnomalyDetectorTransportAction extends HandledTransportAction<Ge
         this.allEntityProfileTypeStrs = getProfileListStrs(allEntityProfiles);
         List<EntityProfileName> defaultEntityProfiles = Arrays.asList(EntityProfileName.STATE);
         this.defaultEntityProfileTypes = new HashSet<EntityProfileName>(defaultEntityProfiles);
-
-        this.xContentRegistry = xContentRegistry;
-        this.nodeFilter = nodeFilter;
-        filterByEnabled = AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES.get(settings);
-        clusterService.getClusterSettings().addSettingsUpdateConsumer(FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
-        this.transportService = transportService;
-        this.adTaskManager = adTaskManager;
     }
 
     @Override
-    protected void doExecute(Task task, GetAnomalyDetectorRequest request, ActionListener<GetAnomalyDetectorResponse> actionListener) {
-        String detectorID = request.getDetectorID();
-        User user = getUserContext(client);
+    protected void doExecute(Task task, GetConfigRequest request, ActionListener<GetAnomalyDetectorResponse> actionListener) {
+        String detectorID = request.getConfigID();
+        User user = ParseUtils.getUserContext(client);
         ActionListener<GetAnomalyDetectorResponse> listener = wrapRestActionListener(actionListener, FAIL_TO_GET_DETECTOR);
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             resolveUserAndExecute(
@@ -152,228 +147,6 @@ public class GetAnomalyDetectorTransportAction extends HandledTransportAction<Ge
         }
     }
 
-    protected void getExecute(GetAnomalyDetectorRequest request, ActionListener<GetAnomalyDetectorResponse> listener) {
-        String detectorID = request.getDetectorID();
-        String typesStr = request.getTypeStr();
-        String rawPath = request.getRawPath();
-        Entity entity = request.getEntity();
-        boolean all = request.isAll();
-        boolean returnJob = request.isReturnJob();
-        boolean returnTask = request.isReturnTask();
-
-        try {
-            if (!Strings.isEmpty(typesStr) || rawPath.endsWith(PROFILE) || rawPath.endsWith(PROFILE + "/")) {
-                if (entity != null) {
-                    Set<EntityProfileName> entityProfilesToCollect = getEntityProfilesToCollect(typesStr, all);
-                    EntityProfileRunner profileRunner = new EntityProfileRunner(
-                        client,
-                        clientUtil,
-                        xContentRegistry,
-                        AnomalyDetectorSettings.NUM_MIN_SAMPLES
-                    );
-                    profileRunner
-                        .profile(
-                            detectorID,
-                            entity,
-                            entityProfilesToCollect,
-                            ActionListener
-                                .wrap(
-                                    profile -> {
-                                        listener
-                                            .onResponse(
-                                                new GetAnomalyDetectorResponse(
-                                                    0,
-                                                    null,
-                                                    0,
-                                                    0,
-                                                    null,
-                                                    null,
-                                                    false,
-                                                    null,
-                                                    null,
-                                                    false,
-                                                    null,
-                                                    null,
-                                                    profile,
-                                                    true
-                                                )
-                                            );
-                                    },
-                                    e -> listener.onFailure(e)
-                                )
-                        );
-                } else {
-                    Set<DetectorProfileName> profilesToCollect = getProfilesToCollect(typesStr, all);
-                    AnomalyDetectorProfileRunner profileRunner = new AnomalyDetectorProfileRunner(
-                        client,
-                        clientUtil,
-                        xContentRegistry,
-                        nodeFilter,
-                        AnomalyDetectorSettings.NUM_MIN_SAMPLES,
-                        transportService,
-                        adTaskManager
-                    );
-                    profileRunner.profile(detectorID, getProfileActionListener(listener), profilesToCollect);
-                }
-            } else {
-                if (returnTask) {
-                    adTaskManager.getAndExecuteOnLatestADTasks(detectorID, null, null, ALL_DETECTOR_TASK_TYPES, (taskList) -> {
-                        Optional<ADTask> realtimeAdTask = Optional.empty();
-                        Optional<ADTask> historicalAdTask = Optional.empty();
-
-                        if (taskList != null && taskList.size() > 0) {
-                            Map<String, ADTask> adTasks = new HashMap<>();
-                            List<ADTask> duplicateAdTasks = new ArrayList<>();
-                            for (ADTask task : taskList) {
-                                if (adTasks.containsKey(task.getTaskType())) {
-                                    LOG
-                                        .info(
-                                            "Found duplicate latest task of detector {}, task id: {}, task type: {}",
-                                            detectorID,
-                                            task.getTaskType(),
-                                            task.getTaskId()
-                                        );
-                                    duplicateAdTasks.add(task);
-                                    continue;
-                                }
-                                adTasks.put(task.getTaskType(), task);
-                            }
-                            if (duplicateAdTasks.size() > 0) {
-                                adTaskManager.resetLatestFlagAsFalse(duplicateAdTasks);
-                            }
-
-                            if (adTasks.containsKey(ADTaskType.REALTIME_HC_DETECTOR.name())) {
-                                realtimeAdTask = Optional.ofNullable(adTasks.get(ADTaskType.REALTIME_HC_DETECTOR.name()));
-                            } else if (adTasks.containsKey(ADTaskType.REALTIME_SINGLE_ENTITY.name())) {
-                                realtimeAdTask = Optional.ofNullable(adTasks.get(ADTaskType.REALTIME_SINGLE_ENTITY.name()));
-                            }
-                            if (adTasks.containsKey(ADTaskType.HISTORICAL_HC_DETECTOR.name())) {
-                                historicalAdTask = Optional.ofNullable(adTasks.get(ADTaskType.HISTORICAL_HC_DETECTOR.name()));
-                            } else if (adTasks.containsKey(ADTaskType.HISTORICAL_SINGLE_ENTITY.name())) {
-                                historicalAdTask = Optional.ofNullable(adTasks.get(ADTaskType.HISTORICAL_SINGLE_ENTITY.name()));
-                            } else if (adTasks.containsKey(ADTaskType.HISTORICAL.name())) {
-                                historicalAdTask = Optional.ofNullable(adTasks.get(ADTaskType.HISTORICAL.name()));
-                            }
-                        }
-                        getDetectorAndJob(detectorID, returnJob, returnTask, realtimeAdTask, historicalAdTask, listener);
-                    }, transportService, true, 2, listener);
-                } else {
-                    getDetectorAndJob(detectorID, returnJob, returnTask, Optional.empty(), Optional.empty(), listener);
-                }
-            }
-        } catch (Exception e) {
-            LOG.error(e);
-            listener.onFailure(e);
-        }
-    }
-
-    private void getDetectorAndJob(
-        String detectorID,
-        boolean returnJob,
-        boolean returnTask,
-        Optional<ADTask> realtimeAdTask,
-        Optional<ADTask> historicalAdTask,
-        ActionListener<GetAnomalyDetectorResponse> listener
-    ) {
-        MultiGetRequest.Item adItem = new MultiGetRequest.Item(CommonName.CONFIG_INDEX, detectorID);
-        MultiGetRequest multiGetRequest = new MultiGetRequest().add(adItem);
-        if (returnJob) {
-            MultiGetRequest.Item adJobItem = new MultiGetRequest.Item(CommonName.JOB_INDEX, detectorID);
-            multiGetRequest.add(adJobItem);
-        }
-        client.multiGet(multiGetRequest, onMultiGetResponse(listener, returnJob, returnTask, realtimeAdTask, historicalAdTask, detectorID));
-    }
-
-    private ActionListener<MultiGetResponse> onMultiGetResponse(
-        ActionListener<GetAnomalyDetectorResponse> listener,
-        boolean returnJob,
-        boolean returnTask,
-        Optional<ADTask> realtimeAdTask,
-        Optional<ADTask> historicalAdTask,
-        String detectorId
-    ) {
-        return new ActionListener<MultiGetResponse>() {
-            @Override
-            public void onResponse(MultiGetResponse multiGetResponse) {
-                MultiGetItemResponse[] responses = multiGetResponse.getResponses();
-                AnomalyDetector detector = null;
-                Job adJob = null;
-                String id = null;
-                long version = 0;
-                long seqNo = 0;
-                long primaryTerm = 0;
-
-                for (MultiGetItemResponse response : responses) {
-                    if (CommonName.CONFIG_INDEX.equals(response.getIndex())) {
-                        if (response.getResponse() == null || !response.getResponse().isExists()) {
-                            listener.onFailure(new OpenSearchStatusException(FAIL_TO_FIND_CONFIG_MSG + detectorId, RestStatus.NOT_FOUND));
-                            return;
-                        }
-                        id = response.getId();
-                        version = response.getResponse().getVersion();
-                        primaryTerm = response.getResponse().getPrimaryTerm();
-                        seqNo = response.getResponse().getSeqNo();
-                        if (!response.getResponse().isSourceEmpty()) {
-                            try (
-                                XContentParser parser = RestHandlerUtils
-                                    .createXContentParserFromRegistry(xContentRegistry, response.getResponse().getSourceAsBytesRef())
-                            ) {
-                                ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                                detector = parser.namedObject(AnomalyDetector.class, AnomalyDetector.PARSE_FIELD_NAME, null);
-                            } catch (Exception e) {
-                                String message = "Failed to parse detector job " + detectorId;
-                                listener.onFailure(buildInternalServerErrorResponse(e, message));
-                                return;
-                            }
-                        }
-                    }
-
-                    if (CommonName.JOB_INDEX.equals(response.getIndex())) {
-                        if (response.getResponse() != null
-                            && response.getResponse().isExists()
-                            && !response.getResponse().isSourceEmpty()) {
-                            try (
-                                XContentParser parser = RestHandlerUtils
-                                    .createXContentParserFromRegistry(xContentRegistry, response.getResponse().getSourceAsBytesRef())
-                            ) {
-                                ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                                adJob = Job.parse(parser);
-                            } catch (Exception e) {
-                                String message = "Failed to parse detector job " + detectorId;
-                                listener.onFailure(buildInternalServerErrorResponse(e, message));
-                                return;
-                            }
-                        }
-                    }
-                }
-                listener
-                    .onResponse(
-                        new GetAnomalyDetectorResponse(
-                            version,
-                            id,
-                            primaryTerm,
-                            seqNo,
-                            detector,
-                            adJob,
-                            returnJob,
-                            realtimeAdTask.orElse(null),
-                            historicalAdTask.orElse(null),
-                            returnTask,
-                            RestStatus.OK,
-                            null,
-                            null,
-                            false
-                        )
-                    );
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                listener.onFailure(e);
-            }
-        };
-    }
-
     private ActionListener<DetectorProfile> getProfileActionListener(ActionListener<GetAnomalyDetectorResponse> listener) {
         return ActionListener.wrap(new CheckedConsumer<DetectorProfile, Exception>() {
             @Override
@@ -384,11 +157,6 @@ public class GetAnomalyDetectorTransportAction extends HandledTransportAction<Ge
                     );
             }
         }, exception -> { listener.onFailure(exception); });
-    }
-
-    private OpenSearchStatusException buildInternalServerErrorResponse(Exception e, String errorMsg) {
-        LOG.error(errorMsg, e);
-        return new OpenSearchStatusException(errorMsg, RestStatus.INTERNAL_SERVER_ERROR);
     }
 
     /**
@@ -429,5 +197,107 @@ public class GetAnomalyDetectorTransportAction extends HandledTransportAction<Ge
 
     private Set<String> getProfileListStrs(List<? extends Name> profileList) {
         return profileList.stream().map(profile -> profile.getName()).collect(Collectors.toSet());
+    }
+
+    @Override
+    protected void fillInHistoricalTaskforBwc(Map<String, ADTask> tasks, Optional<ADTask> historicalAdTask) {
+        if (tasks.containsKey(ADTaskType.HISTORICAL.name())) {
+            historicalAdTask = Optional.ofNullable(tasks.get(ADTaskType.HISTORICAL.name()));
+        }
+    }
+
+    @Override
+    protected void getExecuteProfile(
+        GetConfigRequest request,
+        Entity entity,
+        String typesStr,
+        boolean all,
+        String configId,
+        ActionListener<GetAnomalyDetectorResponse> listener
+    ) {
+        if (entity != null) {
+            Set<EntityProfileName> entityProfilesToCollect = getEntityProfilesToCollect(typesStr, all);
+            EntityProfileRunner profileRunner = new EntityProfileRunner(
+                client,
+                clientUtil,
+                xContentRegistry,
+                TimeSeriesSettings.NUM_MIN_SAMPLES
+            );
+            profileRunner
+                .profile(
+                    configId,
+                    entity,
+                    entityProfilesToCollect,
+                    ActionListener
+                        .wrap(
+                            profile -> {
+                                listener
+                                    .onResponse(
+                                        new GetAnomalyDetectorResponse(
+                                            0,
+                                            null,
+                                            0,
+                                            0,
+                                            null,
+                                            null,
+                                            false,
+                                            null,
+                                            null,
+                                            false,
+                                            null,
+                                            null,
+                                            profile,
+                                            true
+                                        )
+                                    );
+                            },
+                            e -> listener.onFailure(e)
+                        )
+                );
+        } else {
+            Set<DetectorProfileName> profilesToCollect = getProfilesToCollect(typesStr, all);
+            AnomalyDetectorProfileRunner profileRunner = new AnomalyDetectorProfileRunner(
+                client,
+                clientUtil,
+                xContentRegistry,
+                nodeFilter,
+                TimeSeriesSettings.NUM_MIN_SAMPLES,
+                transportService,
+                taskManager
+            );
+            profileRunner.profile(configId, getProfileActionListener(listener), profilesToCollect);
+        }
+    }
+
+    @Override
+    protected GetAnomalyDetectorResponse createResponse(
+        long version,
+        String id,
+        long primaryTerm,
+        long seqNo,
+        AnomalyDetector config,
+        Job job,
+        boolean returnJob,
+        Optional<ADTask> realtimeTask,
+        Optional<ADTask> historicalTask,
+        boolean returnTask,
+        RestStatus restStatus
+    ) {
+        return new GetAnomalyDetectorResponse(
+            version,
+            id,
+            primaryTerm,
+            seqNo,
+            config,
+            job,
+            returnJob,
+            realtimeTask.orElse(null),
+            historicalTask.orElse(null),
+            returnTask,
+            RestStatus.OK,
+            null,
+            null,
+            false
+        );
     }
 }

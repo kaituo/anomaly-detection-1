@@ -11,7 +11,7 @@
 
 package org.opensearch.ad.transport;
 
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_MODEL_SIZE_PER_NODE;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_MODEL_SIZE_PER_NODE;
 
 import java.io.IOException;
 import java.util.List;
@@ -23,26 +23,29 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.caching.CacheProvider;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.model.ModelProfile;
 import org.opensearch.transport.TransportService;
+
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 /**
  *  This class contains the logic to extract the stats from the nodes
  */
 public class ProfileTransportAction extends TransportNodesAction<ProfileRequest, ProfileResponse, ProfileNodeRequest, ProfileNodeResponse> {
     private static final Logger LOG = LogManager.getLogger(ProfileTransportAction.class);
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private FeatureManager featureManager;
-    private CacheProvider cacheProvider;
+    private CacheProvider<ThresholdedRandomCutForest, ADPriorityCache> cacheProvider;
     // the number of models to return. Defaults to 10.
     private volatile int numModelsToReturn;
 
@@ -64,9 +67,9 @@ public class ProfileTransportAction extends TransportNodesAction<ProfileRequest,
         ClusterService clusterService,
         TransportService transportService,
         ActionFilters actionFilters,
-        ModelManager modelManager,
+        ADModelManager modelManager,
         FeatureManager featureManager,
-        CacheProvider cacheProvider,
+        CacheProvider<ThresholdedRandomCutForest, ADPriorityCache> cacheProvider,
         Settings settings
     ) {
         super(
@@ -83,8 +86,8 @@ public class ProfileTransportAction extends TransportNodesAction<ProfileRequest,
         this.modelManager = modelManager;
         this.featureManager = featureManager;
         this.cacheProvider = cacheProvider;
-        this.numModelsToReturn = MAX_MODEL_SIZE_PER_NODE.get(settings);
-        clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_MODEL_SIZE_PER_NODE, it -> this.numModelsToReturn = it);
+        this.numModelsToReturn = AD_MAX_MODEL_SIZE_PER_NODE.get(settings);
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_MAX_MODEL_SIZE_PER_NODE, it -> this.numModelsToReturn = it);
     }
 
     @Override

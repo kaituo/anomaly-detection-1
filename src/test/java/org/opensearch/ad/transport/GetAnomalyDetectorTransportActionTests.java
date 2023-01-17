@@ -27,13 +27,16 @@ import org.mockito.Mockito;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.indices.ADIndex;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
+import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.EntityProfile;
 import org.opensearch.ad.model.InitProgressProfile;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
+import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.*;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.settings.ClusterSettings;
@@ -52,6 +55,9 @@ import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.task.TaskManager;
+import org.opensearch.timeseries.transport.BaseGetConfigTransportAction;
+import org.opensearch.timeseries.transport.GetConfigRequest;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.timeseries.util.SecurityClientUtil;
@@ -61,10 +67,10 @@ import com.google.common.collect.ImmutableMap;
 
 public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNodeTestCase {
     private static ThreadPool threadPool;
-    private GetAnomalyDetectorTransportAction action;
+    private BaseGetConfigTransportAction<GetAnomalyDetectorResponse, ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement, ADTaskManager, AnomalyDetector> action;
     private Task task;
     private ActionListener<GetAnomalyDetectorResponse> response;
-    private ADTaskManager adTaskManager;
+    private TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement> adTaskManager;
     private Entity entity;
     private String categoryField;
     private String categoryValue;
@@ -86,7 +92,7 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
         ClusterService clusterService = mock(ClusterService.class);
         ClusterSettings clusterSettings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         adTaskManager = mock(ADTaskManager.class);
@@ -126,14 +132,14 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
 
     @Test
     public void testGetTransportAction() throws IOException {
-        GetAnomalyDetectorRequest getConfigRequest = new GetAnomalyDetectorRequest("1234", 4321, false, false, "nonempty", "", false, null);
-        action.doExecute(task, getConfigRequest, response);
+        GetConfigRequest getAnomalyDetectorRequest = new GetConfigRequest("1234", 4321, false, false, "nonempty", "", false, null);
+        action.doExecute(task, getAnomalyDetectorRequest, response);
     }
 
     @Test
     public void testGetTransportActionWithReturnJob() throws IOException {
-        GetAnomalyDetectorRequest getConfigRequest = new GetAnomalyDetectorRequest("1234", 4321, true, false, "", "abcd", false, null);
-        action.doExecute(task, getConfigRequest, response);
+        GetConfigRequest getAnomalyDetectorRequest = new GetConfigRequest("1234", 4321, true, false, "", "abcd", false, null);
+        action.doExecute(task, getAnomalyDetectorRequest, response);
     }
 
     @Test
@@ -144,23 +150,23 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
 
     @Test
     public void testGetAnomalyDetectorRequest() throws IOException {
-        GetAnomalyDetectorRequest request = new GetAnomalyDetectorRequest("1234", 4321, true, false, "", "abcd", false, entity);
+        GetConfigRequest request = new GetConfigRequest("1234", 4321, true, false, "", "abcd", false, entity);
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
         StreamInput input = out.bytes().streamInput();
-        GetAnomalyDetectorRequest newRequest = new GetAnomalyDetectorRequest(input);
-        Assert.assertEquals(request.getDetectorID(), newRequest.getDetectorID());
+        GetConfigRequest newRequest = new GetConfigRequest(input);
+        Assert.assertEquals(request.getConfigID(), newRequest.getConfigID());
         Assert.assertEquals(request.getRawPath(), newRequest.getRawPath());
         Assert.assertNull(newRequest.validate());
     }
 
     @Test
     public void testGetAnomalyDetectorRequestNoEntityValue() throws IOException {
-        GetAnomalyDetectorRequest request = new GetAnomalyDetectorRequest("1234", 4321, true, false, "", "abcd", false, null);
+        GetConfigRequest request = new GetConfigRequest("1234", 4321, true, false, "", "abcd", false, null);
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
         StreamInput input = out.bytes().streamInput();
-        GetAnomalyDetectorRequest newRequest = new GetAnomalyDetectorRequest(input);
+        GetConfigRequest newRequest = new GetConfigRequest(input);
         Assert.assertNull(newRequest.getEntity());
     }
 

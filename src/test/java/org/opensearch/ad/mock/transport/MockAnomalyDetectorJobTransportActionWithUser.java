@@ -11,8 +11,8 @@
 
 package org.opensearch.ad.mock.transport;
 
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_REQUEST_TIMEOUT;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
 import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
 
 import org.apache.logging.log4j.LogManager;
@@ -21,13 +21,15 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
+import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.rest.handler.IndexAnomalyDetectorJobActionHandler;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.transport.AnomalyDetectorJobRequest;
-import org.opensearch.ad.transport.AnomalyDetectorJobResponse;
+import org.opensearch.ad.model.ADTask;
+import org.opensearch.ad.model.ADTaskType;
+import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.transport.AnomalyDetectorJobTransportAction;
+import org.opensearch.ad.transport.GetAnomalyDetectorResponse;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -38,11 +40,14 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.rest.handler.IndexJobActionHandler;
+import org.opensearch.timeseries.task.TaskManager;
+import org.opensearch.timeseries.transport.JobRequest;
+import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
-public class MockAnomalyDetectorJobTransportActionWithUser extends
-    HandledTransportAction<AnomalyDetectorJobRequest, AnomalyDetectorJobResponse> {
+public class MockAnomalyDetectorJobTransportActionWithUser extends HandledTransportAction<JobRequest, JobResponse> {
     private final Logger logger = LogManager.getLogger(AnomalyDetectorJobTransportAction.class);
 
     private final Client client;
@@ -52,7 +57,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
     private final NamedXContentRegistry xContentRegistry;
     private volatile Boolean filterByEnabled;
     private ThreadContext.StoredContext context;
-    private final ADTaskManager adTaskManager;
+    private final TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement> adTaskManager;
     private final TransportService transportService;
     private final ExecuteADResultResponseRecorder recorder;
 
@@ -65,10 +70,10 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         Settings settings,
         ADIndexManagement anomalyDetectionIndices,
         NamedXContentRegistry xContentRegistry,
-        ADTaskManager adTaskManager,
+        TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement> adTaskManager,
         ExecuteADResultResponseRecorder recorder
     ) {
-        super(MockAnomalyDetectorJobAction.NAME, transportService, actionFilters, AnomalyDetectorJobRequest::new);
+        super(MockAnomalyDetectorJobAction.NAME, transportService, actionFilters, JobRequest::new);
         this.transportService = transportService;
         this.client = client;
         this.clusterService = clusterService;
@@ -76,8 +81,8 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         this.anomalyDetectionIndices = anomalyDetectionIndices;
         this.xContentRegistry = xContentRegistry;
         this.adTaskManager = adTaskManager;
-        filterByEnabled = FILTER_BY_BACKEND_ROLES.get(settings);
-        clusterService.getClusterSettings().addSettingsUpdateConsumer(FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
+        filterByEnabled = AD_FILTER_BY_BACKEND_ROLES.get(settings);
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
 
         ThreadContext threadContext = new ThreadContext(settings);
         context = threadContext.stashContext();
@@ -85,9 +90,9 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
     }
 
     @Override
-    protected void doExecute(Task task, AnomalyDetectorJobRequest request, ActionListener<AnomalyDetectorJobResponse> listener) {
-        String detectorId = request.getDetectorID();
-        DateRange detectionDateRange = request.getDetectionDateRange();
+    protected void doExecute(Task task, JobRequest request, ActionListener<JobResponse> listener) {
+        String detectorId = request.getConfigID();
+        DateRange detectionDateRange = request.getDateRange();
         boolean historical = request.isHistorical();
         long seqNo = request.getSeqNo();
         long primaryTerm = request.getPrimaryTerm();
@@ -125,7 +130,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
     }
 
     private void executeDetector(
-        ActionListener<AnomalyDetectorJobResponse> listener,
+        ActionListener<JobResponse> listener,
         String detectorId,
         long seqNo,
         long primaryTerm,
@@ -135,7 +140,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         DateRange detectionDateRange,
         boolean historical
     ) {
-        IndexAnomalyDetectorJobActionHandler handler = new IndexAnomalyDetectorJobActionHandler(
+        IndexJobActionHandler handler = new IndexJobActionHandler(
             client,
             anomalyDetectionIndices,
             detectorId,
