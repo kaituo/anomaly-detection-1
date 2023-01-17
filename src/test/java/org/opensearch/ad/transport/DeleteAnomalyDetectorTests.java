@@ -21,7 +21,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -37,7 +36,6 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.client.Client;
@@ -58,6 +56,7 @@ import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.Job;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
 
@@ -71,7 +70,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
     private DeleteResponse deleteResponse;
     private GetResponse getResponse;
     ClusterService clusterService;
-    private AnomalyDetectorJob jobParameter;
+    private Job jobParameter;
 
     @BeforeClass
     public static void setUpBeforeClass() {
@@ -89,7 +88,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
         clusterService = mock(ClusterService.class);
         ClusterSettings clusterSettings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         transportService = new TransportService(
@@ -117,7 +116,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
             adTaskManager
         );
 
-        jobParameter = mock(AnomalyDetectorJob.class);
+        jobParameter = mock(Job.class);
         when(jobParameter.getName()).thenReturn(randomAlphaOfLength(10));
         IntervalSchedule schedule = new IntervalSchedule(Instant.now(), 1, ChronoUnit.MINUTES);
         when(jobParameter.getSchedule()).thenReturn(schedule);
@@ -165,7 +164,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
             ADTask adTask = ADTask.builder().state("RUNNING").build();
             consumer.accept(Optional.of(adTask));
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestDetectorLevelTask(eq("1234"), any(), any(), eq(transportService), eq(true), any());
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(eq("1234"), any(), any(), eq(transportService), eq(true), any());
 
         future = mock(PlainActionFuture.class);
         DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
@@ -197,9 +196,9 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     private ClusterState createClusterState() {
-        Map<String, IndexMetadata> immutableOpenMap = new HashMap<>();
-        immutableOpenMap
-            .put(
+        ImmutableOpenMap<String, IndexMetadata> immutableOpenMap = ImmutableOpenMap
+            .<String, IndexMetadata>builder()
+            .fPut(
                 CommonName.JOB_INDEX,
                 IndexMetadata
                     .builder("test")
@@ -288,7 +287,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
                     true,
                     BytesReference
                         .bytes(
-                            new AnomalyDetectorJob(
+                            new Job(
                                 "1234",
                                 jobParameter.getSchedule(),
                                 jobParameter.getWindowDelay(),

@@ -85,4 +85,14 @@ public class CommonMessages {
     public static final String BUG_RESPONSE = "We might have bugs.";
     public static final String MEMORY_LIMIT_EXCEEDED_ERR_MSG = "Models memory usage exceeds our limit.";
 
+    // ======================================
+    // transport
+    // ======================================
+    public static final String CONFIG_ID_MISSING_MSG = "config ID is missing";
+    public static final String MODEL_ID_MISSING_MSG = "model ID is missing";
+
+    // ======================================
+    // task
+    // ======================================
+    public static String CAN_NOT_FIND_LATEST_TASK = "can't find latest task";
 }

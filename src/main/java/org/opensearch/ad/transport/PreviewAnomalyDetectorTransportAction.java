@@ -12,11 +12,10 @@
 package org.opensearch.ad.transport;
 
 import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_PREVIEW_DETECTOR;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_ANOMALY_FEATURES;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW;
 import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedToken;
-import static org.opensearch.timeseries.util.ParseUtils.getUserContext;
 import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
 import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
@@ -35,7 +34,6 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.AnomalyDetectorRunner;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
@@ -51,11 +49,13 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.ClientException;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
@@ -68,7 +68,7 @@ public class PreviewAnomalyDetectorTransportAction extends
     private final NamedXContentRegistry xContentRegistry;
     private volatile Integer maxAnomalyFeatures;
     private volatile Boolean filterByEnabled;
-    private final ADCircuitBreakerService adCircuitBreakerService;
+    private final CircuitBreakerService adCircuitBreakerService;
     private Semaphore lock;
 
     @Inject
@@ -80,7 +80,7 @@ public class PreviewAnomalyDetectorTransportAction extends
         Client client,
         AnomalyDetectorRunner anomalyDetectorRunner,
         NamedXContentRegistry xContentRegistry,
-        ADCircuitBreakerService adCircuitBreakerService
+        CircuitBreakerService adCircuitBreakerService
     ) {
         super(PreviewAnomalyDetectorAction.NAME, transportService, actionFilters, PreviewAnomalyDetectorRequest::new);
         this.clusterService = clusterService;
@@ -89,8 +89,8 @@ public class PreviewAnomalyDetectorTransportAction extends
         this.xContentRegistry = xContentRegistry;
         maxAnomalyFeatures = MAX_ANOMALY_FEATURES.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_ANOMALY_FEATURES, it -> maxAnomalyFeatures = it);
-        filterByEnabled = AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES.get(settings);
-        clusterService.getClusterSettings().addSettingsUpdateConsumer(FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
+        filterByEnabled = AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES.get(settings);
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
         this.adCircuitBreakerService = adCircuitBreakerService;
         this.lock = new Semaphore(MAX_CONCURRENT_PREVIEW.get(settings), true);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_CONCURRENT_PREVIEW, it -> { lock = new Semaphore(it); });
@@ -103,7 +103,7 @@ public class PreviewAnomalyDetectorTransportAction extends
         ActionListener<PreviewAnomalyDetectorResponse> actionListener
     ) {
         String detectorId = request.getId();
-        User user = getUserContext(client);
+        User user = ParseUtils.getUserContext(client);
         ActionListener<PreviewAnomalyDetectorResponse> listener = wrapRestActionListener(actionListener, FAIL_TO_PREVIEW_DETECTOR);
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             resolveUserAndExecute(
@@ -114,7 +114,9 @@ public class PreviewAnomalyDetectorTransportAction extends
                 (anomalyDetector) -> previewExecute(request, context, listener),
                 client,
                 clusterService,
-                xContentRegistry
+                xContentRegistry,
+                PreviewAnomalyDetectorResponse.class,
+                AnomalyDetector.class
             );
         } catch (Exception e) {
             logger.error(e);

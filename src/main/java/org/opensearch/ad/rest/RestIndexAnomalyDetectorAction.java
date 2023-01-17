@@ -24,7 +24,6 @@ import java.util.Locale;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.ADEnabledSetting;
@@ -43,6 +42,7 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestResponse;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.rest.action.RestResponseListener;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
 import com.google.common.collect.ImmutableList;
 
@@ -94,7 +94,8 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
             requestTimeout,
             maxSingleEntityDetectors,
             maxMultiEntityDetectors,
-            maxAnomalyFeatures
+            maxAnomalyFeatures,
+            maxCategoricalFields
         );
 
         return channel -> client
@@ -113,16 +114,16 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
                 // Create
                 new ReplacedRoute(
                     RestRequest.Method.POST,
-                    AnomalyDetectorPlugin.AD_BASE_DETECTORS_URI,
+                    TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI,
                     RestRequest.Method.POST,
-                    AnomalyDetectorPlugin.LEGACY_OPENDISTRO_AD_BASE_URI
+                    TimeSeriesAnalyticsPlugin.LEGACY_OPENDISTRO_AD_BASE_URI
                 ),
                 // Update
                 new ReplacedRoute(
                     RestRequest.Method.PUT,
-                    String.format(Locale.ROOT, "%s/{%s}", AnomalyDetectorPlugin.AD_BASE_DETECTORS_URI, DETECTOR_ID),
+                    String.format(Locale.ROOT, "%s/{%s}", TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI, DETECTOR_ID),
                     RestRequest.Method.PUT,
-                    String.format(Locale.ROOT, "%s/{%s}", AnomalyDetectorPlugin.LEGACY_OPENDISTRO_AD_BASE_URI, DETECTOR_ID)
+                    String.format(Locale.ROOT, "%s/{%s}", TimeSeriesAnalyticsPlugin.LEGACY_OPENDISTRO_AD_BASE_URI, DETECTOR_ID)
                 )
             );
     }
@@ -143,7 +144,7 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
                     response.toXContent(channel.newBuilder(), ToXContent.EMPTY_PARAMS)
                 );
                 if (restStatus == RestStatus.CREATED) {
-                    String location = String.format(Locale.ROOT, "%s/%s", AnomalyDetectorPlugin.LEGACY_AD_BASE, response.getId());
+                    String location = String.format(Locale.ROOT, "%s/%s", TimeSeriesAnalyticsPlugin.LEGACY_AD_BASE, response.getId());
                     bytesRestResponse.addHeader("Location", location);
                 }
                 return bytesRestResponse;

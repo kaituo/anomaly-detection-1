@@ -21,7 +21,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.opensearch.action.DocWriteResponse.Result.CREATED;
-import static org.opensearch.ad.constant.ADCommonMessages.CAN_NOT_FIND_LATEST_TASK;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -34,8 +33,8 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.update.UpdateResponse;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
-import org.opensearch.ad.NodeStateManager;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
@@ -49,7 +48,6 @@ import org.opensearch.ad.transport.AnomalyResultAction;
 import org.opensearch.ad.transport.AnomalyResultResponse;
 import org.opensearch.ad.transport.ProfileAction;
 import org.opensearch.ad.transport.ProfileResponse;
-import org.opensearch.ad.transport.handler.AnomalyIndexHandler;
 import org.opensearch.client.Client;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
@@ -59,7 +57,9 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.InternalFailure;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
+import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.model.Feature;
+import org.opensearch.timeseries.transport.handler.ResultIndexingHandler;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.TransportService;
 
@@ -85,8 +85,8 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
     private ExecuteADResultResponseRecorder recorder;
     private Client client;
     private IndexAnomalyDetectorJobActionHandler handler;
-    private AnomalyIndexHandler<AnomalyResult> anomalyResultHandler;
-    private NodeStateManager nodeStateManager;
+    private ResultIndexingHandler<AnomalyResult> anomalyResultHandler;
+    private ADNodeStateManager nodeStateManager;
     private ADTaskCacheManager adTaskCacheManager;
 
     @BeforeClass
@@ -156,9 +156,9 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         threadPool = mock(ThreadPool.class);
 
-        anomalyResultHandler = mock(AnomalyIndexHandler.class);
+        anomalyResultHandler = mock(ResultIndexingHandler.class);
 
-        nodeStateManager = mock(NodeStateManager.class);
+        nodeStateManager = mock(ADNodeStateManager.class);
 
         adTaskCacheManager = mock(ADTaskCacheManager.class);
         when(adTaskCacheManager.hasQueriedResultIndex(anyString())).thenReturn(true);
@@ -278,7 +278,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
             Object[] args = invocation.getArguments();
             ActionListener<UpdateResponse> listener = (ActionListener<UpdateResponse>) args[5];
 
-            listener.onFailure(new ResourceNotFoundException(CAN_NOT_FIND_LATEST_TASK));
+            listener.onFailure(new ResourceNotFoundException(CommonMessages.CAN_NOT_FIND_LATEST_TASK));
 
             return null;
         }).when(adTaskManager).updateLatestRealtimeTaskOnCoordinatingNode(any(), any(), any(), any(), any(), any());

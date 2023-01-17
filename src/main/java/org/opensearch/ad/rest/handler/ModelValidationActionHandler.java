@@ -35,13 +35,9 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.ad.constant.ADCommonMessages;
-import org.opensearch.ad.feature.SearchFeatureDao;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.MergeableList;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.ValidateAnomalyDetectorResponse;
-import org.opensearch.ad.util.MultiResponsesDelegateActionListener;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -68,15 +64,21 @@ import org.opensearch.search.aggregations.bucket.terms.Terms;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.FieldSortBuilder;
 import org.opensearch.search.sort.SortOrder;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.MergeableList;
 import org.opensearch.timeseries.model.TimeConfiguration;
 import org.opensearch.timeseries.model.ValidationAspect;
 import org.opensearch.timeseries.model.ValidationIssueType;
+import org.opensearch.timeseries.rest.handler.ConfigUpdateConfirmer;
+import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 
 /**
  * <p>This class executes all validation checks that are not blocking on the 'model' level.
@@ -94,7 +96,7 @@ public class ModelValidationActionHandler {
     protected final ClusterService clusterService;
     protected final Logger logger = LogManager.getLogger(AbstractAnomalyDetectorActionHandler.class);
     protected final TimeValue requestTimeout;
-    protected final AnomalyDetectorActionHandler handler = new AnomalyDetectorActionHandler();
+    protected final ConfigUpdateConfirmer handler = new ConfigUpdateConfirmer();
     protected final Client client;
     protected final SecurityClientUtil clientUtil;
     protected final NamedXContentRegistry xContentRegistry;
@@ -104,6 +106,7 @@ public class ModelValidationActionHandler {
     protected final String validationType;
     protected final Settings settings;
     protected final User user;
+    protected final AnalysisType context;
 
     /**
      * Constructor function.
@@ -147,6 +150,7 @@ public class ModelValidationActionHandler {
         this.clock = clock;
         this.settings = settings;
         this.user = user;
+        this.context = AnalysisType.AD;
     }
 
     // Need to first check if multi entity detector or not before doing any sort of validation.
@@ -253,6 +257,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
+                context,
                 searchResponseListener
             );
     }
@@ -344,6 +349,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
+                context,
                 searchResponseListener
             );
     }
@@ -461,6 +467,7 @@ public class ModelValidationActionHandler {
                             client::search,
                             user,
                             client,
+                            context,
                             this
                         );
                     // In this case decreasingInterval has to be true already, so we will stop
@@ -495,6 +502,7 @@ public class ModelValidationActionHandler {
                     client::search,
                     user,
                     client,
+                    context,
                     this
                 );
         }
@@ -571,6 +579,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
+                context,
                 searchResponseListener
             );
     }
@@ -631,6 +640,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
+                context,
                 searchResponseListener
             );
     }
@@ -693,6 +703,7 @@ public class ModelValidationActionHandler {
                 client::search,
                 user,
                 client,
+                context,
                 searchResponseListener
             );
     }
@@ -783,6 +794,7 @@ public class ModelValidationActionHandler {
                     client::search,
                     user,
                     client,
+                    context,
                     searchResponseListener
                 );
         }

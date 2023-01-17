@@ -18,25 +18,26 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchSecurityException;
 import org.opensearch.action.ActionListener;
-import org.opensearch.ad.constant.CommonValue;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.feature.Features;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.EntityAnomalyResult;
-import org.opensearch.ad.util.MultiResponsesDelegateActionListener;
 import org.opensearch.common.util.concurrent.ThreadContext;
+import org.opensearch.timeseries.constant.CommonValue;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.feature.Features;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.FeatureData;
+import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 
 /**
  * Runner to trigger an anomaly detector.
@@ -44,11 +45,11 @@ import org.opensearch.timeseries.model.FeatureData;
 public final class AnomalyDetectorRunner {
 
     private final Logger logger = LogManager.getLogger(AnomalyDetectorRunner.class);
-    private final ModelManager modelManager;
+    private final ADModelManager modelManager;
     private final FeatureManager featureManager;
     private final int maxPreviewResults;
 
-    public AnomalyDetectorRunner(ModelManager modelManager, FeatureManager featureManager, int maxPreviewResults) {
+    public AnomalyDetectorRunner(ADModelManager modelManager, FeatureManager featureManager, int maxPreviewResults) {
         this.modelManager = modelManager;
         this.featureManager = featureManager;
         this.maxPreviewResults = maxPreviewResults;
@@ -167,21 +168,22 @@ public final class AnomalyDetectorRunner {
 
                 AnomalyResult result;
                 if (results != null && results.size() > i) {
-                    ThresholdingResult thresholdingResult = results.get(i);
-                    result = thresholdingResult
-                        .toAnomalyResult(
+                    results
+                        .get(i)
+                        .toIndexableResult(
                             detector,
                             Instant.ofEpochMilli(timeRange.getKey()),
                             Instant.ofEpochMilli(timeRange.getValue()),
                             null,
                             null,
                             featureDatas,
-                            entity,
+                            Optional.ofNullable(entity),
                             CommonValue.NO_SCHEMA_VERSION,
                             null,
                             null,
                             null
-                        );
+                        )
+                        .ifPresent(r -> anomalyResults.add((AnomalyResult) r));
                 } else {
                     result = new AnomalyResult(
                         detector.getId(),
@@ -192,14 +194,13 @@ public final class AnomalyDetectorRunner {
                         null,
                         null,
                         null,
-                        entity,
+                        Optional.ofNullable(entity),
                         detector.getUser(),
                         CommonValue.NO_SCHEMA_VERSION,
                         null
                     );
+                    anomalyResults.add(result);
                 }
-
-                anomalyResults.add(result);
             }
         }
         return anomalyResults;

@@ -11,8 +11,8 @@
 
 package org.opensearch.ad.mock.transport;
 
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.REQUEST_TIMEOUT;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_REQUEST_TIMEOUT;
 import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
 
 import org.apache.logging.log4j.LogManager;
@@ -27,6 +27,7 @@ import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyDetectorJobRequest;
 import org.opensearch.ad.transport.AnomalyDetectorJobResponse;
 import org.opensearch.ad.transport.AnomalyDetectorJobTransportAction;
+import org.opensearch.ad.transport.GetAnomalyDetectorResponse;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -75,8 +76,8 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         this.anomalyDetectionIndices = anomalyDetectionIndices;
         this.xContentRegistry = xContentRegistry;
         this.adTaskManager = adTaskManager;
-        filterByEnabled = FILTER_BY_BACKEND_ROLES.get(settings);
-        clusterService.getClusterSettings().addSettingsUpdateConsumer(FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
+        filterByEnabled = AD_FILTER_BY_BACKEND_ROLES.get(settings);
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
 
         ThreadContext threadContext = new ThreadContext(settings);
         context = threadContext.stashContext();
@@ -91,7 +92,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         long seqNo = request.getSeqNo();
         long primaryTerm = request.getPrimaryTerm();
         String rawPath = request.getRawPath();
-        TimeValue requestTimeout = REQUEST_TIMEOUT.get(settings);
+        TimeValue requestTimeout = AD_REQUEST_TIMEOUT.get(settings);
         String userStr = "user_name|backendrole1,backendrole2|roles1,role2";
         // By the time request reaches here, the user permissions are validated by Security plugin.
         User user = User.parse(userStr);
@@ -114,7 +115,8 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
                 ),
                 client,
                 clusterService,
-                xContentRegistry
+                xContentRegistry,
+                GetAnomalyDetectorResponse.class
             );
         } catch (Exception e) {
             logger.error(e);

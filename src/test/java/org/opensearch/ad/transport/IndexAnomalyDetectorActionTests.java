@@ -34,6 +34,7 @@ import org.opensearch.timeseries.util.RestHandlerUtils;
 import com.google.common.collect.ImmutableMap;
 
 public class IndexAnomalyDetectorActionTests extends OpenSearchSingleNodeTestCase {
+    @Override
     @Before
     public void setUp() throws Exception {
         super.setUp();

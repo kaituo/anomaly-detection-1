@@ -21,7 +21,6 @@ import java.util.Locale;
 import org.apache.commons.lang.StringUtils;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
 import org.opensearch.ad.settings.ADEnabledSetting;
@@ -35,6 +34,7 @@ import org.opensearch.rest.RestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.rest.action.RestToXContentListener;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 
 import com.google.common.collect.ImmutableList;
@@ -109,7 +109,7 @@ public class RestPreviewAnomalyDetectorAction extends BaseRestHandler {
                 // preview detector
                 new Route(
                     RestRequest.Method.POST,
-                    String.format(Locale.ROOT, "%s/%s", AnomalyDetectorPlugin.AD_BASE_DETECTORS_URI, PREVIEW)
+                    String.format(Locale.ROOT, "%s/%s", TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI, PREVIEW)
                 )
             );
     }
@@ -125,7 +125,7 @@ public class RestPreviewAnomalyDetectorAction extends BaseRestHandler {
                         .format(
                             Locale.ROOT,
                             "%s/{%s}/%s",
-                            AnomalyDetectorPlugin.AD_BASE_DETECTORS_URI,
+                            TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI,
                             RestHandlerUtils.DETECTOR_ID,
                             PREVIEW
                         ),
@@ -134,7 +134,7 @@ public class RestPreviewAnomalyDetectorAction extends BaseRestHandler {
                         .format(
                             Locale.ROOT,
                             "%s/{%s}/%s",
-                            AnomalyDetectorPlugin.LEGACY_OPENDISTRO_AD_BASE_URI,
+                            TimeSeriesAnalyticsPlugin.LEGACY_OPENDISTRO_AD_BASE_URI,
                             RestHandlerUtils.DETECTOR_ID,
                             PREVIEW
                         )

@@ -60,7 +60,7 @@ import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.test.transport.MockTransportService;
-import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Feature;
@@ -81,11 +81,11 @@ public abstract class ADIntegTestCase extends OpenSearchIntegTestCase {
 
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return Collections.singletonList(AnomalyDetectorPlugin.class);
+        return Collections.singletonList(TimeSeriesAnalyticsPlugin.class);
     }
 
     protected Collection<Class<? extends Plugin>> transportClientPlugins() {
-        return Collections.singletonList(AnomalyDetectorPlugin.class);
+        return Collections.singletonList(TimeSeriesAnalyticsPlugin.class);
     }
 
     @Override

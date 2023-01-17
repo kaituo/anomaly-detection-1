@@ -65,14 +65,14 @@ public class StatsAnomalyDetectorTransportActionTests extends ADIntegTestCase {
     public void testStatsAnomalyDetectorWithClusterLevelStats() {
         ADStatsRequest adStatsRequest = new ADStatsRequest(clusterService().localNode());
         adStatsRequest.addStat(StatNames.DETECTOR_COUNT.getName());
-        adStatsRequest.addStat(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName());
+        adStatsRequest.addStat(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName());
         StatsAnomalyDetectorResponse response = client().execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest).actionGet(5_000);
         assertEquals(1, response.getAdStatsResponse().getADStatsNodesResponse().getNodes().size());
         Map<String, Object> statsMap = response.getAdStatsResponse().getADStatsNodesResponse().getNodes().get(0).getStatsMap();
         Map<String, Object> clusterStats = response.getAdStatsResponse().getClusterStats();
         assertEquals(0, statsMap.size());
         assertEquals(2L, clusterStats.get(StatNames.DETECTOR_COUNT.getName()));
-        assertEquals(1L, clusterStats.get(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName()));
+        assertEquals(1L, clusterStats.get(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName()));
     }
 
     public void testStatsAnomalyDetectorWithDetectorCount() {
@@ -84,18 +84,18 @@ public class StatsAnomalyDetectorTransportActionTests extends ADIntegTestCase {
         Map<String, Object> clusterStats = response.getAdStatsResponse().getClusterStats();
         assertEquals(0, statsMap.size());
         assertEquals(2L, clusterStats.get(StatNames.DETECTOR_COUNT.getName()));
-        assertFalse(clusterStats.containsKey(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName()));
+        assertFalse(clusterStats.containsKey(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName()));
     }
 
     public void testStatsAnomalyDetectorWithSingleEntityDetectorCount() {
         ADStatsRequest adStatsRequest = new ADStatsRequest(clusterService().localNode());
-        adStatsRequest.addStat(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName());
+        adStatsRequest.addStat(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName());
         StatsAnomalyDetectorResponse response = client().execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest).actionGet(5_000);
         assertEquals(1, response.getAdStatsResponse().getADStatsNodesResponse().getNodes().size());
         Map<String, Object> statsMap = response.getAdStatsResponse().getADStatsNodesResponse().getNodes().get(0).getStatsMap();
         Map<String, Object> clusterStats = response.getAdStatsResponse().getClusterStats();
         assertEquals(0, statsMap.size());
-        assertEquals(1L, clusterStats.get(StatNames.SINGLE_ENTITY_DETECTOR_COUNT.getName()));
+        assertEquals(1L, clusterStats.get(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName()));
         assertFalse(clusterStats.containsKey(StatNames.DETECTOR_COUNT.getName()));
     }
 

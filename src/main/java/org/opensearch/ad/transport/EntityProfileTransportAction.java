@@ -21,11 +21,8 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.cluster.HashRing;
+import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.model.EntityProfileName;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.ad.model.ModelProfileOnNode;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -35,12 +32,17 @@ import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.caching.CacheProvider;
+import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.ModelProfile;
 import org.opensearch.transport.TransportException;
 import org.opensearch.transport.TransportRequestOptions;
 import org.opensearch.transport.TransportResponseHandler;
 import org.opensearch.transport.TransportService;
+
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 /**
  * Transport action to get entity profile.
@@ -56,7 +58,7 @@ public class EntityProfileTransportAction extends HandledTransportAction<EntityP
     private final HashRing hashRing;
     private final TransportRequestOptions option;
     private final ClusterService clusterService;
-    private final CacheProvider cacheProvider;
+    private final CacheProvider<ThresholdedRandomCutForest, ADPriorityCache> cacheProvider;
 
     @Inject
     public EntityProfileTransportAction(
@@ -65,7 +67,7 @@ public class EntityProfileTransportAction extends HandledTransportAction<EntityP
         Settings settings,
         HashRing hashRing,
         ClusterService clusterService,
-        CacheProvider cacheProvider
+        CacheProvider<ThresholdedRandomCutForest, ADPriorityCache> cacheProvider
     ) {
         super(EntityProfileAction.NAME, transportService, actionFilters, EntityProfileRequest::new);
         this.transportService = transportService;
@@ -73,7 +75,7 @@ public class EntityProfileTransportAction extends HandledTransportAction<EntityP
         this.option = TransportRequestOptions
             .builder()
             .withType(TransportRequestOptions.Type.REG)
-            .withTimeout(AnomalyDetectorSettings.REQUEST_TIMEOUT.get(settings))
+            .withTimeout(AnomalyDetectorSettings.AD_REQUEST_TIMEOUT.get(settings))
             .build();
         this.clusterService = clusterService;
         this.cacheProvider = cacheProvider;
@@ -91,7 +93,7 @@ public class EntityProfileTransportAction extends HandledTransportAction<EntityP
         }
         // we use entity's toString (e.g., app_0) to find its node
         // This should be consistent with how we land a model node in AnomalyResultTransportAction
-        Optional<DiscoveryNode> node = hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(entityValue.toString());
+        Optional<DiscoveryNode> node = hashRing.getOwningNodeWithSameLocalVersionForRealtime(entityValue.toString());
         if (false == node.isPresent()) {
             listener.onFailure(new TimeSeriesException(adID, NO_NODE_FOUND_MSG));
             return;
@@ -100,12 +102,12 @@ public class EntityProfileTransportAction extends HandledTransportAction<EntityP
         String modelId = modelIdOptional.get();
         DiscoveryNode localNode = clusterService.localNode();
         if (localNode.getId().equals(nodeId)) {
-            EntityCache cache = cacheProvider.get();
+            ADPriorityCache cache = cacheProvider.get();
             Set<EntityProfileName> profilesToCollect = request.getProfilesToCollect();
             EntityProfileResponse.Builder builder = new EntityProfileResponse.Builder();
             if (profilesToCollect.contains(EntityProfileName.ENTITY_INFO)) {
                 builder.setActive(cache.isActive(adID, modelId));
-                builder.setLastActiveMs(cache.getLastActiveMs(adID, modelId));
+                builder.setLastActiveMs(cache.getLastActiveTime(adID, modelId));
             }
             if (profilesToCollect.contains(EntityProfileName.INIT_PROGRESS) || profilesToCollect.contains(EntityProfileName.STATE)) {
                 builder.setTotalUpdates(cache.getTotalUpdates(adID, modelId));

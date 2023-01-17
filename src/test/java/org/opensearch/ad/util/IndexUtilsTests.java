@@ -24,6 +24,7 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.util.IndexUtils;
 
 public class IndexUtilsTests extends OpenSearchIntegTestCase {
 

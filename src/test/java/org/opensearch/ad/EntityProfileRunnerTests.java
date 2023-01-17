@@ -35,16 +35,13 @@ import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.ad.model.EntityProfile;
 import org.opensearch.ad.model.EntityProfileName;
 import org.opensearch.ad.model.EntityState;
 import org.opensearch.ad.model.InitProgressProfile;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.ad.model.ModelProfileOnNode;
 import org.opensearch.ad.transport.EntityProfileAction;
 import org.opensearch.ad.transport.EntityProfileResponse;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.io.stream.StreamInput;
@@ -61,6 +58,7 @@ import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.Job;
 
 public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
     private AnomalyDetector detector;
@@ -74,7 +72,7 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
     private String detectorId;
     private String entityValue;
     private int requiredSamples;
-    private AnomalyDetectorJob job;
+    private Job job;
 
     private int smallUpdates;
     private String categoryField;
@@ -129,12 +127,12 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
         requiredSamples = 128;
         client = mock(Client.class);
         when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
 
         runner = new EntityProfileRunner(client, clientUtil, xContentRegistry(), requiredSamples);

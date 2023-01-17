@@ -21,13 +21,15 @@ import org.opensearch.common.io.stream.NamedWriteableAwareStreamInput;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.model.ConfigState;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.ModelProfile;
 
 public class DetectorProfileTests extends OpenSearchTestCase {
 
     private DetectorProfile createRandomDetectorProfile() {
         return new DetectorProfile.Builder()
-            .state(DetectorState.INIT)
+            .state(ConfigState.INIT)
             .error(randomAlphaOfLength(5))
             .modelProfile(
                 new ModelProfileOnNode[] {
