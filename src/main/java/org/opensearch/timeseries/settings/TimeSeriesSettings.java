@@ -104,18 +104,18 @@ public class TimeSeriesSettings {
     public static int RESULT_WRITE_QUEUE_SIZE_IN_BYTES = 1160;
 
     /**
-     * FeatureRequest has entityName (# category fields * 256, the recommended limit
-     * of a keyword field length), model Id (roughly 256 bytes), and QueuedRequest
-     * fields including config Id(roughly 128 bytes), dataStartTimeMillis (long,
+     * FeatureRequest has entity (max 2 category fields * 256, the recommended limit
+     * of a keyword field length, 512 bytes), model Id (roughly 256 bytes), runOnce
+     * boolean (roughly 8 bytes), dataStartTimeMillis (long,
      *  8 bytes), and currentFeature (16 bytes, assume two features on average).
-     * Plus Java object size (12 bytes), we have roughly 932 bytes per request
+     * Plus Java object size (12 bytes), we have roughly 812 bytes per request
      * assuming we have 2 categorical fields (plan to support 2 categorical fields now).
      * We don't want the total size exceeds 0.1% of the heap.
-     * We can have at most 0.1% heap / 932 = heap / 932,000.
+     * We can have at most 0.1% heap / 812 = heap / 812,000.
      * For t3.small, 0.1% heap is of 1MB. The queue's size is up to
-     * 10^ 6 / 932 = 1072
+     * 10^ 6 / 812 = 1231
      */
-    public static int FEATURE_REQUEST_SIZE_IN_BYTES = 932;
+    public static int FEATURE_REQUEST_SIZE_IN_BYTES = 812;
 
     /**
      * CheckpointMaintainRequest has model Id (roughly 256 bytes), and QueuedRequest
@@ -157,6 +157,11 @@ public class TimeSeriesSettings {
 
     // for a batch operation, we want all of the bounding box in-place for speed
     public static final double BATCH_BOUNDING_BOX_CACHE_RATIO = 1;
+
+    // feature processing
+    public static final int TRAIN_SAMPLE_TIME_RANGE_IN_HOURS = 24;
+
+    public static final int MIN_TRAIN_SAMPLES = 512;
 
     // ======================================
     // Cold start setting

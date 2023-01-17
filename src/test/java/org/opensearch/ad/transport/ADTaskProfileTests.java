@@ -33,6 +33,7 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.InternalSettingsPlugin;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
+import org.opensearch.timeseries.TaskProfile;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
@@ -117,7 +118,7 @@ public class ADTaskProfileTests extends OpenSearchSingleNodeTestCase {
     }
 
     public void testADTaskProfileParse() throws IOException {
-        ADTaskProfile adTaskProfile = new ADTaskProfile(
+        TaskProfile adTaskProfile = new ADTaskProfile(
             randomAlphaOfLength(5),
             randomInt(),
             randomLong(),
@@ -128,7 +129,7 @@ public class ADTaskProfileTests extends OpenSearchSingleNodeTestCase {
         );
         String adTaskProfileString = TestHelpers
             .xContentBuilderToString(adTaskProfile.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        ADTaskProfile parsedADTaskProfile = ADTaskProfile.parse(TestHelpers.parser(adTaskProfileString));
+        TaskProfile parsedADTaskProfile = ADTaskProfile.parse(TestHelpers.parser(adTaskProfileString));
         assertEquals(adTaskProfile, parsedADTaskProfile);
         assertEquals(parsedADTaskProfile.toString(), adTaskProfile.toString());
     }
@@ -170,7 +171,7 @@ public class ADTaskProfileTests extends OpenSearchSingleNodeTestCase {
     }
 
     public void testADTaskProfileParseFullConstructor() throws IOException {
-        ADTaskProfile adTaskProfile = new ADTaskProfile(
+        TaskProfile adTaskProfile = new ADTaskProfile(
             TestHelpers.randomAdTask(),
             randomInt(),
             randomLong(),
@@ -190,7 +191,7 @@ public class ADTaskProfileTests extends OpenSearchSingleNodeTestCase {
         );
         String adTaskProfileString = TestHelpers
             .xContentBuilderToString(adTaskProfile.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
-        ADTaskProfile parsedADTaskProfile = ADTaskProfile.parse(TestHelpers.parser(adTaskProfileString));
+        TaskProfile parsedADTaskProfile = ADTaskProfile.parse(TestHelpers.parser(adTaskProfileString));
         assertEquals(adTaskProfile, parsedADTaskProfile);
     }
 }

@@ -89,7 +89,6 @@ import org.opensearch.search.aggregations.metrics.Percentile;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.Imputer;
@@ -129,7 +128,7 @@ public class SearchFeatureDaoTests {
     @Mock
     private Max max;
     @Mock
-    private NodeStateManager stateManager;
+    private ADNodeStateManager stateManager;
 
     @Mock
     private AnomalyDetector detector;
@@ -167,7 +166,7 @@ public class SearchFeatureDaoTests {
         settings = Settings.EMPTY;
 
         when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));

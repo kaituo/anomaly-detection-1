@@ -22,6 +22,7 @@ import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.model.Feature;
+import org.opensearch.timeseries.transport.DeleteConfigRequest;
 
 import com.google.common.collect.ImmutableList;
 
@@ -60,7 +61,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
 
     private void testDeleteDetector(AnomalyDetector detector) throws IOException {
         String detectorId = createDetector(detector);
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest(detectorId);
+        DeleteConfigRequest request = new DeleteConfigRequest(detectorId);
         DeleteResponse deleteResponse = client().execute(DeleteAnomalyDetectorAction.INSTANCE, request).actionGet(10000);
         assertEquals("deleted", deleteResponse.getResult().getLowercase());
     }

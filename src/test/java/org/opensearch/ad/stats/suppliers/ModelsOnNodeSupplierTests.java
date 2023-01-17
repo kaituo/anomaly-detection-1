@@ -14,7 +14,7 @@ package org.opensearch.ad.stats.suppliers;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_MODEL_SIZE_PER_NODE;
-import static org.opensearch.ad.stats.suppliers.ModelsOnNodeSupplier.MODEL_STATE_STAT_KEYS;
+import static org.opensearch.timeseries.stats.suppliers.ModelsOnNodeSupplier.MODEL_STATE_STAT_KEYS;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -30,16 +30,19 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.ml.EntityModel;
+import org.opensearch.ad.ml.ADModelManager;
+import org.opensearch.ad.ml.ADModelState;
 import org.opensearch.ad.ml.HybridThresholdingModel;
-import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.ml.ModelState;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.caching.HCCacheProvider;
+import org.opensearch.timeseries.ml.ModelManager;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
+import org.opensearch.timeseries.stats.suppliers.ModelsOnNodeCountSupplier;
+import org.opensearch.timeseries.stats.suppliers.ModelsOnNodeSupplier;
 
 import com.amazon.randomcutforest.RandomCutForest;
 
@@ -49,15 +52,15 @@ import test.org.opensearch.ad.util.RandomModelStateConfig;
 public class ModelsOnNodeSupplierTests extends OpenSearchTestCase {
     private RandomCutForest rcf;
     private HybridThresholdingModel thresholdingModel;
-    private List<ModelState<?>> expectedResults;
+    private List<ADModelState<?>> expectedResults;
     private Clock clock;
-    private List<ModelState<?>> entityModelsInformation;
+    private List<ADModelState<?>> entityModelsInformation;
 
     @Mock
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
 
     @Mock
-    private CacheProvider cacheProvider;
+    private HCCacheProvider cacheProvider;
 
     @Before
     public void setup() {
@@ -70,17 +73,26 @@ public class ModelsOnNodeSupplierTests extends OpenSearchTestCase {
         expectedResults = new ArrayList<>(
             Arrays
                 .asList(
-                    new ModelState<>(rcf, "rcf-model-1", "detector-1", ModelManager.ModelType.RCF.getName(), clock, 0f),
-                    new ModelState<>(thresholdingModel, "thr-model-1", "detector-1", ModelManager.ModelType.RCF.getName(), clock, 0f),
-                    new ModelState<>(rcf, "rcf-model-2", "detector-2", ModelManager.ModelType.THRESHOLD.getName(), clock, 0f),
-                    new ModelState<>(thresholdingModel, "thr-model-2", "detector-2", ModelManager.ModelType.THRESHOLD.getName(), clock, 0f)
+                    new ADModelState<>(rcf, "rcf-model-1", "detector-1", ModelManager.ModelType.RCF.getName(), clock, 0f),
+                    new ADModelState<>(thresholdingModel, "thr-model-1", "detector-1", ModelManager.ModelType.RCF.getName(), clock, 0f),
+                    new ADModelState<>(rcf, "rcf-model-2", "detector-2", ModelManager.ModelType.THRESHOLD.getName(), clock, 0f),
+                    new ADModelState<>(
+                        thresholdingModel,
+                        "thr-model-2",
+                        "detector-2",
+                        ModelManager.ModelType.THRESHOLD.getName(),
+                        clock,
+                        0f
+                    )
                 )
         );
 
         when(modelManager.getAllModels()).thenReturn(expectedResults);
 
-        ModelState<EntityModel> entityModel1 = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
-        ModelState<EntityModel> entityModel2 = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> entityModel1 = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> entityModel2 = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
 
         entityModelsInformation = new ArrayList<>(Arrays.asList(entityModel1, entityModel2));
         EntityCache cache = mock(EntityCache.class);

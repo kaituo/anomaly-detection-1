@@ -49,28 +49,19 @@ import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.action.support.master.AcknowledgedResponse;
-import org.opensearch.ad.AnomalyDetectorJobRunnerTests;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.constant.CommonValue;
 import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.ml.ModelState;
+import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADEntityColdStart;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.ratelimit.CheckpointReadWorker;
-import org.opensearch.ad.ratelimit.ColdEntityWorker;
-import org.opensearch.ad.ratelimit.EntityColdStartWorker;
-import org.opensearch.ad.ratelimit.ResultWriteWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointReadWorker;
+import org.opensearch.ad.ratelimit.ADColdEntityWorker;
+import org.opensearch.ad.ratelimit.ADColdStartWorker;
+import org.opensearch.ad.ratelimit.ADResultWriteWorker;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.stats.ADStat;
-import org.opensearch.ad.stats.ADStats;
-import org.opensearch.ad.stats.suppliers.CounterSupplier;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
@@ -80,7 +71,6 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.EndRunException;
@@ -89,6 +79,7 @@ import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.stats.StatNames;
+import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
 import org.opensearch.transport.TransportService;
 
 import com.google.gson.JsonArray;
@@ -102,15 +93,15 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
     EntityResultTransportAction entityResult;
     ActionFilters actionFilters;
     TransportService transportService;
-    ModelManager manager;
+    ADModelManager manager;
     CircuitBreakerService adCircuitBreakerService;
-    CheckpointDao checkpointDao;
-    CacheProvider provider;
+    ADCheckpointDao checkpointDao;
+    EntityCacheProvider provider;
     EntityCache entityCache;
-    NodeStateManager stateManager;
+    ADNodeStateManager stateManager;
     Settings settings;
     Clock clock;
-    EntityResultRequest request;
+    EntityADResultRequest request;
     String detectorId;
     long timeoutMs;
     AnomalyDetector detector;
@@ -125,13 +116,13 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
     double[] cacheHitData;
     String tooLongEntity;
     double[] tooLongData;
-    ResultWriteWorker resultWriteQueue;
-    CheckpointReadWorker checkpointReadQueue;
+    ADResultWriteWorker resultWriteQueue;
+    ADCheckpointReadWorker checkpointReadQueue;
     int minSamples;
     Instant now;
-    EntityColdStarter coldStarter;
-    ColdEntityWorker coldEntityQueue;
-    EntityColdStartWorker entityColdStartQueue;
+    ADEntityColdStart coldStarter;
+    ADColdEntityWorker coldEntityQueue;
+    ADColdStartWorker entityColdStartQueue;
     ADIndexManagement indexUtil;
     ClusterService clusterService;
     ADStats adStats;
@@ -157,14 +148,14 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
         adCircuitBreakerService = mock(CircuitBreakerService.class);
         when(adCircuitBreakerService.isOpen()).thenReturn(false);
 
-        checkpointDao = mock(CheckpointDao.class);
+        checkpointDao = mock(ADCheckpointDao.class);
 
         detectorId = "123";
         entities = new HashMap<>();
 
         start = 10L;
         end = 20L;
-        request = new EntityResultRequest(detectorId, entities, start, end);
+        request = new EntityADResultRequest(detectorId, entities, start, end);
 
         clock = mock(Clock.class);
         now = Instant.now();
@@ -182,7 +173,7 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
-        manager = new ModelManager(
+        manager = new ADModelManager(
             null,
             clock,
             0,
@@ -200,13 +191,13 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
             clusterService
         );
 
-        provider = mock(CacheProvider.class);
+        provider = mock(EntityCacheProvider.class);
         entityCache = mock(EntityCache.class);
         when(provider.get()).thenReturn(entityCache);
 
         String field = "a";
         detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(detectorId, Arrays.asList(field));
-        stateManager = mock(NodeStateManager.class);
+        stateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));
@@ -225,7 +216,8 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
         tooLongData = new double[] { 0.3 };
         entities.put(Entity.createSingleAttributeEntity(detector.getCategoryFields().get(0), tooLongEntity), tooLongData);
 
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
         when(entityCache.get(eq(cacheMissEntityObj.getModelId(detectorId).get()), any())).thenReturn(null);
         when(entityCache.get(eq(cacheHitEntityObj.getModelId(detectorId).get()), any())).thenReturn(state);
 
@@ -236,31 +228,31 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
         indexUtil = mock(ADIndexManagement.class);
         when(indexUtil.getSchemaVersion(any())).thenReturn(CommonValue.NO_SCHEMA_VERSION);
 
-        resultWriteQueue = mock(ResultWriteWorker.class);
-        checkpointReadQueue = mock(CheckpointReadWorker.class);
+        resultWriteQueue = mock(ADResultWriteWorker.class);
+        checkpointReadQueue = mock(ADCheckpointReadWorker.class);
 
         minSamples = 1;
 
-        coldStarter = mock(EntityColdStarter.class);
+        coldStarter = mock(ADEntityColdStart.class);
 
         doAnswer(invocation -> {
-            ModelState<EntityModel> modelState = invocation.getArgument(0);
+            ADModelState<createFromValueOnlySamples> modelState = invocation.getArgument(0);
             modelState.getModel().clear();
             return null;
         }).when(coldStarter).trainModelFromExistingSamples(any(), anyInt());
 
-        coldEntityQueue = mock(ColdEntityWorker.class);
-        entityColdStartQueue = mock(EntityColdStartWorker.class);
+        coldEntityQueue = mock(ADColdEntityWorker.class);
+        entityColdStartQueue = mock(ADColdStartWorker.class);
 
-        Map<String, ADStat<?>> statsMap = new HashMap<String, ADStat<?>>() {
+        Map<String, TimeSeriesStat<?>> statsMap = new HashMap<String, TimeSeriesStat<?>>() {
             {
-                put(StatNames.MODEL_CORRUTPION_COUNT.getName(), new ADStat<>(false, new CounterSupplier()));
+                put(StatNames.AD_MODEL_CORRUTPION_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()));
             }
         };
 
         adStats = new ADStats(statsMap);
 
-        entityResult = new EntityResultTransportAction(
+        entityResult = new EntityADResultTransportAction(
             actionFilters,
             transportService,
             manager,
@@ -317,7 +309,8 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
 
     // test rcf score is 0
     public void testNoResultsToSave() {
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(false).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(false).build());
         when(entityCache.get(eq(cacheHitEntityObj.getModelId(detectorId).get()), any())).thenReturn(state);
 
         PlainActionFuture<AcknowledgedResponse> future = PlainActionFuture.newFuture();
@@ -335,19 +328,19 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
     }
 
     public void testEmptyId() {
-        request = new EntityResultRequest("", entities, start, end);
+        request = new EntityADResultRequest("", entities, start, end);
         ActionRequestValidationException e = request.validate();
         assertThat(e.validationErrors(), hasItem(ADCommonMessages.AD_ID_MISSING_MSG));
     }
 
     public void testReverseTime() {
-        request = new EntityResultRequest(detectorId, entities, end, start);
+        request = new EntityADResultRequest(detectorId, entities, end, start);
         ActionRequestValidationException e = request.validate();
         assertThat(e.validationErrors(), hasItem(startsWith(CommonMessages.INVALID_TIMESTAMP_ERR_MSG)));
     }
 
     public void testNegativeTime() {
-        request = new EntityResultRequest(detectorId, entities, start, -end);
+        request = new EntityADResultRequest(detectorId, entities, start, -end);
         ActionRequestValidationException e = request.validate();
         assertThat(e.validationErrors(), hasItem(startsWith(CommonMessages.INVALID_TIMESTAMP_ERR_MSG)));
     }
@@ -384,9 +377,9 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
     }
 
     public void testFailToScore() {
-        ModelManager spyModelManager = spy(manager);
-        doThrow(new IllegalArgumentException()).when(spyModelManager).getAnomalyResultForEntity(any(), any(), anyString(), any(), anyInt());
-        entityResult = new EntityResultTransportAction(
+        ADModelManager spyModelManager = spy(manager);
+        doThrow(new IllegalArgumentException()).when(spyModelManager).getResult(any(), any(), anyString(), any(), anyInt());
+        entityResult = new EntityADResultTransportAction(
             actionFilters,
             transportService,
             spyModelManager,
@@ -409,9 +402,9 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
         future.actionGet(timeoutMs);
 
         verify(resultWriteQueue, never()).put(any());
-        verify(entityCache, times(1)).removeEntityModel(anyString(), anyString());
+        verify(entityCache, times(1)).removeModel(anyString(), anyString());
         verify(entityColdStartQueue, times(1)).put(any());
-        Object val = adStats.getStat(StatNames.MODEL_CORRUTPION_COUNT.getName()).getValue();
+        Object val = adStats.getStat(StatNames.AD_MODEL_CORRUTPION_COUNT.getName()).getValue();
         assertEquals(1L, ((Long) val).longValue());
     }
 }

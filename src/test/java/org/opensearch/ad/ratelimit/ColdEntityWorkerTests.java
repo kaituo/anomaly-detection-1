@@ -33,12 +33,13 @@ import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
     ClusterService clusterService;
-    ColdEntityWorker coldWorker;
-    CheckpointReadWorker readWorker;
+    ADColdEntityWorker coldWorker;
+    ADCheckpointReadWorker readWorker;
     EntityFeatureRequest request, request2, invalidRequest;
     List<EntityFeatureRequest> requests;
 
@@ -63,10 +64,10 @@ public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        readWorker = mock(CheckpointReadWorker.class);
+        readWorker = mock(ADCheckpointReadWorker.class);
 
         // Integer.MAX_VALUE makes a huge heap
-        coldWorker = new ColdEntityWorker(
+        coldWorker = new ADColdEntityWorker(
             Integer.MAX_VALUE,
             AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
             AnomalyDetectorSettings.AD_COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
@@ -154,7 +155,7 @@ public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
         // Integer.MAX_VALUE makes a huge heap
-        coldWorker = new ColdEntityWorker(
+        coldWorker = new ADColdEntityWorker(
             Integer.MAX_VALUE,
             AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
             AnomalyDetectorSettings.AD_COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,

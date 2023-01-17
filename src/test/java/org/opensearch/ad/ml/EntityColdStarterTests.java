@@ -43,8 +43,6 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager.ModelType;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
@@ -55,10 +53,11 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.concurrency.OpenSearchRejectedExecutionException;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
@@ -106,11 +105,11 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
     // train using samples directly
     public void testTrainUsingSamples() throws InterruptedException {
         Queue<double[]> samples = MLUtil.createQueueSamples(numMinSamples);
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
-        assertTrue(model.getTrcf().isPresent());
-        ThresholdedRandomCutForest ercf = model.getTrcf().get();
+        assertTrue(model.getModel().isPresent());
+        ThresholdedRandomCutForest ercf = model.getModel().get();
         assertEquals(numMinSamples, ercf.getForest().getTotalUpdates());
 
         checkSemaphoreRelease();
@@ -118,8 +117,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
     public void testColdStart() throws InterruptedException, IOException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
@@ -145,24 +144,24 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
 
-        assertTrue(model.getTrcf().isPresent());
-        ThresholdedRandomCutForest ercf = model.getTrcf().get();
+        assertTrue(model.getModel().isPresent());
+        ThresholdedRandomCutForest ercf = model.getModel().get();
         // 1 round: stride * (samples - 1) + 1 = 60 * 2 + 1 = 121
         // plus 1 existing sample
         assertEquals(121, ercf.getForest().getTotalUpdates());
-        assertTrue("size: " + model.getSamples().size(), model.getSamples().isEmpty());
+        assertTrue("size: " + model.getValueOnlySamples().size(), model.getValueOnlySamples().isEmpty());
 
         checkSemaphoreRelease();
 
         released.set(false);
         // too frequent cold start of the same detector will fail
         samples = MLUtil.createQueueSamples(1);
-        model = new EntityModel(entity, samples, null);
+        model = new createFromValueOnlySamples<>(entity, samples, null);
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
 
-        assertFalse(model.getTrcf().isPresent());
+        assertFalse(model.getModel().isPresent());
         // the samples is not touched since cold start does not happen
-        assertEquals("size: " + model.getSamples().size(), 1, model.getSamples().size());
+        assertEquals("size: " + model.getValueOnlySamples().size(), 1, model.getValueOnlySamples().size());
         checkSemaphoreRelease();
 
         List<double[]> expectedColdStartData = new ArrayList<>();
@@ -182,8 +181,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
     // min max: miss one
     public void testMissMin() throws IOException, InterruptedException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
@@ -195,7 +194,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
         verify(searchFeatureDao, never()).getColdStartSamplesForPeriods(any(), any(), any(), anyBoolean(), eq(AnalysisType.AD), any());
 
-        assertTrue(!model.getTrcf().isPresent());
+        assertTrue(!model.getModel().isPresent());
         checkSemaphoreRelease();
     }
 
@@ -204,7 +203,10 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
      * @param modelState an initialized model state
      * @param coldStartData cold start data that initialized the modelState
      */
-    private void diffTesting(ModelState<EntityModel> modelState, List<double[]> coldStartData) {
+    private void diffTesting(
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> modelState,
+        List<double[]> coldStartData
+    ) {
         int inputDimension = detector.getEnabledFeatureIds().size();
 
         ThresholdedRandomCutForest refTRcf = ThresholdedRandomCutForest
@@ -243,8 +245,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         for (int i = 0; i < 100; i++) {
             double[] point = r.ints(inputDimension, 0, 50).asDoubleStream().toArray();
             AnomalyDescriptor descriptor = refTRcf.process(point, 0);
-            ThresholdingResult result = modelManager
-                .getAnomalyResultForEntity(point, modelState, modelId, entity, detector.getShingleSize());
+            ThresholdingResult result = modelManager.getResult(point, modelState, modelId, entity, detector.getShingleSize());
             assertEquals(descriptor.getRCFScore(), result.getRcfScore(), 1e-10);
             assertEquals(descriptor.getAnomalyGrade(), result.getGrade(), 1e-10);
         }
@@ -270,8 +271,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
     public void testTwoSegmentsWithSingleSample() throws InterruptedException, IOException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
         double[] savedSample = samples.peek();
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
@@ -297,11 +298,11 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
-        assertTrue(model.getTrcf().isPresent());
+        assertTrue(model.getModel().isPresent());
 
         // 1 round: stride * (samples - 1) + 1 = 60 * 4 + 1 = 241
         // if 241 < shingle size + numMinSamples, then another round is performed
-        assertEquals(241, modelState.getModel().getTrcf().get().getForest().getTotalUpdates());
+        assertEquals(241, modelState.getModel().getModel().get().getForest().getTotalUpdates());
         checkSemaphoreRelease();
 
         List<double[]> expectedColdStartData = new ArrayList<>();
@@ -315,7 +316,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         expectedColdStartData.addAll(convertToFeatures(interval2, 60));
         double[][] interval3 = imputer.impute(new double[][] { new double[] { sample3[0], sample5[0] } }, 121);
         expectedColdStartData.addAll(convertToFeatures(interval3, 121));
-        assertTrue("size: " + model.getSamples().size(), model.getSamples().isEmpty());
+        assertTrue("size: " + model.getValueOnlySamples().size(), model.getValueOnlySamples().isEmpty());
         assertEquals(241, expectedColdStartData.size());
         diffTesting(modelState, expectedColdStartData);
     }
@@ -323,9 +324,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
     // two segments of samples, one segment has 3 samples, while another one 2 samples
     public void testTwoSegments() throws InterruptedException, IOException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        double[] savedSample = samples.peek();
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
@@ -354,8 +354,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
 
-        assertTrue(model.getTrcf().isPresent());
-        ThresholdedRandomCutForest ercf = model.getTrcf().get();
+        assertTrue(model.getModel().isPresent());
+        ThresholdedRandomCutForest ercf = model.getModel().get();
         // 1 rounds: stride * (samples - 1) + 1 = 60 * 5 + 1 = 301
         assertEquals(301, ercf.getForest().getTotalUpdates());
         checkSemaphoreRelease();
@@ -374,14 +374,14 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         double[][] interval4 = imputer.impute(new double[][] { new double[] { sample5[0], sample6[0] } }, 61);
         expectedColdStartData.addAll(convertToFeatures(interval4, 61));
         assertEquals(301, expectedColdStartData.size());
-        assertTrue("size: " + model.getSamples().size(), model.getSamples().isEmpty());
+        assertTrue("size: " + model.getValueOnlySamples().size(), model.getValueOnlySamples().isEmpty());
         diffTesting(modelState, expectedColdStartData);
     }
 
     public void testThrottledColdStart() throws InterruptedException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
@@ -400,8 +400,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
     public void testColdStartException() throws InterruptedException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
@@ -418,8 +418,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
     @SuppressWarnings("unchecked")
     public void testNotEnoughSamples() throws InterruptedException, IOException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         detector = TestHelpers.AnomalyDetectorBuilder
             .newInstance()
@@ -452,10 +452,10 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
 
-        assertTrue(!model.getTrcf().isPresent());
+        assertTrue(!model.getModel().isPresent());
         // 1st round we add 57 and 1.
         // 2nd round we add 57 and 1.
-        Queue<double[]> currentSamples = model.getSamples();
+        Queue<double[]> currentSamples = model.getValueOnlySamples();
         assertEquals("real sample size is " + currentSamples.size(), 4, currentSamples.size());
         int j = 0;
         while (!currentSamples.isEmpty()) {
@@ -473,8 +473,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
     @SuppressWarnings("unchecked")
     public void testEmptyDataRange() throws InterruptedException {
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         // the min-max range 894056973000L~894057860000L is too small and thus no data range can be found
         when(clock.millis()).thenReturn(894057860000L);
@@ -496,9 +496,9 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
 
-        assertTrue(!model.getTrcf().isPresent());
+        assertTrue(!model.getModel().isPresent());
         // the min-max range is too small and thus no data range can be found
-        assertEquals("real sample size is " + model.getSamples().size(), 1, model.getSamples().size());
+        assertEquals("real sample size is " + model.getValueOnlySamples().size(), 1, model.getValueOnlySamples().size());
     }
 
     public void testTrainModelFromExistingSamplesEnoughSamples() {
@@ -528,8 +528,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         Queue<double[]> samples = models.v1();
         ThresholdedRandomCutForest rcf = models.v2();
 
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
         Random r = new Random();
 
@@ -537,8 +537,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         for (int i = 0; i < 100; i++) {
             double[] point = r.ints(inputDimension, 0, 50).asDoubleStream().toArray();
             AnomalyDescriptor descriptor = rcf.process(point, 0);
-            ThresholdingResult result = modelManager
-                .getAnomalyResultForEntity(point, modelState, modelId, entity, detector.getShingleSize());
+            ThresholdingResult result = modelManager.getResult(point, modelState, modelId, entity, detector.getShingleSize());
             assertEquals(descriptor.getRCFScore(), result.getRcfScore(), 1e-10);
             assertEquals(descriptor.getAnomalyGrade(), result.getGrade(), 1e-10);
         }
@@ -546,10 +545,10 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
     public void testTrainModelFromExistingSamplesNotEnoughSamples() {
         Queue<double[]> samples = new ArrayDeque<>();
-        EntityModel model = new EntityModel(entity, samples, null);
-        modelState = new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        modelState = new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
         entityColdStarter.trainModelFromExistingSamples(modelState, detector.getShingleSize());
-        assertTrue(!modelState.getModel().getTrcf().isPresent());
+        assertTrue(!modelState.getModel().getModel().isPresent());
     }
 
     @SuppressWarnings("unchecked")
@@ -630,8 +629,12 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
                 return null;
             }).when(searchFeatureDao).getColdStartSamplesForPeriods(any(), any(), any(), anyBoolean(), eq(AnalysisType.AD), any());
 
-            EntityModel model = new EntityModel(entity, new ArrayDeque<>(), null);
-            modelState = new ModelState<>(model, modelId, detector.getId(), ModelType.ENTITY.getName(), clock, priority);
+            createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(
+                entity,
+                new ArrayDeque<>(),
+                null
+            );
+            modelState = new ADModelState<>(model, modelId, detector.getId(), ModelManager.ModelType.ENTITY.getName(), clock, priority);
 
             released = new AtomicBoolean();
 
@@ -644,7 +647,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             entityColdStarter.trainModel(entity, detector.getId(), modelState, listener);
 
             checkSemaphoreRelease();
-            assertTrue(model.getTrcf().isPresent());
+            assertTrue(model.getModel().isPresent());
 
             int tp = 0;
             int fp = 0;
@@ -652,8 +655,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             long[] changeTimestamps = dataWithKeys.changeTimeStampsMs;
 
             for (int j = trainTestSplit; j < data.length; j++) {
-                ThresholdingResult result = modelManager
-                    .getAnomalyResultForEntity(data[j], modelState, modelId, entity, detector.getShingleSize());
+                ThresholdingResult result = modelManager.getResult(data[j], modelState, modelId, entity, detector.getShingleSize());
                 if (result.getGrade() > 0) {
                     if (changeTimestamps[j] == 0) {
                         fp++;
@@ -701,7 +703,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
     public void testAccuracyOneMinuteIntervalNoInterpolation() throws Exception {
         ADEnabledSetting.getInstance().setSettingValue(ADEnabledSetting.INTERPOLATION_IN_HCAD_COLD_START_ENABLED, false);
         // for one minute interval, we need to disable interpolation to achieve good results
-        entityColdStarter = new EntityColdStarter(
+        entityColdStarter = new ADEntityColdStarter(
             clock,
             threadPool,
             stateManager,
@@ -722,8 +724,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             TimeSeriesSettings.MAX_COLD_START_ROUNDS
         );
 
-        modelManager = new ModelManager(
-            mock(CheckpointDao.class),
+        modelManager = new ADModelManager(
+            mock(ADCheckpointDao.class),
             mock(Clock.class),
             TimeSeriesSettings.NUM_TREES,
             TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
@@ -735,7 +737,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             entityColdStarter,
             mock(FeatureManager.class),
-            mock(MemoryTracker.class),
+            mock(ADMemoryTracker.class),
             settings,
             clusterService
         );
@@ -743,7 +745,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         accuracyTemplate(1, 0.6f, 0.6f);
     }
 
-    private ModelState<EntityModel> createStateForCacheRelease() {
+    private ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> createStateForCacheRelease() {
         inProgressLatch = new CountDownLatch(1);
         releaseSemaphore = () -> {
             released.set(true);
@@ -751,12 +753,12 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         };
         listener = ActionListener.wrap(releaseSemaphore);
         Queue<double[]> samples = MLUtil.createQueueSamples(1);
-        EntityModel model = new EntityModel(entity, samples, null);
-        return new ModelState<>(model, modelId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(entity, samples, null);
+        return new ADModelState<>(model, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
     }
 
     public void testCacheReleaseAfterMaintenance() throws IOException, InterruptedException {
-        ModelState<EntityModel> modelState = createStateForCacheRelease();
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> modelState = createStateForCacheRelease();
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
             listener.onResponse(Optional.of(1602269260000L));
@@ -780,13 +782,13 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
-        assertTrue(modelState.getModel().getTrcf().isPresent());
+        assertTrue(modelState.getModel().getModel().isPresent());
 
         modelState = createStateForCacheRelease();
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
         // model is not trained as the door keeper remembers it and won't retry training
-        assertTrue(!modelState.getModel().getTrcf().isPresent());
+        assertTrue(!modelState.getModel().getModel().isPresent());
 
         // make sure when the next maintenance coming, current door keeper gets reset
         // note our detector interval is 1 minute and the door keeper will expire in 60 intervals, which are 60 minutes
@@ -797,11 +799,11 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
         // model is trained as the door keeper gets reset
-        assertTrue(modelState.getModel().getTrcf().isPresent());
+        assertTrue(modelState.getModel().getModel().isPresent());
     }
 
     public void testCacheReleaseAfterClear() throws IOException, InterruptedException {
-        ModelState<EntityModel> modelState = createStateForCacheRelease();
+        ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> modelState = createStateForCacheRelease();
         doAnswer(invocation -> {
             ActionListener<Optional<Long>> listener = invocation.getArgument(3);
             listener.onResponse(Optional.of(1602269260000L));
@@ -825,7 +827,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
-        assertTrue(modelState.getModel().getTrcf().isPresent());
+        assertTrue(modelState.getModel().getModel().isPresent());
 
         entityColdStarter.clear(detectorId);
 
@@ -833,6 +835,6 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         entityColdStarter.trainModel(entity, detectorId, modelState, listener);
         checkSemaphoreRelease();
         // model is trained as the door keeper is regenerated after clearance
-        assertTrue(modelState.getModel().getTrcf().isPresent());
+        assertTrue(modelState.getModel().getModel().isPresent());
     }
 }

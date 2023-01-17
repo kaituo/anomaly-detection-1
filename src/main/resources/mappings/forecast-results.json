@@ -95,9 +95,6 @@
     "task_id": {
       "type": "keyword"
     },
-    "model_id": {
-      "type": "keyword"
-    },
     "entity_id": {
       "type": "keyword"
     },

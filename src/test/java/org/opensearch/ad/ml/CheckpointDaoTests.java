@@ -127,7 +127,7 @@ import test.org.opensearch.ad.util.RandomModelStateConfig;
 public class CheckpointDaoTests extends OpenSearchTestCase {
     private static final Logger logger = LogManager.getLogger(CheckpointDaoTests.class);
 
-    private CheckpointDao checkpointDao;
+    private ADCheckpointDao checkpointDao;
 
     // dependencies
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
@@ -211,7 +211,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         serializeRCFBufferPool.setTimeBetweenEvictionRuns(TimeSeriesSettings.HOURLY_MAINTENANCE);
 
         anomalyRate = 0.005;
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             indexName,
@@ -496,14 +496,15 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
 
     @SuppressWarnings("unchecked")
     public void test_restore() throws IOException {
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
-        EntityModel modelToSave = state.getModel();
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        createFromValueOnlySamples modelToSave = state.getModel();
 
         GetResponse getResponse = mock(GetResponse.class);
         when(getResponse.isExists()).thenReturn(true);
         Map<String, Object> source = new HashMap<>();
-        source.put(CheckpointDao.DETECTOR_ID, state.getId());
-        source.put(CheckpointDao.FIELD_MODELV2, checkpointDao.toCheckpoint(modelToSave, modelId).get());
+        source.put(ADCheckpointDao.DETECTOR_ID, state.getConfigId());
+        source.put(ADCheckpointDao.FIELD_MODELV2, checkpointDao.toCheckpoint(modelToSave, modelId).get());
         source.put(CommonName.TIMESTAMP, "2020-10-11T22:58:23.610392Z");
         when(getResponse.getSource()).thenReturn(source);
 
@@ -514,14 +515,14 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             return null;
         }).when(clientUtil).asyncRequest(any(GetRequest.class), any(BiConsumer.class), any(ActionListener.class));
 
-        ActionListener<Optional<Entry<EntityModel, Instant>>> listener = mock(ActionListener.class);
+        ActionListener<Optional<Entry<createFromValueOnlySamples, Instant>>> listener = mock(ActionListener.class);
         checkpointDao.deserializeModelCheckpoint(modelId, listener);
 
-        ArgumentCaptor<Optional<Entry<EntityModel, Instant>>> responseCaptor = ArgumentCaptor.forClass(Optional.class);
+        ArgumentCaptor<Optional<Entry<createFromValueOnlySamples, Instant>>> responseCaptor = ArgumentCaptor.forClass(Optional.class);
         verify(listener).onResponse(responseCaptor.capture());
-        Optional<Entry<EntityModel, Instant>> response = responseCaptor.getValue();
+        Optional<Entry<createFromValueOnlySamples, Instant>> response = responseCaptor.getValue();
         assertTrue(response.isPresent());
-        Entry<EntityModel, Instant> entry = response.get();
+        Entry<createFromValueOnlySamples, Instant> entry = response.get();
         OffsetDateTime utcTime = entry.getValue().atOffset(ZoneOffset.UTC);
         assertEquals(2020, utcTime.getYear());
         assertEquals(Month.OCTOBER, utcTime.getMonth());
@@ -530,9 +531,9 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         assertEquals(58, utcTime.getMinute());
         assertEquals(23, utcTime.getSecond());
 
-        EntityModel model = entry.getKey();
-        Queue<double[]> queue = model.getSamples();
-        Queue<double[]> samplesToSave = modelToSave.getSamples();
+        createFromValueOnlySamples model = entry.getKey();
+        Queue<double[]> queue = model.getValueOnlySamples();
+        Queue<double[]> samplesToSave = modelToSave.getValueOnlySamples();
         assertEquals(samplesToSave.size(), queue.size());
         assertTrue(Arrays.equals(samplesToSave.peek(), queue.peek()));
         logger.info(modelToSave.getTrcf());
@@ -679,7 +680,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
     }
 
     public void test_too_large_checkpoint() throws IOException {
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             indexName,
@@ -696,13 +697,15 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             anomalyRate
         );
 
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
 
         assertTrue(checkpointDao.toIndexSource(state).isEmpty());
     }
 
     public void test_to_index_source() throws IOException {
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
 
         Map<String, Object> source = checkpointDao.toIndexSource(state);
         assertTrue(!source.isEmpty());
@@ -716,7 +719,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
     public void testBorrowFromPoolFailure() throws Exception {
         GenericObjectPool<LinkedBuffer> mockSerializeRCFBufferPool = mock(GenericObjectPool.class);
         when(mockSerializeRCFBufferPool.borrowObject()).thenThrow(NoSuchElementException.class);
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             indexName,
@@ -733,7 +736,8 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             anomalyRate
         );
 
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
         assertTrue(!checkpointDao.toCheckpoint(state.getModel(), modelId).get().isEmpty());
     }
 
@@ -741,7 +745,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         ThresholdedRandomCutForestMapper mockMapper = mock(ThresholdedRandomCutForestMapper.class);
         when(mockMapper.toState(any())).thenThrow(RuntimeException.class);
 
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             indexName,
@@ -759,37 +763,40 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         );
 
         // make sure sample size is not 0 otherwise sample size won't be written to checkpoint
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(1).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(1).build());
         String json = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
-        assertEquals(null, JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
+        assertEquals(null, JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
         assertTrue(null != JsonDeserializer.getChildNode(json, CommonName.ENTITY_SAMPLE));
         // assertTrue(null != JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_THRESHOLD));
         // assertNotNull(JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
     }
 
     public void testEmptySample() throws IOException {
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
         // assertTrue(null != JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
         assertEquals(null, JsonDeserializer.getChildNode(json, CommonName.ENTITY_SAMPLE));
         // assertTrue(null != JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_THRESHOLD));
-        assertNotNull(JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
     }
 
     public void testToCheckpointErcfCheckoutFail() throws Exception {
         when(serializeRCFBufferPool.borrowObject()).thenThrow(RuntimeException.class);
 
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
 
-        assertNotNull(JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
     }
 
     @SuppressWarnings("unchecked")
     private void setUpMockTrcf() {
         trcfMapper = mock(ThresholdedRandomCutForestMapper.class);
         trcfSchema = mock(Schema.class);
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             indexName,
@@ -811,10 +818,11 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         setUpMockTrcf();
         when(trcfMapper.toState(any())).thenThrow(RuntimeException.class).thenReturn(null);
 
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
 
-        assertNotNull(JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
     }
 
     public void testToCheckpointTrcfFailNewBuffer() throws Exception {
@@ -822,10 +830,11 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         doReturn(null).when(serializeRCFBufferPool).borrowObject();
         when(trcfMapper.toState(any())).thenThrow(RuntimeException.class);
 
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
 
-        assertNull(JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
+        assertNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
     }
 
     public void testToCheckpointTrcfCheckoutBufferInvalidateFail() throws Exception {
@@ -833,41 +842,44 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         when(trcfMapper.toState(any())).thenThrow(RuntimeException.class).thenReturn(null);
         doThrow(RuntimeException.class).when(serializeRCFBufferPool).invalidateObject(any());
 
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
 
-        assertNotNull(JsonDeserializer.getChildNode(json, CheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
     }
 
     public void testFromEntityModelCheckpointWithTrcf() throws Exception {
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
         String model = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
 
         Map<String, Object> entity = new HashMap<>();
         entity.put(FIELD_MODELV2, model);
         entity.put(CommonName.TIMESTAMP, Instant.now().toString());
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(entity, this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao.fromEntityModelCheckpoint(entity, this.modelId);
 
         assertTrue(result.isPresent());
-        Entry<EntityModel, Instant> pair = result.get();
-        EntityModel entityModel = pair.getKey();
+        Entry<createFromValueOnlySamples, Instant> pair = result.get();
+        createFromValueOnlySamples entityModel = pair.getKey();
         assertTrue(entityModel.getTrcf().isPresent());
     }
 
     public void testFromEntityModelCheckpointTrcfMapperFail() throws Exception {
         setUpMockTrcf();
         when(trcfMapper.toModel(any())).thenThrow(RuntimeException.class);
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
         String model = checkpointDao.toCheckpoint(state.getModel(), modelId).get();
 
         Map<String, Object> entity = new HashMap<>();
         entity.put(FIELD_MODELV2, model);
         entity.put(CommonName.TIMESTAMP, Instant.now().toString());
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(entity, this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao.fromEntityModelCheckpoint(entity, this.modelId);
 
         assertTrue(result.isPresent());
-        Entry<EntityModel, Instant> pair = result.get();
-        EntityModel entityModel = pair.getKey();
+        Entry<createFromValueOnlySamples, Instant> pair = result.get();
+        createFromValueOnlySamples entityModel = pair.getKey();
         assertFalse(entityModel.getTrcf().isPresent());
     }
 
@@ -896,14 +908,15 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_2.json");
         Instant now = modelPair.getRight();
 
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao
+            .fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
         assertTrue(result.isPresent());
-        Entry<EntityModel, Instant> pair = result.get();
+        Entry<createFromValueOnlySamples, Instant> pair = result.get();
         assertEquals(now, pair.getValue());
 
-        EntityModel entityModel = pair.getKey();
+        createFromValueOnlySamples entityModel = pair.getKey();
 
-        Queue<double[]> samples = entityModel.getSamples();
+        Queue<double[]> samples = entityModel.getValueOnlySamples();
         assertEquals(6, samples.size());
         double[] firstSample = samples.peek();
         assertEquals(1, firstSample.length);
@@ -926,7 +939,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
 
     public void testFromEntityModelCheckpointModelTooLarge() throws FileNotFoundException, IOException, URISyntaxException {
         Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_2.json");
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             indexName,
@@ -942,7 +955,8 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES,
             anomalyRate
         );
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao
+            .fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
         // checkpoint is only configured to take in 1 MB checkpoint at most. But the checkpoint here is of 1408047 bytes.
         assertTrue(!result.isPresent());
     }
@@ -952,28 +966,31 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         Map<String, Object> entity = new HashMap<>();
         entity.put(CommonName.TIMESTAMP, Instant.now().toString());
 
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(entity, this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao.fromEntityModelCheckpoint(entity, this.modelId);
         assertTrue(!result.isPresent());
     }
 
     public void testFromEntityModelCheckpointEmptySamples() throws FileNotFoundException, IOException, URISyntaxException {
         Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_1.json");
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao
+            .fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
         assertTrue(result.isPresent());
-        Queue<double[]> samples = result.get().getKey().getSamples();
+        Queue<double[]> samples = result.get().getKey().getValueOnlySamples();
         assertEquals(0, samples.size());
     }
 
     public void testFromEntityModelCheckpointNoRCF() throws FileNotFoundException, IOException, URISyntaxException {
         Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_3.json");
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao
+            .fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
         assertTrue(result.isPresent());
         assertTrue(!result.get().getKey().getTrcf().isPresent());
     }
 
     public void testFromEntityModelCheckpointNoThreshold() throws FileNotFoundException, IOException, URISyntaxException {
         Pair<Map<String, Object>, Instant> modelPair = setUp1_0Model("checkpoint_4.json");
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao
+            .fromEntityModelCheckpoint(modelPair.getLeft(), this.modelId);
         assertTrue(result.isPresent());
 
         ThresholdedRandomCutForest trcf = result.get().getKey().getTrcf().get();
@@ -984,17 +1001,17 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
     }
 
     public void testFromEntityModelCheckpointWithEntity() throws Exception {
-        ModelState<EntityModel> state = MLUtil
+        ADModelState<createFromValueOnlySamples> state = MLUtil
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).entityAttributes(true).build());
         Map<String, Object> content = checkpointDao.toIndexSource(state);
         // Opensearch will convert from java.time.ZonedDateTime to String. Here I am converting to simulate that
         content.put(CommonName.TIMESTAMP, "2021-09-23T05:00:37.93195Z");
 
-        Optional<Entry<EntityModel, Instant>> result = checkpointDao.fromEntityModelCheckpoint(content, this.modelId);
+        Optional<Entry<createFromValueOnlySamples, Instant>> result = checkpointDao.fromEntityModelCheckpoint(content, this.modelId);
 
         assertTrue(result.isPresent());
-        Entry<EntityModel, Instant> pair = result.get();
-        EntityModel entityModel = pair.getKey();
+        Entry<createFromValueOnlySamples, Instant> pair = result.get();
+        createFromValueOnlySamples entityModel = pair.getKey();
         assertTrue(entityModel.getEntity().isPresent());
         assertEquals(state.getModel().getEntity().get(), entityModel.getEntity().get());
     }

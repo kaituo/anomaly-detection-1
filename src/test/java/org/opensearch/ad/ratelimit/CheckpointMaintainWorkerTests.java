@@ -32,12 +32,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Random;
 
-import org.opensearch.ad.caching.CacheProvider;
 import org.opensearch.ad.caching.EntityCache;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelState;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -45,6 +41,12 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.caching.HCCacheProvider;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
+import org.opensearch.timeseries.ratelimit.CheckPointMaintainRequestAdapter;
+import org.opensearch.timeseries.ratelimit.ModelRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import test.org.opensearch.ad.util.MLUtil;
@@ -52,12 +54,12 @@ import test.org.opensearch.ad.util.RandomModelStateConfig;
 
 public class CheckpointMaintainWorkerTests extends AbstractRateLimitingTest {
     ClusterService clusterService;
-    CheckpointMaintainWorker cpMaintainWorker;
-    CheckpointWriteWorker writeWorker;
-    CheckpointMaintainRequest request;
-    CheckpointMaintainRequest request2;
-    List<CheckpointMaintainRequest> requests;
-    CheckpointDao checkpointDao;
+    ADCheckpointMaintainWorker cpMaintainWorker;
+    ADCheckpointWriteWorker writeWorker;
+    ModelRequest request;
+    ModelRequest request2;
+    List<ModelRequest> requests;
+    ADCheckpointDao checkpointDao;
 
     @Override
     public void setUp() throws Exception {
@@ -81,15 +83,16 @@ public class CheckpointMaintainWorkerTests extends AbstractRateLimitingTest {
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        writeWorker = mock(CheckpointWriteWorker.class);
+        writeWorker = mock(ADCheckpointWriteWorker.class);
 
-        CacheProvider cache = mock(CacheProvider.class);
-        checkpointDao = mock(CheckpointDao.class);
+        HCCacheProvider cache = mock(HCCacheProvider.class);
+        checkpointDao = mock(ADCheckpointDao.class);
         String indexName = ADCommonName.CHECKPOINT_INDEX_NAME;
         Setting<TimeValue> checkpointInterval = AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ;
         EntityCache entityCache = mock(EntityCache.class);
         when(cache.get()).thenReturn(entityCache);
-        ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
+        ADModelState<createFromValueOnlySamples> state = MLUtil
+            .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
         when(entityCache.getForMaintainance(anyString(), anyString())).thenReturn(Optional.of(state));
         CheckPointMaintainRequestAdapter adapter = new CheckPointMaintainRequestAdapter(
             cache,
@@ -102,7 +105,7 @@ public class CheckpointMaintainWorkerTests extends AbstractRateLimitingTest {
         );
 
         // Integer.MAX_VALUE makes a huge heap
-        cpMaintainWorker = new CheckpointMaintainWorker(
+        cpMaintainWorker = new ADCheckpointMaintainWorker(
             Integer.MAX_VALUE,
             AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
             AnomalyDetectorSettings.AD_CHECKPOINT_MAINTAIN_QUEUE_MAX_HEAP_PERCENT,
@@ -122,8 +125,8 @@ public class CheckpointMaintainWorkerTests extends AbstractRateLimitingTest {
             adapter
         );
 
-        request = new CheckpointMaintainRequest(Integer.MAX_VALUE, detectorId, RequestPriority.LOW, entity.getModelId(detectorId).get());
-        request2 = new CheckpointMaintainRequest(Integer.MAX_VALUE, detectorId, RequestPriority.LOW, entity2.getModelId(detectorId).get());
+        request = new ModelRequest(Integer.MAX_VALUE, detectorId, RequestPriority.LOW, entity.getModelId(detectorId).get());
+        request2 = new ModelRequest(Integer.MAX_VALUE, detectorId, RequestPriority.LOW, entity2.getModelId(detectorId).get());
 
         requests = new ArrayList<>();
         requests.add(request);

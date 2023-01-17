@@ -58,10 +58,7 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.ShardSearchFailure;
-import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.constant.CommonValue;
-import org.opensearch.ad.feature.Features;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.mock.model.MockSimpleLog;
@@ -72,10 +69,7 @@ import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.AnomalyResultBucket;
 import org.opensearch.ad.model.DetectorInternalState;
-import org.opensearch.ad.model.DetectorValidationIssue;
 import org.opensearch.ad.model.ExpectedValueList;
-import org.opensearch.ad.ratelimit.RequestPriority;
-import org.opensearch.ad.ratelimit.ResultWriteRequest;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.client.Request;
@@ -133,10 +127,12 @@ import org.opensearch.test.ClusterServiceUtils;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.test.rest.OpenSearchRestTestCase;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.ImputationMethod;
 import org.opensearch.timeseries.dataprocessor.ImputationOption;
 import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.model.ConfigValidationIssue;
 import org.opensearch.timeseries.model.DataByFeatureId;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.Entity;
@@ -1330,7 +1326,7 @@ public class TestHelpers {
 
     public static ADTask randomAdTask(String taskId, TaskState state, Instant executionEndTime, String stoppedBy, boolean withDetector)
         throws IOException {
-        return randomAdTask(taskId, state, executionEndTime, stoppedBy, withDetector, ADTaskType.HISTORICAL_SINGLE_ENTITY);
+        return randomAdTask(taskId, state, executionEndTime, stoppedBy, withDetector, ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR);
     }
 
     public static ADTask randomAdTask(
@@ -1517,8 +1513,8 @@ public class TestHelpers {
         return adStats;
     }
 
-    public static DetectorValidationIssue randomDetectorValidationIssue() {
-        DetectorValidationIssue issue = new DetectorValidationIssue(
+    public static ConfigValidationIssue randomDetectorValidationIssue() {
+        ConfigValidationIssue issue = new ConfigValidationIssue(
             ValidationAspect.DETECTOR,
             ValidationIssueType.NAME,
             randomAlphaOfLength(5)
@@ -1526,8 +1522,8 @@ public class TestHelpers {
         return issue;
     }
 
-    public static DetectorValidationIssue randomDetectorValidationIssueWithSubIssues(Map<String, String> subIssues) {
-        DetectorValidationIssue issue = new DetectorValidationIssue(
+    public static ConfigValidationIssue randomDetectorValidationIssueWithSubIssues(Map<String, String> subIssues) {
+        ConfigValidationIssue issue = new ConfigValidationIssue(
             ValidationAspect.DETECTOR,
             ValidationIssueType.NAME,
             randomAlphaOfLength(5),
@@ -1537,11 +1533,11 @@ public class TestHelpers {
         return issue;
     }
 
-    public static DetectorValidationIssue randomDetectorValidationIssueWithDetectorIntervalRec(long intervalRec) {
-        DetectorValidationIssue issue = new DetectorValidationIssue(
+    public static ConfigValidationIssue randomDetectorValidationIssueWithDetectorIntervalRec(long intervalRec) {
+        ConfigValidationIssue issue = new ConfigValidationIssue(
             ValidationAspect.MODEL,
             ValidationIssueType.DETECTION_INTERVAL,
-            ADCommonMessages.DETECTOR_INTERVAL_REC + intervalRec,
+            CommonMessages.INTERVAL_REC + intervalRec,
             null,
             new IntervalTimeConfiguration(intervalRec, ChronoUnit.MINUTES)
         );
@@ -1549,10 +1545,9 @@ public class TestHelpers {
     }
 
     public static ClusterState createClusterState() {
-        final Map<String, IndexMetadata> mappings = new HashMap<>();
-
-        mappings
-            .put(
+        ImmutableOpenMap<String, IndexMetadata> immutableOpenMap = ImmutableOpenMap
+            .<String, IndexMetadata>builder()
+            .fPut(
                 CommonName.JOB_INDEX,
                 IndexMetadata
                     .builder("test")

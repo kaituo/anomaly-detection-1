@@ -23,8 +23,6 @@ import org.opensearch.plugins.Plugin;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.constant.CommonName;
-import org.opensearch.timeseries.indices.IndexManagementIntegTestCase;
-import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
 public class AnomalyDetectionIndicesTests extends IndexManagementIntegTestCase<ADIndex, ADIndexManagement> {

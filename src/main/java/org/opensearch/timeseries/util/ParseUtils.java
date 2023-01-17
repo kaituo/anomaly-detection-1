@@ -38,8 +38,6 @@ import org.apache.lucene.search.join.ScoreMode;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.search.SearchResponse;
-import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.transport.GetAnomalyDetectorResponse;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
@@ -47,6 +45,7 @@ import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.commons.ConfigConstants;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.ParsingException;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
@@ -302,23 +301,23 @@ public final class ParseUtils {
     }
 
     public static SearchSourceBuilder generateInternalFeatureQuery(
-        AnomalyDetector detector,
+        Config config,
         long startTime,
         long endTime,
         NamedXContentRegistry xContentRegistry
     ) throws IOException {
-        RangeQueryBuilder rangeQuery = new RangeQueryBuilder(detector.getTimeField())
+        RangeQueryBuilder rangeQuery = new RangeQueryBuilder(config.getTimeField())
             .from(startTime)
             .to(endTime)
             .format("epoch_millis")
             .includeLower(true)
             .includeUpper(false);
 
-        BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery().must(rangeQuery).must(detector.getFilterQuery());
+        BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery().must(rangeQuery).must(config.getFilterQuery());
 
         SearchSourceBuilder internalSearchSourceBuilder = new SearchSourceBuilder().query(internalFilterQuery);
-        if (detector.getFeatureAttributes() != null) {
-            for (Feature feature : detector.getFeatureAttributes()) {
+        if (config.getFeatureAttributes() != null) {
+            for (Feature feature : config.getFeatureAttributes()) {
                 AggregatorFactories.Builder internalAgg = parseAggregators(
                     feature.getAggregation().toString(),
                     xContentRegistry,
@@ -366,7 +365,7 @@ public final class ParseUtils {
         BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery().filter(config.getFilterQuery());
 
         if (entity.isPresent()) {
-            for (TermQueryBuilder term : entity.get().getTermQueryBuilders()) {
+            for (TermQueryBuilder term : entity.get().getTermQueryForCustomerIndex()) {
                 internalFilterQuery.filter(term);
             }
         }
@@ -393,12 +392,12 @@ public final class ParseUtils {
     /**
      * Map feature data to its Id and name
      * @param currentFeature Feature data
-     * @param detector Detector Config object
+     * @param config Config object
      * @return a list of feature data with Id and name
      */
-    public static List<FeatureData> getFeatureData(double[] currentFeature, AnomalyDetector detector) {
-        List<String> featureIds = detector.getEnabledFeatureIds();
-        List<String> featureNames = detector.getEnabledFeatureNames();
+    public static List<FeatureData> getFeatureData(double[] currentFeature, Config config) {
+        List<String> featureIds = config.getEnabledFeatureIds();
+        List<String> featureNames = config.getEnabledFeatureNames();
         int featureLen = featureIds.size();
         List<FeatureData> featureData = new ArrayList<>();
         for (int i = 0; i < featureLen; i++) {
@@ -444,7 +443,22 @@ public final class ParseUtils {
         return User.parse(userStr);
     }
 
-    public static <ConfigType extends Config> void resolveUserAndExecute(
+    /**
+     * run the given function based on given user
+     * @param <GetConfigResponseType> Config response type. Can be either GetAnomalyDetectorResponse or GetForecasterResponse
+     * @param requestedUser requested user
+     * @param configId config Id
+     * @param filterByEnabled filter by backend is enabled
+     * @param listener listener. We didn't provide the generic type of listener and therefore can return anything using the listener.
+     * @param function Function to execute
+     * @param client Client to OS.
+     * @param clusterService Cluster service of OS.
+     * @param xContentRegistry Used to deserialize the get config response.
+     * @param getConfigResponseClass The class of Get config transport response. Based on the class type, we run different parse method
+     *  on the get response.
+     * @param configTypeClass the class of the ConfigType, used by the ConfigFactory to parse the correct type of Config
+     */
+    public static <ConfigType extends Config, GetConfigResponseType extends ActionResponse> void resolveUserAndExecute(
         User requestedUser,
         String configId,
         boolean filterByEnabled,
@@ -489,12 +503,14 @@ public final class ParseUtils {
      * @param clusterService cluster service
      * @param xContentRegistry XContent registry
      * @param filterByBackendRole filter by backend role or not
+     * @param getConfigResponseClass The class of Get config transport response. Based on the class type, we run different parse method
+     *  on the get response.
      * @param configTypeClass the class of the ConfigType, used by the ConfigFactory to parse the correct type of Config
      */
-    public static <ConfigType extends Config> void getConfig(
+    public static <ConfigType extends Config, GetConfigResponseType extends ActionResponse> void getConfig(
         User requestUser,
         String configId,
-        ActionListener listener,
+        ActionListener<GetConfigResponseType> listener,
         Consumer<ConfigType> function,
         Client client,
         ClusterService clusterService,
@@ -520,7 +536,7 @@ public final class ParseUtils {
                                 configTypeClass
                             ),
                             exception -> {
-                                logger.error("Failed to get anomaly detector: " + configId, exception);
+                                logger.error("Failed to get config: " + configId, exception);
                                 listener.onFailure(exception);
                             }
                         )
@@ -542,6 +558,7 @@ public final class ParseUtils {
      *   provided the user holds the requisite permissions.
      *
      * @param <ConfigType> The type of Config to be processed in this method, which extends from the Config base type.
+     * @param <GetConfigResponseType> The type of ActionResponse to be used, which extends from the ActionResponse base type.
      * @param response The GetResponse from the getConfig request. This contains the information about the config that is to be processed.
      * @param requestUser The User from the request. This user's permissions will be checked to ensure they have access to the config.
      * @param configId The ID of the config. This is used for logging and error messages.
@@ -551,11 +568,11 @@ public final class ParseUtils {
      * @param filterByBackendRole A boolean indicating whether to filter by backend role. If true, the user's backend roles will be checked to ensure they have access to the config.
      * @param configTypeClass The class of the ConfigType, used by the ConfigFactory to parse the correct type of Config.
      */
-    public static <ConfigType extends Config> void onGetConfigResponse(
+    public static <ConfigType extends Config, GetConfigResponseType extends ActionResponse> void onGetConfigResponse(
         GetResponse response,
         User requestUser,
         String configId,
-        ActionListener<GetAnomalyDetectorResponse> listener,
+        ActionListener<GetConfigResponseType> listener,
         Consumer<ConfigType> function,
         NamedXContentRegistry xContentRegistry,
         boolean filterByBackendRole,
@@ -596,7 +613,7 @@ public final class ParseUtils {
         return user.getRoles().contains("all_access");
     }
 
-    private static boolean checkUserPermissions(User requestedUser, User resourceUser, String detectorId) throws Exception {
+    private static boolean checkUserPermissions(User requestedUser, User resourceUser, String configId) throws Exception {
         if (resourceUser.getBackendRoles() == null || requestedUser.getBackendRoles() == null) {
             return false;
         }
@@ -609,8 +626,8 @@ public final class ParseUtils {
                             + requestedUser.getName()
                             + " has backend role: "
                             + backendRole
-                            + " permissions to access detector: "
-                            + detectorId
+                            + " permissions to access config: "
+                            + configId
                     );
                 return true;
             }
@@ -651,7 +668,7 @@ public final class ParseUtils {
     /**
      * Generate batch query request for feature aggregation on given date range.
      *
-     * @param detector anomaly detector
+     * @param config config accessor
      * @param entity entity
      * @param startTime start time
      * @param endTime end time
@@ -661,46 +678,46 @@ public final class ParseUtils {
      * @throws TimeSeriesException throw AD exception if no enabled feature
      */
     public static SearchSourceBuilder batchFeatureQuery(
-        AnomalyDetector detector,
+        Config config,
         Entity entity,
         long startTime,
         long endTime,
         NamedXContentRegistry xContentRegistry
     ) throws IOException {
-        RangeQueryBuilder rangeQuery = new RangeQueryBuilder(detector.getTimeField())
+        RangeQueryBuilder rangeQuery = new RangeQueryBuilder(config.getTimeField())
             .from(startTime)
             .to(endTime)
             .format(EPOCH_MILLIS_FORMAT)
             .includeLower(true)
             .includeUpper(false);
 
-        BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery().must(rangeQuery).must(detector.getFilterQuery());
+        BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery().must(rangeQuery).must(config.getFilterQuery());
 
-        if (detector.isHighCardinality() && entity != null && entity.getAttributes().size() > 0) {
+        if (config.isHighCardinality() && entity != null && entity.getAttributes().size() > 0) {
             entity
                 .getAttributes()
                 .entrySet()
                 .forEach(attr -> { internalFilterQuery.filter(new TermQueryBuilder(attr.getKey(), attr.getValue())); });
         }
 
-        long intervalSeconds = ((IntervalTimeConfiguration) detector.getInterval()).toDuration().getSeconds();
+        long intervalSeconds = ((IntervalTimeConfiguration) config.getInterval()).toDuration().getSeconds();
 
         List<CompositeValuesSourceBuilder<?>> sources = new ArrayList<>();
         sources
             .add(
                 new DateHistogramValuesSourceBuilder(CommonName.DATE_HISTOGRAM)
-                    .field(detector.getTimeField())
+                    .field(config.getTimeField())
                     .fixedInterval(DateHistogramInterval.seconds((int) intervalSeconds))
             );
 
         CompositeAggregationBuilder aggregationBuilder = new CompositeAggregationBuilder(CommonName.FEATURE_AGGS, sources)
             .size(MAX_BATCH_TASK_PIECE_SIZE);
 
-        if (detector.getEnabledFeatureIds().size() == 0) {
+        if (config.getEnabledFeatureIds().size() == 0) {
             throw new TimeSeriesException("No enabled feature configured").countedInStats(false);
         }
 
-        for (Feature feature : detector.getFeatureAttributes()) {
+        for (Feature feature : config.getFeatureAttributes()) {
             if (feature.getEnabled()) {
                 AggregatorFactories.Builder internalAgg = parseAggregators(
                     feature.getAggregation().toString(),
@@ -776,9 +793,9 @@ public final class ParseUtils {
         return fieldNames;
     }
 
-    public static List<String> getFeatureFieldNames(AnomalyDetector detector, NamedXContentRegistry xContentRegistry) throws IOException {
+    public static List<String> getFeatureFieldNames(Config config, NamedXContentRegistry xContentRegistry) throws IOException {
         List<String> featureFields = new ArrayList<>();
-        for (Feature feature : detector.getFeatureAttributes()) {
+        for (Feature feature : config.getFeatureAttributes()) {
             featureFields.add(getFieldNamesForFeature(feature, xContentRegistry).get(0));
         }
         return featureFields;

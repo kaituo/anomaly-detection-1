@@ -32,9 +32,7 @@ import org.opensearch.ad.AbstractProfileRunnerTests;
 import org.opensearch.ad.AnomalyDetectorProfileRunner;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.transport.ProfileAction;
-import org.opensearch.ad.transport.ProfileNodeResponse;
-import org.opensearch.ad.transport.ProfileResponse;
+import org.opensearch.ad.transport.ADProfileAction;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.BigArrays;
@@ -43,12 +41,15 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.search.aggregations.InternalAggregation;
 import org.opensearch.search.aggregations.InternalAggregations;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.transport.ProfileNodeResponse;
+import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.timeseries.util.SecurityClientUtil;
+
+import com.carrotsearch.hppc.BitMixer;
 
 /**
  * Run tests in ES package since InternalCardinality has only package private constructors
@@ -71,7 +72,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
         throws IOException {
         detector = TestHelpers
             .randomAnomalyDetectorWithInterval(new IntervalTimeConfiguration(detectorIntervalMin, ChronoUnit.MINUTES), true);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));
@@ -169,7 +170,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
                         for (int i = 0; i < 100; i++) {
                             hyperLogLog.collect(0, BitMixer.mix64(randomIntBetween(1, 100)));
                         }
-                        aggs.add(new InternalCardinality(ADCommonName.TOTAL_ENTITIES, hyperLogLog, new HashMap<>()));
+                        aggs.add(new InternalCardinality(CommonName.TOTAL_ENTITIES, hyperLogLog, new HashMap<>()));
                         when(response.getAggregations()).thenReturn(InternalAggregations.from(aggs));
                         listener.onResponse(response);
                         break;
@@ -204,7 +205,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
             listener.onResponse(new ProfileResponse(new ClusterName(clusterName), profileNodeResponses, Collections.emptyList()));
 
             return null;
-        }).when(client).execute(eq(ProfileAction.INSTANCE), any(), any());
+        }).when(client).execute(eq(ADProfileAction.INSTANCE), any(), any());
     }
 
     public void testFailGetEntityStats() throws IOException, InterruptedException {

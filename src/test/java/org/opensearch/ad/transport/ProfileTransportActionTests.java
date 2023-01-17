@@ -29,35 +29,37 @@ import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager;
-import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.ModelProfile;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.ModelProfile;
+import org.opensearch.timeseries.model.ProfileName;
+import org.opensearch.timeseries.transport.ProfileNodeRequest;
+import org.opensearch.timeseries.transport.ProfileNodeResponse;
+import org.opensearch.timeseries.transport.ProfileRequest;
+import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.transport.TransportService;
 
 public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
-    private ProfileTransportAction action;
+    private ADProfileTransportAction action;
     private String detectorId = "Pl536HEBnXkDrah03glg";
     String node1, nodeName1;
     DiscoveryNode discoveryNode1;
-    Set<DetectorProfileName> profilesToRetrieve = new HashSet<DetectorProfileName>();
+    Set<ProfileName> profilesToRetrieve = new HashSet<ProfileName>();
     private int shingleSize = 6;
     private long modelSize = 4456448L;
     private String modelId = "Pl536HEBnXkDrah03glg_model_rcf_1";
-    private CacheProvider cacheProvider;
+    private HCCacheProvider cacheProvider;
     private int activeEntities = 10;
     private long totalUpdates = 127;
     private long multiEntityModelSize = 712480L;
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private FeatureManager featureManager;
 
     @Override
@@ -65,13 +67,13 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     public void setUp() throws Exception {
         super.setUp();
 
-        modelManager = mock(ModelManager.class);
+        modelManager = mock(ADModelManager.class);
         featureManager = mock(FeatureManager.class);
 
         when(featureManager.getShingleSize(any(String.class))).thenReturn(shingleSize);
 
         EntityCache cache = mock(EntityCache.class);
-        cacheProvider = mock(CacheProvider.class);
+        cacheProvider = mock(HCCacheProvider.class);
         when(cacheProvider.get()).thenReturn(cache);
         when(cache.getActiveEntities(anyString())).thenReturn(activeEntities);
         when(cache.getTotalUpdates(anyString())).thenReturn(totalUpdates);
@@ -98,7 +100,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
 
         Settings settings = Settings.builder().put("plugins.anomaly_detection.max_model_size_per_node", 100).build();
 
-        action = new ProfileTransportAction(
+        action = new ADProfileTransportAction(
             client().threadPool(),
             clusterService(),
             mock(TransportService.class),
@@ -109,8 +111,8 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
             settings
         );
 
-        profilesToRetrieve = new HashSet<DetectorProfileName>();
-        profilesToRetrieve.add(DetectorProfileName.COORDINATING_NODE);
+        profilesToRetrieve = new HashSet<ProfileName>();
+        profilesToRetrieve.add(ProfileName.COORDINATING_NODE);
     }
 
     private void setUpModelSize(int maxModel) {
@@ -145,7 +147,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         ProfileNodeRequest profileNodeRequest1 = new ProfileNodeRequest(profileRequest);
         ProfileNodeRequest profileNodeRequest2 = action.newNodeRequest(profileRequest);
 
-        assertEquals(profileNodeRequest1.getId(), profileNodeRequest2.getId());
+        assertEquals(profileNodeRequest1.getConfigId(), profileNodeRequest2.getConfigId());
         assertEquals(profileNodeRequest2.getProfilesToBeRetrieved(), profileNodeRequest2.getProfilesToBeRetrieved());
     }
 
@@ -160,8 +162,8 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         assertEquals(shingleSize, response.getShingleSize());
         assertEquals(null, response.getModelSize());
 
-        profilesToRetrieve = new HashSet<DetectorProfileName>();
-        profilesToRetrieve.add(DetectorProfileName.TOTAL_SIZE_IN_BYTES);
+        profilesToRetrieve = new HashSet<ProfileName>();
+        profilesToRetrieve.add(ProfileName.TOTAL_SIZE_IN_BYTES);
 
         profileRequest = new ProfileRequest(detectorId, profilesToRetrieve, false, nodeId);
         response = action.nodeOperation(new ProfileNodeRequest(profileRequest));
@@ -175,8 +177,8 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     public void testMultiEntityNodeOperation() {
         setUpModelSize(100);
         DiscoveryNode nodeId = clusterService().localNode();
-        profilesToRetrieve = new HashSet<DetectorProfileName>();
-        profilesToRetrieve.add(DetectorProfileName.ACTIVE_ENTITIES);
+        profilesToRetrieve = new HashSet<ProfileName>();
+        profilesToRetrieve.add(ProfileName.ACTIVE_ENTITIES);
         ProfileRequest profileRequest = new ProfileRequest(detectorId, profilesToRetrieve, true, nodeId);
 
         ProfileNodeResponse response = action.nodeOperation(new ProfileNodeRequest(profileRequest));
@@ -184,7 +186,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         assertEquals(activeEntities, response.getActiveEntities());
         assertEquals(null, response.getModelSize());
 
-        profilesToRetrieve.add(DetectorProfileName.INIT_PROGRESS);
+        profilesToRetrieve.add(ProfileName.INIT_PROGRESS);
 
         profileRequest = new ProfileRequest(detectorId, profilesToRetrieve, true, nodeId);
         response = action.nodeOperation(new ProfileNodeRequest(profileRequest));
@@ -193,7 +195,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         assertEquals(null, response.getModelSize());
         assertEquals(totalUpdates, response.getTotalUpdates());
 
-        profilesToRetrieve.add(DetectorProfileName.MODELS);
+        profilesToRetrieve.add(ProfileName.MODELS);
         profileRequest = new ProfileRequest(detectorId, profilesToRetrieve, true, nodeId);
         response = action.nodeOperation(new ProfileNodeRequest(profileRequest));
 
@@ -210,7 +212,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
 
         Settings settings = Settings.builder().put("plugins.anomaly_detection.max_model_size_per_node", 1).build();
 
-        action = new ProfileTransportAction(
+        action = new ADProfileTransportAction(
             client().threadPool(),
             clusterService(),
             mock(TransportService.class),
@@ -222,8 +224,8 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         );
 
         DiscoveryNode nodeId = clusterService().localNode();
-        profilesToRetrieve = new HashSet<DetectorProfileName>();
-        profilesToRetrieve.add(DetectorProfileName.MODELS);
+        profilesToRetrieve = new HashSet<ProfileName>();
+        profilesToRetrieve.add(ProfileName.MODELS);
         ProfileRequest profileRequest = new ProfileRequest(detectorId, profilesToRetrieve, true, nodeId);
         ProfileNodeResponse response = action.nodeOperation(new ProfileNodeRequest(profileRequest));
         assertEquals(2, response.getModelCount());

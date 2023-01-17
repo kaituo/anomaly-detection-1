@@ -22,8 +22,8 @@ import java.util.Map.Entry;
 import java.util.Optional;
 
 import org.mockito.ArgumentCaptor;
-import org.opensearch.ad.ratelimit.CheckpointMaintainRequest;
-import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.ad.ADMemoryTracker;
+import org.opensearch.timeseries.ratelimit.ModelRequest;
 
 import test.org.opensearch.ad.util.MLUtil;
 import test.org.opensearch.ad.util.RandomModelStateConfig;
@@ -69,21 +69,21 @@ public class CacheBufferTests extends AbstractCacheTest {
         cacheBuffer.put(modelId2, modelState2);
         cacheBuffer.put(modelId2, modelState2);
         cacheBuffer.put(modelId4, modelState4);
-        assertTrue(cacheBuffer.getModel(modelId2).isPresent());
+        assertTrue(cacheBuffer.getModelState(modelId2).isPresent());
 
         ArgumentCaptor<Long> memoryReleased = ArgumentCaptor.forClass(Long.class);
         ArgumentCaptor<Boolean> reserved = ArgumentCaptor.forClass(Boolean.class);
-        ArgumentCaptor<MemoryTracker.Origin> orign = ArgumentCaptor.forClass(MemoryTracker.Origin.class);
+        ArgumentCaptor<ADMemoryTracker.Origin> orign = ArgumentCaptor.forClass(ADMemoryTracker.Origin.class);
         cacheBuffer.clear();
         verify(memoryTracker, times(2)).releaseMemory(memoryReleased.capture(), reserved.capture(), orign.capture());
 
         List<Long> capturedMemoryReleased = memoryReleased.getAllValues();
         List<Boolean> capturedreserved = reserved.getAllValues();
-        List<MemoryTracker.Origin> capturedOrigin = orign.getAllValues();
+        List<ADMemoryTracker.Origin> capturedOrigin = orign.getAllValues();
         assertEquals(3 * memoryPerEntity, capturedMemoryReleased.stream().reduce(0L, (a, b) -> a + b).intValue());
         assertTrue(capturedreserved.get(0));
         assertTrue(!capturedreserved.get(1));
-        assertEquals(MemoryTracker.Origin.REAL_TIME_DETECTOR, capturedOrigin.get(0));
+        assertEquals(ADMemoryTracker.Origin.HC_DETECTOR, capturedOrigin.get(0));
 
         assertTrue(!cacheBuffer.expired(Duration.ofHours(1)));
     }
@@ -117,7 +117,7 @@ public class CacheBufferTests extends AbstractCacheTest {
         cacheBuffer.put(modelId3, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
         cacheBuffer.maintenance();
         assertEquals(3, cacheBuffer.getActiveEntities());
-        assertEquals(3, cacheBuffer.getAllModels().size());
+        assertEquals(3, cacheBuffer.getAllModelStates().size());
         // the year of 2122, 100 years later to simulate we are gonna remove all cached entries
         when(clock.instant()).thenReturn(Instant.ofEpochSecond(4814540761L));
         cacheBuffer.maintenance();
@@ -138,7 +138,7 @@ public class CacheBufferTests extends AbstractCacheTest {
         cacheBuffer.put(modelId2, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
         cacheBuffer.put(modelId3, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
 
-        ArgumentCaptor<List<CheckpointMaintainRequest>> savedStates = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<ModelRequest>> savedStates = ArgumentCaptor.forClass(List.class);
         cacheBuffer.maintenance();
         verify(checkpointMaintainQueue, times(1)).putAll(savedStates.capture());
         assertTrue(savedStates.getValue().isEmpty());
@@ -162,12 +162,12 @@ public class CacheBufferTests extends AbstractCacheTest {
         cacheBuffer.put(modelId2, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
         cacheBuffer.put(modelId3, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
 
-        ArgumentCaptor<List<CheckpointMaintainRequest>> savedStates = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<List<ModelRequest>> savedStates = ArgumentCaptor.forClass(List.class);
         cacheBuffer.maintenance();
         verify(checkpointMaintainQueue, times(1)).putAll(savedStates.capture());
-        List<CheckpointMaintainRequest> toSave = savedStates.getValue();
+        List<ModelRequest> toSave = savedStates.getValue();
         assertEquals(1, toSave.size());
-        assertEquals(modelId1, toSave.get(0).getEntityModelId());
+        assertEquals(modelId1, toSave.get(0).getModelId());
     }
 
     /**

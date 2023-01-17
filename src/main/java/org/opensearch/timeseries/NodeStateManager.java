@@ -206,9 +206,9 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
             ) {
                 XContentParserUtils.ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                 Config config = null;
-                if (analysisType == AnalysisType.AD) {
+                if (analysisType.isAD()) {
                     config = AnomalyDetector.parse(parser, response.getId(), response.getVersion());
-                } else if (analysisType == AnalysisType.FORECAST) {
+                } else if (analysisType.isForecast()) {
                     config = Forecaster.parse(parser, response.getId(), response.getVersion());
                 } else {
                     throw new UnsupportedOperationException("This method is not supported");
@@ -232,7 +232,7 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
             listener.onResponse(Optional.of(state.getConfigDef()));
         } else {
             GetRequest request = new GetRequest(CommonName.CONFIG_INDEX, configID);
-            BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser = context == AnalysisType.AD
+            BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser = context.isAD()
                 ? AnomalyDetector::parse
                 : Forecaster::parse;
             clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetConfigResponse(configID, configParser, listener));

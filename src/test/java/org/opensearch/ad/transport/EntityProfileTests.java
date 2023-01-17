@@ -31,15 +31,8 @@ import org.junit.BeforeClass;
 import org.opensearch.Version;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.cluster.HashRing;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.constant.ADCommonMessages;
-import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.model.EntityProfileName;
-import org.opensearch.ad.model.ModelProfile;
-import org.opensearch.ad.model.ModelProfileOnNode;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -50,9 +43,16 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.EntityProfileName;
+import org.opensearch.timeseries.model.ModelProfile;
+import org.opensearch.timeseries.model.ModelProfileOnNode;
+import org.opensearch.timeseries.transport.EntityProfileRequest;
+import org.opensearch.timeseries.transport.EntityProfileResponse;
 import org.opensearch.transport.ConnectTransportException;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportException;
@@ -77,8 +77,8 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
     private TransportService transportService;
     private Settings settings;
     private ClusterService clusterService;
-    private CacheProvider cacheProvider;
-    private EntityProfileTransportAction action;
+    private EntityCacheProvider cacheProvider;
+    private ADEntityProfileTransportAction action;
     private Task task;
     private PlainActionFuture<EntityProfileResponse> future;
     private TransportAddress transportAddress1;
@@ -133,18 +133,18 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
 
         clusterService = mock(ClusterService.class);
 
-        cacheProvider = mock(CacheProvider.class);
+        cacheProvider = mock(EntityCacheProvider.class);
         EntityCache cache = mock(EntityCache.class);
         updates = 1L;
         when(cache.getTotalUpdates(anyString(), anyString())).thenReturn(updates);
         when(cache.isActive(anyString(), anyString())).thenReturn(isActive);
-        when(cache.getLastActiveMs(anyString(), anyString())).thenReturn(lastActiveTimestamp);
+        when(cache.getLastActiveTime(anyString(), anyString())).thenReturn(lastActiveTimestamp);
         Map<String, Long> modelSizeMap = new HashMap<>();
         modelSizeMap.put(modelId, modelSize);
         when(cache.getModelSize(anyString())).thenReturn(modelSizeMap);
         when(cacheProvider.get()).thenReturn(cache);
 
-        action = new EntityProfileTransportAction(actionFilters, transportService, settings, hashRing, clusterService, cacheProvider);
+        action = new ADEntityProfileTransportAction(actionFilters, transportService, settings, hashRing, clusterService, cacheProvider);
 
         future = new PlainActionFuture<>();
         transportAddress1 = new TransportAddress(new InetSocketAddress(InetAddress.getByName("1.2.3.4"), 9300));
@@ -165,7 +165,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
                         TransportRequestOptions options,
                         TransportResponseHandler<T> handler
                     ) {
-                        if (EntityProfileAction.NAME.equals(action)) {
+                        if (ADEntityProfileAction.NAME.equals(action)) {
                             sender.sendRequest(connection, action, request, options, entityProfileHandler(handler));
                         } else {
                             sender.sendRequest(connection, action, request, options, handler);
@@ -187,7 +187,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
                         TransportRequestOptions options,
                         TransportResponseHandler<T> handler
                     ) {
-                        if (EntityProfileAction.NAME.equals(action)) {
+                        if (ADEntityProfileAction.NAME.equals(action)) {
                             sender.sendRequest(connection, action, request, options, entityFailureProfileandler(handler));
                         } else {
                             sender.sendRequest(connection, action, request, options, handler);
@@ -236,7 +236,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
                     .handleException(
                         new ConnectTransportException(
                             new DiscoveryNode(nodeId, transportAddress1, Version.CURRENT.minimumCompatibilityVersion()),
-                            EntityProfileAction.NAME
+                            ADEntityProfileAction.NAME
                         )
                     );
             }
@@ -254,7 +254,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
     }
 
     private void registerHandler(FakeNode node) {
-        new EntityProfileTransportAction(
+        new ADEntityProfileTransportAction(
             new ActionFilters(Collections.emptySet()),
             node.transportService,
             Settings.EMPTY,
@@ -265,15 +265,15 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
     }
 
     public void testInvalidRequest() {
-        when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(anyString())).thenReturn(Optional.empty());
+        when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(anyString())).thenReturn(Optional.empty());
         action.doExecute(task, request, future);
 
-        assertException(future, TimeSeriesException.class, EntityProfileTransportAction.NO_NODE_FOUND_MSG);
+        assertException(future, TimeSeriesException.class, ADEntityProfileTransportAction.NO_NODE_FOUND_MSG);
     }
 
     public void testLocalNodeHit() {
         DiscoveryNode localNode = new DiscoveryNode(nodeId, transportAddress1, Version.CURRENT.minimumCompatibilityVersion());
-        when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(anyString())).thenReturn(Optional.of(localNode));
+        when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(anyString())).thenReturn(Optional.of(localNode));
         when(clusterService.localNode()).thenReturn(localNode);
 
         action.doExecute(task, request, future);
@@ -283,7 +283,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
 
     public void testAllHit() {
         DiscoveryNode localNode = new DiscoveryNode(nodeId, transportAddress1, Version.CURRENT.minimumCompatibilityVersion());
-        when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(anyString())).thenReturn(Optional.of(localNode));
+        when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(anyString())).thenReturn(Optional.of(localNode));
         when(clusterService.localNode()).thenReturn(localNode);
 
         request = new EntityProfileRequest(detectorId, entity, all);
@@ -300,7 +300,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
             TransportService realTransportService = testNodes[0].transportService;
             clusterService = testNodes[0].clusterService;
 
-            action = new EntityProfileTransportAction(
+            action = new ADEntityProfileTransportAction(
                 actionFilters,
                 realTransportService,
                 settings,
@@ -309,7 +309,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
                 cacheProvider
             );
 
-            when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class)))
+            when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class)))
                 .thenReturn(Optional.of(testNodes[1].discoveryNode()));
             registerHandler(testNodes[1]);
 
@@ -330,7 +330,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
             TransportService realTransportService = testNodes[0].transportService;
             clusterService = testNodes[0].clusterService;
 
-            action = new EntityProfileTransportAction(
+            action = new ADEntityProfileTransportAction(
                 actionFilters,
                 realTransportService,
                 settings,
@@ -339,7 +339,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
                 cacheProvider
             );
 
-            when(hashRing.getOwningNodeWithSameLocalAdVersionForRealtimeAD(any(String.class)))
+            when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class)))
                 .thenReturn(Optional.of(testNodes[1].discoveryNode()));
             registerHandler(testNodes[1]);
 
@@ -359,7 +359,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
         EntityProfileResponse response = builder.build();
         String json = TestHelpers.xContentBuilderToString(response.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
         assertEquals(lastActiveTimestamp, JsonDeserializer.getLongValue(json, EntityProfileResponse.LAST_ACTIVE_TS));
-        assertEquals(modelSize, JsonDeserializer.getChildNode(json, ADCommonName.MODEL, CommonName.MODEL_SIZE_IN_BYTES).getAsLong());
+        assertEquals(modelSize, JsonDeserializer.getChildNode(json, CommonName.MODEL, CommonName.MODEL_SIZE_IN_BYTES).getAsLong());
     }
 
     public void testResponseHashCodeEquals() {
@@ -376,8 +376,8 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
     }
 
     public void testEntityProfileName() {
-        assertEquals("state", EntityProfileName.getName(ADCommonName.STATE).getName());
-        assertEquals("models", EntityProfileName.getName(ADCommonName.MODELS).getName());
+        assertEquals("state", EntityProfileName.getName(CommonName.STATE).getName());
+        assertEquals("models", EntityProfileName.getName(CommonName.MODELS).getName());
         IllegalArgumentException exception = expectThrows(IllegalArgumentException.class, () -> EntityProfileName.getName("abc"));
         assertEquals(exception.getMessage(), ADCommonMessages.UNSUPPORTED_PROFILE_TYPE);
     }

@@ -28,7 +28,6 @@ import org.opensearch.monitor.jvm.JvmInfo;
 import org.opensearch.monitor.jvm.JvmInfo.Mem;
 import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.test.OpenSearchTestCase;
-import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
@@ -46,7 +45,7 @@ public class MemoryTrackerTests extends OpenSearchTestCase {
     int numMinSamples;
     int shingleSize;
     int dimension;
-    MemoryTracker tracker;
+    ADMemoryTracker tracker;
     long expectedRCFModelSize;
     String detectorId;
     long largeHeapSize;
@@ -127,13 +126,13 @@ public class MemoryTrackerTests extends OpenSearchTestCase {
     private void setUpBigHeap() {
         ByteSizeValue value = new ByteSizeValue(largeHeapSize);
         when(mem.getHeapMax()).thenReturn(value);
-        tracker = new MemoryTracker(jvmService, modelMaxSizePercentage, clusterService, circuitBreaker);
+        tracker = new ADMemoryTracker(jvmService, modelMaxSizePercentage, modelDesiredSizePercentage, clusterService, circuitBreaker);
     }
 
     private void setUpSmallHeap() {
         ByteSizeValue value = new ByteSizeValue(smallHeapSize);
         when(mem.getHeapMax()).thenReturn(value);
-        tracker = new MemoryTracker(jvmService, modelMaxSizePercentage, clusterService, circuitBreaker);
+        tracker = new ADMemoryTracker(jvmService, modelMaxSizePercentage, modelDesiredSizePercentage, clusterService, circuitBreaker);
     }
 
     public void testEstimateModelSize() {
@@ -333,10 +332,10 @@ public class MemoryTrackerTests extends OpenSearchTestCase {
         assertTrue(!tracker.canAllocate((long) (largeHeapSize * modelMaxPercen + 10)));
 
         long bytesToUse = 100_000;
-        tracker.consumeMemory(bytesToUse, false, MemoryTracker.Origin.REAL_TIME_DETECTOR);
+        tracker.consumeMemory(bytesToUse, false, ADMemoryTracker.Origin.HC_DETECTOR);
         assertTrue(!tracker.canAllocate((long) (largeHeapSize * modelMaxPercen)));
 
-        tracker.releaseMemory(bytesToUse, false, MemoryTracker.Origin.REAL_TIME_DETECTOR);
+        tracker.releaseMemory(bytesToUse, false, ADMemoryTracker.Origin.HC_DETECTOR);
         assertTrue(tracker.canAllocate((long) (largeHeapSize * modelMaxPercen)));
     }
 
@@ -349,11 +348,12 @@ public class MemoryTrackerTests extends OpenSearchTestCase {
         setUpSmallHeap();
         long bytesToUse = 100_000;
         assertEquals(bytesToUse, tracker.getHeapLimit());
-        tracker.consumeMemory(bytesToUse, false, MemoryTracker.Origin.REAL_TIME_DETECTOR);
-        tracker.consumeMemory(bytesToUse, true, MemoryTracker.Origin.REAL_TIME_DETECTOR);
+        assertEquals((long) (smallHeapSize * modelDesiredSizePercentage), tracker.getDesiredModelSize());
+        tracker.consumeMemory(bytesToUse, false, ADMemoryTracker.Origin.HC_DETECTOR);
+        tracker.consumeMemory(bytesToUse, true, ADMemoryTracker.Origin.HC_DETECTOR);
         assertEquals(2 * bytesToUse, tracker.getTotalMemoryBytes());
 
         assertEquals(bytesToUse, tracker.memoryToShed());
-        assertTrue(!tracker.syncMemoryState(MemoryTracker.Origin.REAL_TIME_DETECTOR, 2 * bytesToUse, bytesToUse));
+        assertTrue(!tracker.syncMemoryState(ADMemoryTracker.Origin.HC_DETECTOR, 2 * bytesToUse, bytesToUse));
     }
 }

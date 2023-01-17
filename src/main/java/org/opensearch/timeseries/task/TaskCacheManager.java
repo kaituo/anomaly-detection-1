@@ -15,9 +15,14 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.core.action.ActionListener;
+import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.timeseries.model.TaskState;
+import org.opensearch.transport.TransportService;
 
 public class TaskCacheManager {
     private final Logger logger = LogManager.getLogger(TaskCacheManager.class);
@@ -39,7 +44,11 @@ public class TaskCacheManager {
     protected volatile Integer maxCachedDeletedTask;
     /**
      * This field is to cache deleted detector IDs. Hourly cron will poll this queue
+    <<<<<<< HEAD
      * and clean AD results. Check ADTaskManager#cleanResultOfDeletedConfig()
+    =======
+     * and clean AD results. Check {@link ADTaskManager#cleanResultOfDeletedConfig()}
+    >>>>>>> e8e86a3d (test)
      * <p>Node: any data node servers delete detector request</p>
      */
     protected Queue<String> deletedConfigs;
@@ -62,7 +71,11 @@ public class TaskCacheManager {
     }
 
     /**
+    <<<<<<< HEAD
      * Add deleted task's id to deleted tasks queue.
+    =======
+     * Add deleted task's id to deleted detector tasks queue.
+    >>>>>>> e8e86a3d (test)
      * @param taskId task id
      */
     public void addDeletedTask(String taskId) {
@@ -73,14 +86,22 @@ public class TaskCacheManager {
 
     /**
      * Check if deleted task queue has items.
+    <<<<<<< HEAD
      * @return true if has deleted task in cache
+    =======
+     * @return true if has deleted detector task in cache
+    >>>>>>> e8e86a3d (test)
      */
     public boolean hasDeletedTask() {
         return !deletedTasks.isEmpty();
     }
 
     /**
+    <<<<<<< HEAD
      * Poll one deleted task.
+    =======
+     * Poll one deleted forecaster task.
+    >>>>>>> e8e86a3d (test)
      * @return task id
      */
     public String pollDeletedTask() {
@@ -146,8 +167,13 @@ public class TaskCacheManager {
      *
      * If realtime task cache doesn't exist, will do nothing. Next realtime job run will re-init
      * realtime task cache when it finds task cache not inited yet.
+    <<<<<<< HEAD
      * Check ADTaskManager#initCacheWithCleanupIfRequired(String, AnomalyDetector, TransportService, ActionListener),
      * ADTaskManager#updateLatestRealtimeTaskOnCoordinatingNode(String, String, Long, Long, String, ActionListener)
+    =======
+     * Check {@link ADTaskManager#initCacheWithCleanupIfRequired(String, AnomalyDetector, TransportService, ActionListener)},
+     * {@link ADTaskManager#updateLatestRealtimeTaskOnCoordinatingNode(String, String, Long, Long, String, ActionListener)}
+    >>>>>>> e8e86a3d (test)
      *
      * @param detectorId detector id
      * @param newState new task state

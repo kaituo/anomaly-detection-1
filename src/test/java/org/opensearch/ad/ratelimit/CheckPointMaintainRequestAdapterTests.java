@@ -27,37 +27,40 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.action.update.UpdateRequest;
-import org.opensearch.ad.caching.CacheProvider;
 import org.opensearch.ad.caching.EntityCache;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelState;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.caching.HCCacheProvider;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
+import org.opensearch.timeseries.ratelimit.CheckPointMaintainRequestAdapter;
+import org.opensearch.timeseries.ratelimit.CheckpointWriteRequest;
+import org.opensearch.timeseries.ratelimit.ModelRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 
 import test.org.opensearch.ad.util.MLUtil;
 import test.org.opensearch.ad.util.RandomModelStateConfig;
 
 public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingTest {
-    private CacheProvider cache;
-    private CheckpointDao checkpointDao;
+    private HCCacheProvider cache;
+    private ADCheckpointDao checkpointDao;
     private String indexName;
     private Setting<TimeValue> checkpointInterval;
     private CheckPointMaintainRequestAdapter adapter;
-    private ModelState<EntityModel> state;
-    private CheckpointMaintainRequest request;
+    private ADModelState<createFromValueOnlySamples> state;
+    private ModelRequest request;
     private ClusterService clusterService;
 
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        cache = mock(CacheProvider.class);
-        checkpointDao = mock(CheckpointDao.class);
+        cache = mock(HCCacheProvider.class);
+        checkpointDao = mock(ADCheckpointDao.class);
         indexName = ADCommonName.CHECKPOINT_INDEX_NAME;
         checkpointInterval = AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ;
         EntityCache entityCache = mock(EntityCache.class);
@@ -79,7 +82,7 @@ public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingT
             clusterService,
             Settings.EMPTY
         );
-        request = new CheckpointMaintainRequest(Integer.MAX_VALUE, detectorId, RequestPriority.MEDIUM, entity.getModelId(detectorId).get());
+        request = new ModelRequest(Integer.MAX_VALUE, detectorId, RequestPriority.MEDIUM, entity.getModelId(detectorId).get());
 
     }
 
@@ -105,7 +108,7 @@ public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingT
         Map<String, Object> content = new HashMap<String, Object>();
         content.put("a", "b");
         when(checkpointDao.toIndexSource(any())).thenReturn(content);
-        assertTrue(adapter.convert(new CheckpointMaintainRequest(Integer.MAX_VALUE, detectorId, RequestPriority.MEDIUM, null)).isEmpty());
+        assertTrue(adapter.convert(new ModelRequest(Integer.MAX_VALUE, detectorId, RequestPriority.MEDIUM, null)).isEmpty());
     }
 
     public void testNormal() throws IOException {

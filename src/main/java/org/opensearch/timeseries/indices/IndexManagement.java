@@ -159,7 +159,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         this.threadPool = threadPool;
         this.clusterService.addLocalNodeClusterManagerListener(this);
         this.nodeFilter = nodeFilter;
-        this.settings = Settings.builder().put("index.hidden", true).build();
+        this.settings = Settings.builder().put(IndexMetadata.SETTING_INDEX_HIDDEN, true).build();
         this.maxUpdateRunningTimes = maxUpdateRunningTimes;
         this.indexType = indexType;
         this.maxPrimaryShards = maxPrimaryShards;
@@ -261,7 +261,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
                     .put(IndexMetadata.SETTING_NUMBER_OF_SHARDS, getNumberOfPrimaryShards())
                     // 1 replica for better search performance and fail-over
                     .put(IndexMetadata.SETTING_NUMBER_OF_REPLICAS, 1)
-                    .put("index.hidden", hiddenIndex)
+                    .put(IndexMetadata.SETTING_INDEX_HIDDEN, hiddenIndex)
             );
     }
 
@@ -501,7 +501,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
                         // accordingly.
                         // At least 1 replica for fail-over.
                         .put(IndexMetadata.SETTING_AUTO_EXPAND_REPLICAS, minJobIndexReplicas + "-" + maxJobIndexReplicas)
-                        .put("index.hidden", true)
+                        .put(IndexMetadata.SETTING_INDEX_HIDDEN, true)
                 );
             adminClient.indices().create(request, actionListener);
         } catch (IOException e) {

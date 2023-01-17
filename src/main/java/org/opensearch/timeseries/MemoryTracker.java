@@ -313,6 +313,7 @@ public class MemoryTracker {
     }
 
     /**
+    <<<<<<< HEAD
      * Determines if hosting is allowed based on the estimated size of a given ThresholdedRandomCutForest and
      * the available memory resources.
      *
@@ -328,6 +329,13 @@ public class MemoryTracker {
      * <pre>{@code
      * boolean canHost = isHostingAllowed("config123", myTRCF);
      * }</pre>
+    =======
+     * This function derives from the old code: https://tinyurl.com/2eaabja6
+     *
+     * @param configId Config Id
+     * @param trcf Thresholded random cut forest model
+     * @return true if there is enough memory; otherwise throw LimitExceededException.
+    >>>>>>> e8e86a3d (test)
      */
     public synchronized boolean isHostingAllowed(String configId, ThresholdedRandomCutForest trcf) {
         long requiredBytes = estimateTRCFModelSize(trcf);

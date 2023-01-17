@@ -1,12 +1,6 @@
 /*
+ * Copyright OpenSearch Contributors
  * SPDX-License-Identifier: Apache-2.0
- *
- * The OpenSearch Contributors require contributions made to
- * this file be licensed under the Apache-2.0 license or a
- * compatible open source license.
- *
- * Modifications Copyright OpenSearch Contributors. See
- * GitHub history for details.
  */
 
 package org.opensearch.ad.settings;
@@ -34,6 +28,8 @@ public class ADEnabledSetting extends DynamicNumericSetting {
      */
     public static final String AD_ENABLED = "plugins.anomaly_detection.enabled";
 
+    // use TimeSeriesEnabledSetting.BREAKER_ENABLED instread
+    @Deprecated
     public static final String AD_BREAKER_ENABLED = "plugins.anomaly_detection.breaker.enabled";
 
     public static final String LEGACY_OPENDISTRO_AD_ENABLED = "opendistro.anomaly_detection.enabled";
@@ -103,14 +99,6 @@ public class ADEnabledSetting extends DynamicNumericSetting {
      */
     public static boolean isADEnabled() {
         return ADEnabledSetting.getInstance().getSettingValue(ADEnabledSetting.AD_ENABLED);
-    }
-
-    /**
-     * Whether AD circuit breaker is enabled or not.  If disabled, an open circuit breaker wouldn't cause an AD job to be stopped.
-     * @return whether AD circuit breaker is enabled or not.
-     */
-    public static boolean isADBreakerEnabled() {
-        return ADEnabledSetting.getInstance().getSettingValue(ADEnabledSetting.AD_BREAKER_ENABLED);
     }
 
     /**

@@ -115,7 +115,11 @@ public final class AnomalyDetectorSettings {
     /**
      * @deprecated This setting is deprecated because we need to manage fault tolerance for
      * multiple analysis such as AD and forecasting.
+    <<<<<<< HEAD
      * Use TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE instead.
+    =======
+     * Use {@link #TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE} instead.
+    >>>>>>> e8e86a3d (test)
      */
     @Deprecated
     public static final Setting<Integer> AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE = Setting
@@ -130,7 +134,11 @@ public final class AnomalyDetectorSettings {
     /**
      * @deprecated This setting is deprecated because we need to manage fault tolerance for
      * multiple analysis such as AD and forecasting.
+    <<<<<<< HEAD
      * Use TimeSeriesSettings.COOLDOWN_MINUTES instead.
+    =======
+     * Use {@link #TimeSeriesSettings.COOLDOWN_MINUTES} instead.
+    >>>>>>> e8e86a3d (test)
      */
     @Deprecated
     public static final Setting<TimeValue> AD_COOLDOWN_MINUTES = Setting
@@ -144,7 +152,11 @@ public final class AnomalyDetectorSettings {
     /**
      * @deprecated This setting is deprecated because we need to manage fault tolerance for
      * multiple analysis such as AD and forecasting.
+    <<<<<<< HEAD
      * Use TimeSeriesSettings.BACKOFF_MINUTES instead.
+    =======
+     * Use {@link #TimeSeriesSettings.BACKOFF_MINUTES} instead.
+    >>>>>>> e8e86a3d (test)
      */
     @Deprecated
     public static final Setting<TimeValue> AD_BACKOFF_MINUTES = Setting
@@ -237,10 +249,6 @@ public final class AnomalyDetectorSettings {
     public static final int MAX_TRAIN_SAMPLE = 24;
 
     public static final int MAX_SAMPLE_STRIDE = 64;
-
-    public static final int TRAIN_SAMPLE_TIME_RANGE_IN_HOURS = 24;
-
-    public static final int MIN_TRAIN_SAMPLES = 512;
 
     public static final int MAX_IMPUTATION_NEIGHBOR_DISTANCE = 2;
 
@@ -591,37 +599,6 @@ public final class AnomalyDetectorSettings {
             Setting.Property.NodeScope,
             Setting.Property.Dynamic
         );
-
-    /**
-     * EntityRequest has entityName (# category fields * 256, the recommended limit
-     * of a keyword field length), model Id (roughly 256 bytes), and QueuedRequest
-     * fields including detector Id(roughly 128 bytes), expirationEpochMs (long,
-     *  8 bytes), and priority (12 bytes).
-     * Plus Java object size (12 bytes), we have roughly 928 bytes per request
-     * assuming we have 2 categorical fields (plan to support 2 categorical fields now).
-     * We don't want the total size exceeds 0.1% of the heap.
-     * We can have at most 0.1% heap / 928 = heap / 928,000.
-     * For t3.small, 0.1% heap is of 1MB. The queue's size is up to
-     * 10^ 6 / 928 = 1078
-     */
-    // to be replaced by TimeSeriesSettings.FEATURE_REQUEST_SIZE_IN_BYTES
-    @Deprecated
-    public static int ENTITY_REQUEST_SIZE_IN_BYTES = 928;
-
-    /**
-     * EntityFeatureRequest consists of EntityRequest (928 bytes, read comments
-     * of ENTITY_COLD_START_QUEUE_SIZE_CONSTANT), pointer to current feature
-     * (8 bytes), and dataStartTimeMillis (8 bytes).  We have roughly
-     * 928 + 16 = 944 bytes per request.
-     *
-     * We don't want the total size exceeds 0.1% of the heap.
-     * We should have at most 0.1% heap / 944 = heap / 944,000
-     * For t3.small, 0.1% heap is of 1MB. The queue's size is up to
-     * 10^ 6 / 944 = 1059
-     */
-    // to be replaced by TimeSeriesSettings.FEATURE_REQUEST_SIZE_IN_BYTES
-    @Deprecated
-    public static int ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES = 944;
 
     // ======================================
     // pagination setting

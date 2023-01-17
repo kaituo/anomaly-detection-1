@@ -21,7 +21,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
@@ -58,6 +57,7 @@ import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.transport.DeleteConfigRequest;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
 
@@ -126,32 +126,32 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
 
     public void testDeleteADTransportAction_FailDeleteResponse() {
         future = mock(PlainActionFuture.class);
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         setupMocks(true, true, false, false);
 
         action.doExecute(mock(Task.class), request, future);
-        verify(adTaskManager).deleteADTasks(eq("1234"), any(), any());
+        verify(adTaskManager).deleteTasks(eq("1234"), any(), any());
         verify(client, times(1)).delete(any(), any());
         verify(future).onFailure(any(OpenSearchStatusException.class));
     }
 
     public void testDeleteADTransportAction_NullAnomalyDetector() {
         future = mock(PlainActionFuture.class);
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         setupMocks(true, false, false, false);
 
         action.doExecute(mock(Task.class), request, future);
-        verify(adTaskManager).deleteADTasks(eq("1234"), any(), any());
+        verify(adTaskManager).deleteTasks(eq("1234"), any(), any());
         verify(client, times(3)).delete(any(), any());
     }
 
     public void testDeleteADTransportAction_DeleteResponseException() {
         future = mock(PlainActionFuture.class);
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         setupMocks(true, false, true, false);
 
         action.doExecute(mock(Task.class), request, future);
-        verify(adTaskManager).deleteADTasks(eq("1234"), any(), any());
+        verify(adTaskManager).deleteTasks(eq("1234"), any(), any());
         verify(client, times(1)).delete(any(), any());
         verify(future).onFailure(any(RuntimeException.class));
     }
@@ -165,10 +165,10 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
             ADTask adTask = ADTask.builder().state("RUNNING").build();
             consumer.accept(Optional.of(adTask));
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestDetectorLevelTask(eq("1234"), any(), any(), eq(transportService), eq(true), any());
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(eq("1234"), any(), any(), eq(transportService), eq(true), any());
 
         future = mock(PlainActionFuture.class);
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         setupMocks(false, false, false, false);
 
         action.doExecute(mock(Task.class), request, future);
@@ -178,7 +178,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
     public void testDeleteADTransportAction_JobRunning() {
         when(clusterService.state()).thenReturn(createClusterState());
         future = mock(PlainActionFuture.class);
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         setupMocks(false, false, false, false);
 
         action.doExecute(mock(Task.class), request, future);
@@ -188,7 +188,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
     public void testDeleteADTransportAction_GetResponseException() {
         when(clusterService.state()).thenReturn(createClusterState());
         future = mock(PlainActionFuture.class);
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         setupMocks(false, false, false, true);
 
         action.doExecute(mock(Task.class), request, future);
@@ -197,9 +197,9 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
     }
 
     private ClusterState createClusterState() {
-        Map<String, IndexMetadata> immutableOpenMap = new HashMap<>();
-        immutableOpenMap
-            .put(
+        ImmutableOpenMap<String, IndexMetadata> immutableOpenMap = ImmutableOpenMap
+            .<String, IndexMetadata>builder()
+            .fPut(
                 CommonName.JOB_INDEX,
                 IndexMetadata
                     .builder("test")
@@ -252,7 +252,7 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
 
             function.execute();
             return null;
-        }).when(adTaskManager).deleteADTasks(eq("1234"), any(), any());
+        }).when(adTaskManager).deleteTasks(eq("1234"), any(), any());
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
