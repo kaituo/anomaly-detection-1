@@ -29,19 +29,17 @@ import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.ad.AnomalyDetectorPlugin;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.OpenSearchIntegTestCase;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.ModelProfile;
 import org.opensearch.transport.TransportService;
 
 public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
@@ -53,11 +51,11 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     private int shingleSize = 6;
     private long modelSize = 4456448L;
     private String modelId = "Pl536HEBnXkDrah03glg_model_rcf_1";
-    private CacheProvider cacheProvider;
+    private HCCacheProvider cacheProvider;
     private int activeEntities = 10;
     private long totalUpdates = 127;
     private long multiEntityModelSize = 712480L;
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private FeatureManager featureManager;
 
     @Override
@@ -65,13 +63,13 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     public void setUp() throws Exception {
         super.setUp();
 
-        modelManager = mock(ModelManager.class);
+        modelManager = mock(ADModelManager.class);
         featureManager = mock(FeatureManager.class);
 
         when(featureManager.getShingleSize(any(String.class))).thenReturn(shingleSize);
 
         EntityCache cache = mock(EntityCache.class);
-        cacheProvider = mock(CacheProvider.class);
+        cacheProvider = mock(HCCacheProvider.class);
         when(cacheProvider.get()).thenReturn(cache);
         when(cache.getActiveEntities(anyString())).thenReturn(activeEntities);
         when(cache.getTotalUpdates(anyString())).thenReturn(totalUpdates);
@@ -114,13 +112,13 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     }
 
     private void setUpModelSize(int maxModel) {
-        Settings nodeSettings = Settings.builder().put(AnomalyDetectorSettings.MAX_MODEL_SIZE_PER_NODE.getKey(), maxModel).build();
+        Settings nodeSettings = Settings.builder().put(AnomalyDetectorSettings.AD_MAX_MODEL_SIZE_PER_NODE.getKey(), maxModel).build();
         internalCluster().startNode(nodeSettings);
     }
 
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return Arrays.asList(AnomalyDetectorPlugin.class);
+        return Arrays.asList(TimeSeriesAnalyticsPlugin.class);
     }
 
     @Test

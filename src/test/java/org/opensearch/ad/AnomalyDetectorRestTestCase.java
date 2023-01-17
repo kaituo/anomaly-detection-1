@@ -26,7 +26,6 @@ import org.apache.hc.core5.http.message.BasicHeader;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
-import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.client.Request;
 import org.opensearch.client.Response;
 import org.opensearch.client.RestClient;
@@ -45,6 +44,7 @@ import org.opensearch.rest.RestStatus;
 import org.opensearch.test.rest.OpenSearchRestTestCase;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 
 import com.google.common.collect.ImmutableList;
@@ -258,7 +258,7 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
         String id = null;
         Long version = null;
         AnomalyDetector detector = null;
-        AnomalyDetectorJob detectorJob = null;
+        Job detectorJob = null;
         ADTask realtimeAdTask = null;
         ADTask historicalAdTask = null;
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -275,7 +275,7 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
                     detector = AnomalyDetector.parse(parser);
                     break;
                 case "anomaly_detector_job":
-                    detectorJob = AnomalyDetectorJob.parse(parser);
+                    detectorJob = Job.parse(parser);
                     break;
                 case "realtime_detection_task":
                     if (parser.currentToken() != XContentParser.Token.VALUE_NULL) {

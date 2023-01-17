@@ -39,6 +39,7 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.cluster.HourlyCron;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
 import test.org.opensearch.ad.util.ClusterCreation;

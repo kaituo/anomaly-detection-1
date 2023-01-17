@@ -55,7 +55,6 @@ import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
-import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
@@ -168,7 +167,7 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
                     put(ADIndexManagement.META, new HashMap<String, Object>() {
                         {
                             // version 1 will cause update
-                            put(CommonName.SCHEMA_VERSION_FIELD, 1);
+                            put(org.opensearch.timeseries.constant.CommonName.SCHEMA_VERSION_FIELD, 1);
                         }
                     });
                 }

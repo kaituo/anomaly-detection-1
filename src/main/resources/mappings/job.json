@@ -1,0 +1,108 @@
+{
+  "dynamic": false,
+  "_meta": {
+    "schema_version": 4
+  },
+  "properties": {
+    "schema_version": {
+      "type": "integer"
+    },
+    "name": {
+      "type": "keyword"
+    },
+    "schedule": {
+      "properties": {
+        "interval": {
+          "properties": {
+            "start_time": {
+              "type": "date",
+              "format": "strict_date_time||epoch_millis"
+            },
+            "period": {
+              "type": "integer"
+            },
+            "unit": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    },
+    "window_delay": {
+      "properties": {
+        "period": {
+          "properties": {
+            "interval": {
+              "type": "integer"
+            },
+            "unit": {
+              "type": "keyword"
+            }
+          }
+        }
+      }
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "enabled_time": {
+      "type": "date",
+      "format": "strict_date_time||epoch_millis"
+    },
+    "disabled_time": {
+      "type": "date",
+      "format": "strict_date_time||epoch_millis"
+    },
+    "last_update_time": {
+      "type": "date",
+      "format": "strict_date_time||epoch_millis"
+    },
+    "lock_duration_seconds": {
+      "type": "long"
+    },
+    "result_index": {
+      "type": "keyword"
+    },
+    "user": {
+      "type": "nested",
+      "properties": {
+        "name": {
+          "type": "text",
+          "fields": {
+            "keyword": {
+              "type": "keyword",
+              "ignore_above": 256
+            }
+          }
+        },
+        "backend_roles": {
+          "type" : "text",
+          "fields" : {
+            "keyword" : {
+              "type" : "keyword"
+            }
+          }
+        },
+        "roles": {
+          "type" : "text",
+          "fields" : {
+            "keyword" : {
+              "type" : "keyword"
+            }
+          }
+        },
+        "custom_attribute_names": {
+          "type" : "text",
+          "fields" : {
+            "keyword" : {
+              "type" : "keyword"
+            }
+          }
+        }
+      }
+    },
+    "type": {
+      "type": "keyword"
+    }
+  }
+}

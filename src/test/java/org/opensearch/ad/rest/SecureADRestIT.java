@@ -225,7 +225,7 @@ public class SecureADRestIT extends AnomalyDetectorRestTestCase {
         AnomalyDetector aliceDetector = createRandomAnomalyDetector(false, false, aliceClient);
         enableFilterBy();
         confirmingClientIsAdmin();
-        AnomalyDetector detector = getAnomalyDetector(aliceDetector.getId(), client());
+        AnomalyDetector detector = getAnomalyDetector(aliceDetector.getConfigId(), client());
         Assert
             .assertArrayEquals(
                 "User backend role of detector doesn't change",
@@ -240,7 +240,7 @@ public class SecureADRestIT extends AnomalyDetectorRestTestCase {
         enableFilterBy();
 
         AnomalyDetector newDetector = new AnomalyDetector(
-            aliceDetector.getId(),
+            aliceDetector.getConfigId(),
             aliceDetector.getVersion(),
             aliceDetector.getName(),
             randomAlphaOfLength(10),

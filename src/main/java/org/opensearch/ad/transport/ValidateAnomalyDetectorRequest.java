@@ -28,6 +28,9 @@ public class ValidateAnomalyDetectorRequest extends ActionRequest {
     private final Integer maxMultiEntityAnomalyDetectors;
     private final Integer maxAnomalyFeatures;
     private final TimeValue requestTimeout;
+    // added during refactoring for forecasting. It is fine we add a new field
+    // since the request is handled by the same node.
+    private Integer maxCategoricalFields;
 
     public ValidateAnomalyDetectorRequest(StreamInput in) throws IOException {
         super(in);
@@ -37,6 +40,7 @@ public class ValidateAnomalyDetectorRequest extends ActionRequest {
         maxMultiEntityAnomalyDetectors = in.readInt();
         maxAnomalyFeatures = in.readInt();
         requestTimeout = in.readTimeValue();
+        maxCategoricalFields = in.readInt();
     }
 
     public ValidateAnomalyDetectorRequest(
@@ -45,7 +49,8 @@ public class ValidateAnomalyDetectorRequest extends ActionRequest {
         Integer maxSingleEntityAnomalyDetectors,
         Integer maxMultiEntityAnomalyDetectors,
         Integer maxAnomalyFeatures,
-        TimeValue requestTimeout
+        TimeValue requestTimeout,
+        Integer maxCategoricalFields
     ) {
         this.detector = detector;
         this.validationType = validationType;
@@ -53,6 +58,7 @@ public class ValidateAnomalyDetectorRequest extends ActionRequest {
         this.maxMultiEntityAnomalyDetectors = maxMultiEntityAnomalyDetectors;
         this.maxAnomalyFeatures = maxAnomalyFeatures;
         this.requestTimeout = requestTimeout;
+        this.maxCategoricalFields = maxCategoricalFields;
     }
 
     @Override
@@ -64,6 +70,7 @@ public class ValidateAnomalyDetectorRequest extends ActionRequest {
         out.writeInt(maxMultiEntityAnomalyDetectors);
         out.writeInt(maxAnomalyFeatures);
         out.writeTimeValue(requestTimeout);
+        out.writeInt(maxCategoricalFields);
     }
 
     @Override
@@ -93,5 +100,9 @@ public class ValidateAnomalyDetectorRequest extends ActionRequest {
 
     public TimeValue getRequestTimeout() {
         return requestTimeout;
+    }
+
+    public Integer getMaxCategoricalFields() {
+        return maxCategoricalFields;
     }
 }

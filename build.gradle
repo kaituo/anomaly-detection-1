@@ -126,9 +126,12 @@ dependencies {
     implementation group: 'com.yahoo.datasketches', name: 'memory', version: '0.12.2'
     implementation group: 'commons-lang', name: 'commons-lang', version: '2.6'
     implementation group: 'org.apache.commons', name: 'commons-pool2', version: '2.10.0'
-    implementation 'software.amazon.randomcutforest:randomcutforest-serialization:3.0-rc3'
-    implementation 'software.amazon.randomcutforest:randomcutforest-parkservices:3.0-rc3'
-    implementation 'software.amazon.randomcutforest:randomcutforest-core:3.0-rc3'
+    implementation 'software.amazon.randomcutforest:randomcutforest-serialization:3.7.0'
+    implementation 'software.amazon.randomcutforest:randomcutforest-parkservices:3.7.0'
+    implementation 'software.amazon.randomcutforest:randomcutforest-core:3.7.0'
+    //implementation files('lib/randomcutforest-core-3.5.0.jar')
+    //implementation files('lib/randomcutforest-serialization-3.5.0.jar')
+    //implementation files('lib/randomcutforest-parkservices-3.5.0.jar')
 
     // we inherit jackson-core from opensearch core
     implementation "com.fasterxml.jackson.core:jackson-databind:2.14.1"
@@ -201,7 +204,7 @@ ext {
 opensearchplugin {
     name 'opensearch-anomaly-detection'
     description 'OpenSearch anomaly detector plugin'
-    classname 'org.opensearch.ad.AnomalyDetectorPlugin'
+    classname 'org.opensearch.timeseries.TimeSeriesAnalyticsPlugin'
     extendedPlugins = ['lang-painless', 'opensearch-job-scheduler']
 }
 
@@ -654,7 +657,7 @@ task release(type: Copy, group: 'build') {
 
 List<String> jacocoExclusions = [
         // code for configuration, settings, etc is excluded from coverage
-        'org.opensearch.ad.AnomalyDetectorPlugin',
+        'org.opensearch.timeseries.TimeSeriesAnalyticsPlugin',
 
         // rest layer is tested in integration testing mostly, difficult to mock all of it
         'org.opensearch.ad.rest.*',

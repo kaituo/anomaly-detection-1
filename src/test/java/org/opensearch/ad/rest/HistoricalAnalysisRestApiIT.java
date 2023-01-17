@@ -17,8 +17,8 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_RUNNING_ENT
 import static org.opensearch.timeseries.TestHelpers.AD_BASE_STATS_URI;
 import static org.opensearch.timeseries.TestHelpers.HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS;
 import static org.opensearch.timeseries.stats.StatNames.AD_TOTAL_BATCH_TASK_EXECUTION_COUNT;
-import static org.opensearch.timeseries.stats.StatNames.MULTI_ENTITY_DETECTOR_COUNT;
-import static org.opensearch.timeseries.stats.StatNames.SINGLE_ENTITY_DETECTOR_COUNT;
+import static org.opensearch.timeseries.stats.StatNames.HC_DETECTOR_COUNT;
+import static org.opensearch.timeseries.stats.StatNames.SINGLE_STREAM_DETECTOR_COUNT;
 
 import java.io.IOException;
 import java.util.List;
@@ -34,14 +34,14 @@ import org.opensearch.ad.HistoricalAnalysisRestTestCase;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskProfile;
-import org.opensearch.ad.model.ADTaskState;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.client.Response;
 import org.opensearch.client.ResponseException;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.model.TaskState;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -118,8 +118,8 @@ public class HistoricalAnalysisRestApiIT extends HistoricalAnalysisRestTestCase 
         // get task profile
         ADTaskProfile adTaskProfile = waitUntilGetTaskProfile(detectorId);
         if (categoryFieldSize > 0) {
-            if (!ADTaskState.RUNNING.name().equals(adTaskProfile.getAdTask().getState())) {
-                adTaskProfile = (ADTaskProfile) waitUntilTaskReachState(detectorId, ImmutableSet.of(ADTaskState.RUNNING.name())).get(0);
+            if (!TaskState.RUNNING.name().equals(adTaskProfile.getAdTask().getState())) {
+                adTaskProfile = (ADTaskProfile) waitUntilTaskReachState(detectorId, ImmutableSet.of(TaskState.RUNNING.name())).get(0);
             }
             assertEquals((int) Math.pow(categoryFieldDocCount, categoryFieldSize), adTaskProfile.getTotalEntitiesCount().intValue());
             assertTrue(adTaskProfile.getPendingEntitiesCount() > 0);
@@ -133,7 +133,7 @@ public class HistoricalAnalysisRestApiIT extends HistoricalAnalysisRestTestCase 
         Response statsResponse = TestHelpers.makeRequest(client(), "GET", AD_BASE_STATS_URI, ImmutableMap.of(), "", null);
         String statsResult = EntityUtils.toString(statsResponse.getEntity());
         Map<String, Object> stringObjectMap = TestHelpers.parseStatsResult(statsResult);
-        String detectorCountState = categoryFieldSize > 0 ? MULTI_ENTITY_DETECTOR_COUNT.getName() : SINGLE_ENTITY_DETECTOR_COUNT.getName();
+        String detectorCountState = categoryFieldSize > 0 ? HC_DETECTOR_COUNT.getName() : SINGLE_STREAM_DETECTOR_COUNT.getName();
         assertTrue((long) stringObjectMap.get(detectorCountState) > 0);
         Map<String, Object> nodes = (Map<String, Object>) stringObjectMap.get("nodes");
         long totalBatchTaskExecution = 0;
@@ -146,7 +146,7 @@ public class HistoricalAnalysisRestApiIT extends HistoricalAnalysisRestTestCase 
         // get detector with AD task
         ToXContentObject[] result = getHistoricalAnomalyDetector(detectorId, true, client());
         AnomalyDetector parsedDetector = (AnomalyDetector) result[0];
-        AnomalyDetectorJob parsedJob = (AnomalyDetectorJob) result[1];
+        Job parsedJob = (Job) result[1];
         ADTask parsedADTask = (ADTask) result[2];
         assertNull(parsedJob);
         assertNotNull(parsedDetector);
@@ -172,7 +172,7 @@ public class HistoricalAnalysisRestApiIT extends HistoricalAnalysisRestTestCase 
         assertEquals(RestStatus.OK, TestHelpers.restStatus(stopDetectorResponse));
 
         // get task profile
-        checkIfTaskCanFinishCorrectly(detectorId, taskId, ImmutableSet.of(ADTaskState.STOPPED.name()));
+        checkIfTaskCanFinishCorrectly(detectorId, taskId, ImmutableSet.of(TaskState.STOPPED.name()));
         updateClusterSettings(BATCH_TASK_PIECE_INTERVAL_SECONDS.getKey(), 1);
 
         waitUntilTaskDone(detectorId);

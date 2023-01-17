@@ -46,12 +46,7 @@ import org.opensearch.action.bulk.BulkItemResponse;
 import org.opensearch.action.bulk.BulkItemResponse.Failure;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.ad.AnomalyDetectorPlugin;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelState;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
@@ -64,17 +59,18 @@ import org.opensearch.index.shard.ShardId;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import test.org.opensearch.ad.util.MLUtil;
 import test.org.opensearch.ad.util.RandomModelStateConfig;
 
 public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
-    CheckpointWriteWorker worker;
+    ADCheckpointWriteWorker worker;
 
-    CheckpointDao checkpoint;
+    ADCheckpointDao checkpoint;
     ClusterService clusterService;
 
-    ModelState<EntityModel> state;
+    ADModelState<createFromValueOnlySamples> state;
 
     @Override
     @SuppressWarnings("unchecked")
@@ -88,7 +84,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
                     new HashSet<>(
                         Arrays
                             .asList(
-                                AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
+                                AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
                                 AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_CONCURRENCY,
                                 AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_BATCH_SIZE
                             )
@@ -97,33 +93,33 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        checkpoint = mock(CheckpointDao.class);
+        checkpoint = mock(ADCheckpointDao.class);
         Map<String, Object> checkpointMap = new HashMap<>();
         checkpointMap.put(CommonName.FIELD_MODEL, "a");
         when(checkpoint.toIndexSource(any())).thenReturn(checkpointMap);
         when(checkpoint.shouldSave(any(), anyBoolean(), any(), any())).thenReturn(true);
 
         // Integer.MAX_VALUE makes a huge heap
-        worker = new CheckpointWriteWorker(
+        worker = new ADCheckpointWriteWorker(
             Integer.MAX_VALUE,
-            AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_SIZE_IN_BYTES,
-            AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
+            TimeSeriesSettings.CHECKPOINT_WRITE_QUEUE_SIZE_IN_BYTES,
+            AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
             clusterService,
             new Random(42),
-            mock(ADCircuitBreakerService.class),
+            mock(CircuitBreakerService.class),
             threadPool,
             Settings.EMPTY,
-            AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
+            TimeSeriesSettings.MAX_QUEUED_TASKS_RATIO,
             clock,
-            AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
-            AnomalyDetectorSettings.QUEUE_MAINTENANCE,
+            TimeSeriesSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
+            TimeSeriesSettings.LOW_SEGMENT_PRUNE_RATIO,
+            TimeSeriesSettings.MAINTENANCE_FREQ_CONSTANT,
+            TimeSeriesSettings.QUEUE_MAINTENANCE,
             checkpoint,
             ADCommonName.CHECKPOINT_INDEX_NAME,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
             nodeStateManager,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE
+            TimeSeriesSettings.HOURLY_MAINTENANCE
         );
 
         state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().build());
@@ -164,7 +160,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             return null;
         }).when(checkpoint).batchWrite(any(), any());
 
-        List<ModelState<EntityModel>> states = new ArrayList<>();
+        List<ADModelState<createFromValueOnlySamples>> states = new ArrayList<>();
         states.add(state);
         worker.writeAll(states, detectorId, true, RequestPriority.MEDIUM);
 
@@ -182,7 +178,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         ExecutorService executorService = mock(ExecutorService.class);
 
         ThreadPool mockThreadPool = mock(ThreadPool.class);
-        when(mockThreadPool.executor(AnomalyDetectorPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(mockThreadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = () -> {
                 try {
@@ -208,26 +204,26 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
         // Integer.MAX_VALUE makes a huge heap
         // create a worker to use mockThreadPool
-        worker = new CheckpointWriteWorker(
+        worker = new ADCheckpointWriteWorker(
             Integer.MAX_VALUE,
-            AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_SIZE_IN_BYTES,
-            AnomalyDetectorSettings.CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
+            TimeSeriesSettings.CHECKPOINT_WRITE_QUEUE_SIZE_IN_BYTES,
+            AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
             clusterService,
             new Random(42),
-            mock(ADCircuitBreakerService.class),
+            mock(CircuitBreakerService.class),
             mockThreadPool,
             Settings.EMPTY,
-            AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
+            TimeSeriesSettings.MAX_QUEUED_TASKS_RATIO,
             clock,
-            AnomalyDetectorSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.LOW_SEGMENT_PRUNE_RATIO,
-            AnomalyDetectorSettings.MAINTENANCE_FREQ_CONSTANT,
-            AnomalyDetectorSettings.QUEUE_MAINTENANCE,
+            TimeSeriesSettings.MEDIUM_SEGMENT_PRUNE_RATIO,
+            TimeSeriesSettings.LOW_SEGMENT_PRUNE_RATIO,
+            TimeSeriesSettings.MAINTENANCE_FREQ_CONSTANT,
+            TimeSeriesSettings.QUEUE_MAINTENANCE,
             checkpoint,
             ADCommonName.CHECKPOINT_INDEX_NAME,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
             nodeStateManager,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE
+            TimeSeriesSettings.HOURLY_MAINTENANCE
         );
 
         // our concurrency is 2, so first 2 requests cause two batches. And the
@@ -237,7 +233,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         // CHECKPOINT_WRITE_QUEUE_BATCH_SIZE is the largest batch size
         int numberOfRequests = 2 * AD_CHECKPOINT_WRITE_QUEUE_BATCH_SIZE.getDefault(Settings.EMPTY) + 1;
         for (int i = 0; i < numberOfRequests; i++) {
-            ModelState<EntityModel> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().build());
+            ADModelState<createFromValueOnlySamples> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().build());
             worker.write(state, true, RequestPriority.MEDIUM);
         }
 
@@ -266,7 +262,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         worker.write(state, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, times(1)).batchWrite(any(), any());
-        verify(nodeStateManager, times(1)).setException(eq(state.getId()), any(OpenSearchRejectedExecutionException.class));
+        verify(nodeStateManager, times(1)).setException(eq(state.getConfigId()), any(OpenSearchRejectedExecutionException.class));
     }
 
     public void testRetryException() {
@@ -280,7 +276,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         worker.write(state, true, RequestPriority.MEDIUM);
         // we don't retry checkpoint write
         verify(checkpoint, times(1)).batchWrite(any(), any());
-        verify(nodeStateManager, times(1)).setException(eq(state.getId()), any(OpenSearchStatusException.class));
+        verify(nodeStateManager, times(1)).setException(eq(state.getConfigId()), any(OpenSearchStatusException.class));
     }
 
     /**
@@ -308,7 +304,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
     @SuppressWarnings("unchecked")
     public void testEmptyTimeStamp() {
-        ModelState<EntityModel> state = mock(ModelState.class);
+        ADModelState<createFromValueOnlySamples> state = mock(ADModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.MIN);
         worker.write(state, false, RequestPriority.MEDIUM);
 
@@ -317,7 +313,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
     @SuppressWarnings("unchecked")
     public void testTooSoonToSaveSingleWrite() {
-        ModelState<EntityModel> state = mock(ModelState.class);
+        ADModelState<createFromValueOnlySamples> state = mock(ADModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.now());
         worker.write(state, false, RequestPriority.MEDIUM);
 
@@ -326,10 +322,10 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
     @SuppressWarnings("unchecked")
     public void testTooSoonToSaveWriteAll() {
-        ModelState<EntityModel> state = mock(ModelState.class);
+        ADModelState<createFromValueOnlySamples> state = mock(ADModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.now());
 
-        List<ModelState<EntityModel>> states = new ArrayList<>();
+        List<ADModelState<createFromValueOnlySamples>> states = new ArrayList<>();
         states.add(state);
 
         worker.writeAll(states, detectorId, false, RequestPriority.MEDIUM);
@@ -339,7 +335,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
     @SuppressWarnings("unchecked")
     public void testEmptyModel() {
-        ModelState<EntityModel> state = mock(ModelState.class);
+        ADModelState<createFromValueOnlySamples> state = mock(ADModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.now());
         when(state.getModel()).thenReturn(null);
         worker.write(state, true, RequestPriority.MEDIUM);
@@ -349,11 +345,11 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
     @SuppressWarnings("unchecked")
     public void testEmptyModelId() {
-        ModelState<EntityModel> state = mock(ModelState.class);
+        ADModelState<createFromValueOnlySamples> state = mock(ADModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.now());
-        EntityModel model = mock(EntityModel.class);
+        createFromValueOnlySamples model = mock(createFromValueOnlySamples.class);
         when(state.getModel()).thenReturn(model);
-        when(state.getId()).thenReturn("1");
+        when(state.getConfigId()).thenReturn("1");
         when(state.getModelId()).thenReturn(null);
         worker.write(state, true, RequestPriority.MEDIUM);
 
@@ -362,11 +358,11 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
     @SuppressWarnings("unchecked")
     public void testEmptyDetectorId() {
-        ModelState<EntityModel> state = mock(ModelState.class);
+        ADModelState<createFromValueOnlySamples> state = mock(ADModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.now());
-        EntityModel model = mock(EntityModel.class);
+        createFromValueOnlySamples model = mock(createFromValueOnlySamples.class);
         when(state.getModel()).thenReturn(model);
-        when(state.getId()).thenReturn(null);
+        when(state.getConfigId()).thenReturn(null);
         when(state.getModelId()).thenReturn("a");
         worker.write(state, true, RequestPriority.MEDIUM);
 
@@ -379,7 +375,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
 
         worker.write(state, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
@@ -391,9 +387,9 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
 
-        List<ModelState<EntityModel>> states = new ArrayList<>();
+        List<ADModelState<createFromValueOnlySamples>> states = new ArrayList<>();
         states.add(state);
         worker.writeAll(states, detectorId, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
@@ -405,7 +401,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onFailure(new RuntimeException());
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
 
         worker.write(state, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());

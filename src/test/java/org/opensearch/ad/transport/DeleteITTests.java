@@ -18,26 +18,28 @@ import java.util.concurrent.ExecutionException;
 import org.opensearch.action.ActionFuture;
 import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.ad.ADIntegTestCase;
-import org.opensearch.ad.AnomalyDetectorPlugin;
 import org.opensearch.plugins.Plugin;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.transport.StopConfigRequest;
+import org.opensearch.timeseries.transport.StopConfigResponse;
 
 public class DeleteITTests extends ADIntegTestCase {
 
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return Collections.singletonList(AnomalyDetectorPlugin.class);
+        return Collections.singletonList(TimeSeriesAnalyticsPlugin.class);
     }
 
     protected Collection<Class<? extends Plugin>> transportClientPlugins() {
-        return Collections.singletonList(AnomalyDetectorPlugin.class);
+        return Collections.singletonList(TimeSeriesAnalyticsPlugin.class);
     }
 
     public void testNormalStopDetector() throws ExecutionException, InterruptedException {
-        StopDetectorRequest request = new StopDetectorRequest().adID("123");
+        StopConfigRequest request = new StopConfigRequest().adID("123");
 
-        ActionFuture<StopDetectorResponse> future = client().execute(StopDetectorAction.INSTANCE, request);
+        ActionFuture<StopConfigResponse> future = client().execute(StopDetectorAction.INSTANCE, request);
 
-        StopDetectorResponse response = future.get();
+        StopConfigResponse response = future.get();
         assertTrue(response.success());
     }
 
@@ -59,9 +61,9 @@ public class DeleteITTests extends ADIntegTestCase {
     }
 
     public void testEmptyIDStopDetector() throws ExecutionException, InterruptedException {
-        StopDetectorRequest request = new StopDetectorRequest();
+        StopConfigRequest request = new StopConfigRequest();
 
-        ActionFuture<StopDetectorResponse> future = client().execute(StopDetectorAction.INSTANCE, request);
+        ActionFuture<StopConfigResponse> future = client().execute(StopDetectorAction.INSTANCE, request);
 
         expectThrows(ActionRequestValidationException.class, () -> future.actionGet());
     }

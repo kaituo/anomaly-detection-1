@@ -24,14 +24,14 @@ import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 
 public class NodeStateTests extends OpenSearchTestCase {
-    private NodeState state;
+    private ADNodeState state;
     private Clock clock;
 
     @Override
     public void setUp() throws Exception {
         super.setUp();
         clock = mock(Clock.class);
-        state = new NodeState("123", clock);
+        state = new ADNodeState("123", clock);
     }
 
     private Duration duration = Duration.ofHours(1);

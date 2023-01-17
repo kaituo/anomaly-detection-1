@@ -29,7 +29,6 @@ import org.opensearch.OpenSearchException;
 import org.opensearch.action.ActionListener;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.util.ClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.reindex.BulkByScrollResponse;
@@ -60,7 +59,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
         PARTIAL_FAILURE
     }
 
-    private CheckpointDao checkpointDao;
+    private ADCheckpointDao checkpointDao;
     private Client client;
     private ClientUtil clientUtil;
     private Gson gson;
@@ -82,7 +81,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
     @Before
     public void setUp() throws Exception {
         super.setUp();
-        super.setUpLog4jForJUnit(CheckpointDao.class);
+        super.setUpLog4jForJUnit(ADCheckpointDao.class);
 
         client = mock(Client.class);
         clientUtil = mock(ClientUtil.class);
@@ -97,7 +96,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
         objectPool = mock(GenericObjectPool.class);
         int deserializeRCFBufferSize = 512;
         anomalyRate = 0.005;
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
             ADCommonName.CHECKPOINT_INDEX_NAME,
@@ -157,7 +156,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).execute(eq(DeleteByQueryAction.INSTANCE), any(), any());
 
-        checkpointDao.deleteModelCheckpointByDetectorId(detectorId);
+        checkpointDao.deleteModelCheckpointByConfigId(detectorId);
     }
 
     public void testDeleteSingleNormal() throws Exception {
@@ -172,7 +171,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
 
     public void testDeleteSingleResultFailure() throws Exception {
         delete_by_detector_id_template(DeleteExecutionMode.FAILURE);
-        assertTrue(testAppender.containsMessage(CheckpointDao.NOT_ABLE_TO_DELETE_LOG_MSG));
+        assertTrue(testAppender.containsMessage(CheckpointDao.NOT_ABLE_TO_DELETE_CHECKPOINT_MSG));
     }
 
     public void testDeleteSingleResultPartialFailure() throws Exception {

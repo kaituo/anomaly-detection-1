@@ -17,7 +17,9 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 import org.opensearch.action.ActionResponse;
 import org.opensearch.ad.model.AnomalyResult;
@@ -26,11 +28,11 @@ import org.opensearch.common.io.stream.OutputStreamStreamOutput;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.commons.authuser.User;
-import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.timeseries.model.FeatureData;
+import org.opensearch.timeseries.transport.ResultResponse;
 
-public class AnomalyResultResponse extends ActionResponse implements ToXContentObject {
+public class AnomalyResultResponse extends ResultResponse<AnomalyResult> {
     public static final String ANOMALY_GRADE_JSON_KEY = "anomalyGrade";
     public static final String CONFIDENCE_JSON_KEY = "confidence";
     public static final String ANOMALY_SCORE_JSON_KEY = "anomalyScore";
@@ -48,18 +50,13 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
 
     private Double anomalyGrade;
     private Double confidence;
-    private Double anomalyScore;
-    private String error;
-    private List<FeatureData> features;
-    private Long rcfTotalUpdates;
-    private Long detectorIntervalInMinutes;
-    private Boolean isHCDetector;
     private Integer relativeIndex;
     private double[] relevantAttribution;
     private double[] pastValues;
     private double[][] expectedValuesList;
     private double[] likelihoodOfValues;
     private Double threshold;
+    protected Double anomalyScore;
 
     // used when returning an error/exception or empty result
     public AnomalyResultResponse(
@@ -103,14 +100,10 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
         double[] likelihoodOfValues,
         Double threshold
     ) {
+        super(features, error, rcfTotalUpdates, detectorIntervalInMinutes, isHCDetector);
         this.anomalyGrade = anomalyGrade;
         this.confidence = confidence;
         this.anomalyScore = anomalyScore;
-        this.features = features;
-        this.error = error;
-        this.rcfTotalUpdates = rcfTotalUpdates;
-        this.detectorIntervalInMinutes = detectorIntervalInMinutes;
-        this.isHCDetector = isHCDetector;
         this.relativeIndex = relativeIndex;
         this.relevantAttribution = currentTimeAttribution;
         this.pastValues = pastValues;
@@ -133,8 +126,8 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
         // new field added since AD 1.1
         // Only send AnomalyResultRequest to local node, no need to change this part for BWC
         rcfTotalUpdates = in.readOptionalLong();
-        detectorIntervalInMinutes = in.readOptionalLong();
-        isHCDetector = in.readOptionalBoolean();
+        configIntervalInMinutes = in.readOptionalLong();
+        isHC = in.readOptionalBoolean();
 
         this.relativeIndex = in.readOptionalInt();
 
@@ -176,32 +169,12 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
         return anomalyGrade;
     }
 
-    public List<FeatureData> getFeatures() {
-        return features;
-    }
-
     public double getConfidence() {
         return confidence;
     }
 
     public double getAnomalyScore() {
         return anomalyScore;
-    }
-
-    public String getError() {
-        return error;
-    }
-
-    public Long getRcfTotalUpdates() {
-        return rcfTotalUpdates;
-    }
-
-    public Long getIntervalInMinutes() {
-        return detectorIntervalInMinutes;
-    }
-
-    public Boolean isHCDetector() {
-        return isHCDetector;
     }
 
     public Integer getRelativeIndex() {
@@ -239,8 +212,8 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
         }
         out.writeOptionalString(error);
         out.writeOptionalLong(rcfTotalUpdates);
-        out.writeOptionalLong(detectorIntervalInMinutes);
-        out.writeOptionalBoolean(isHCDetector);
+        out.writeOptionalLong(configIntervalInMinutes);
+        out.writeOptionalBoolean(isHC);
 
         out.writeOptionalInt(relativeIndex);
 
@@ -294,7 +267,7 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
         }
         builder.endArray();
         builder.field(RCF_TOTAL_UPDATES_JSON_KEY, rcfTotalUpdates);
-        builder.field(DETECTOR_INTERVAL_IN_MINUTES_JSON_KEY, detectorIntervalInMinutes);
+        builder.field(DETECTOR_INTERVAL_IN_MINUTES_JSON_KEY, configIntervalInMinutes);
         builder.field(RELATIVE_INDEX_FIELD_JSON_KEY, relativeIndex);
         builder.field(RELEVANT_ATTRIBUTION_FIELD_JSON_KEY, relevantAttribution);
         builder.field(PAST_VALUES_FIELD_JSON_KEY, pastValues);
@@ -324,7 +297,7 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
     *
     * Convert AnomalyResultResponse to AnomalyResult
     *
-    * @param detectorId Detector Id
+    * @param configId Detector Id
     * @param dataStartInstant data start time
     * @param dataEndInstant data end time
     * @param executionStartInstant  execution start time
@@ -334,8 +307,9 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
     * @param error Error
     * @return converted AnomalyResult
     */
-    public AnomalyResult toAnomalyResult(
-        String detectorId,
+    @Override
+    public List<AnomalyResult> toIndexableResults(
+        String configId,
         Instant dataStartInstant,
         Instant dataEndInstant,
         Instant executionStartInstant,
@@ -346,30 +320,43 @@ public class AnomalyResultResponse extends ActionResponse implements ToXContentO
     ) {
         // Detector interval in milliseconds
         long detectorIntervalMilli = Duration.between(dataStartInstant, dataEndInstant).toMillis();
-        return AnomalyResult
-            .fromRawTRCFResult(
-                detectorId,
-                detectorIntervalMilli,
-                null, // real time results have no task id
-                anomalyScore,
-                anomalyGrade,
-                confidence,
-                features,
-                dataStartInstant,
-                dataEndInstant,
-                executionStartInstant,
-                executionEndInstant,
-                error,
-                null,
-                user,
-                schemaVersion,
-                null, // single-stream real-time has no model id
-                relevantAttribution,
-                relativeIndex,
-                pastValues,
-                expectedValuesList,
-                likelihoodOfValues,
-                threshold
+        return Collections
+            .singletonList(
+                AnomalyResult
+                    .fromRawTRCFResult(
+                        configId,
+                        detectorIntervalMilli,
+                        null, // real time results have no task id
+                        anomalyScore,
+                        anomalyGrade,
+                        confidence,
+                        features,
+                        dataStartInstant,
+                        dataEndInstant,
+                        executionStartInstant,
+                        executionEndInstant,
+                        error,
+                        Optional.empty(),
+                        user,
+                        schemaVersion,
+                        null, // single-stream real-time has no model id
+                        relevantAttribution,
+                        relativeIndex,
+                        pastValues,
+                        expectedValuesList,
+                        likelihoodOfValues,
+                        threshold
+                    )
             );
+    }
+
+    @Override
+    public boolean shouldSave() {
+        // skipping writing to the result index if not necessary
+        // For a single-stream analysis, the result is not useful if error is null
+        // and rcf score (e.g., thus anomaly grade/confidence/forecasts) is null.
+        // For a HC analysis, we don't need to save on the detector level.
+        // We return 0 or Double.NaN rcf score if there is no error.
+        return super.shouldSave() || anomalyScore > 0;
     }
 }

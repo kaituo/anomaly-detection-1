@@ -16,6 +16,7 @@ import java.util.ArrayDeque;
 import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
@@ -29,45 +30,45 @@ public class EntityModelTests extends OpenSearchTestCase {
     }
 
     public void testNullInternalSampleQueue() {
-        EntityModel model = new EntityModel(null, null, null);
-        model.addSample(new double[] { 0.8 });
-        assertEquals(1, model.getSamples().size());
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(null, null, null);
+        model.addValueOnlySample(new double[] { 0.8 });
+        assertEquals(1, model.getValueOnlySamples().size());
     }
 
     public void testNullInputSample() {
-        EntityModel model = new EntityModel(null, null, null);
-        model.addSample(null);
-        assertEquals(0, model.getSamples().size());
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(null, null, null);
+        model.addValueOnlySample(null);
+        assertEquals(0, model.getValueOnlySamples().size());
     }
 
     public void testEmptyInputSample() {
-        EntityModel model = new EntityModel(null, null, null);
-        model.addSample(new double[] {});
-        assertEquals(0, model.getSamples().size());
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = new createFromValueOnlySamples<>(null, null, null);
+        model.addValueOnlySample(new double[] {});
+        assertEquals(0, model.getValueOnlySamples().size());
     }
 
     @Test
     public void trcf_constructor() {
-        EntityModel em = new EntityModel(null, new ArrayDeque<>(), trcf);
-        assertEquals(trcf, em.getTrcf().get());
+        createFromValueOnlySamples<ThresholdedRandomCutForest> em = new createFromValueOnlySamples<>(null, new ArrayDeque<>(), trcf);
+        assertEquals(trcf, em.getModel().get());
     }
 
     @Test
     public void clear() {
-        EntityModel em = new EntityModel(null, new ArrayDeque<>(), trcf);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> em = new createFromValueOnlySamples<>(null, new ArrayDeque<>(), trcf);
 
         em.clear();
 
-        assertTrue(em.getSamples().isEmpty());
-        assertFalse(em.getTrcf().isPresent());
+        assertTrue(em.getValueOnlySamples().isEmpty());
+        assertFalse(em.getModel().isPresent());
     }
 
     @Test
     public void setTrcf() {
-        EntityModel em = new EntityModel(null, null, null);
-        assertFalse(em.getTrcf().isPresent());
+        createFromValueOnlySamples<ThresholdedRandomCutForest> em = new createFromValueOnlySamples<>(null, null, null);
+        assertFalse(em.getModel().isPresent());
 
-        em.setTrcf(this.trcf);
-        assertTrue(em.getTrcf().isPresent());
+        em.setModel(this.trcf);
+        assertTrue(em.getModel().isPresent());
     }
 }

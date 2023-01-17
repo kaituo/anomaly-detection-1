@@ -32,16 +32,19 @@ import org.mockito.MockitoAnnotations;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.NodeStateManager;
-import org.opensearch.ad.feature.SearchFeatureDao;
+import org.opensearch.ad.ADNodeStateManager;
+import org.opensearch.ad.TestHelpers;
+import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.model.ADTask;
+import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorActionHandler;
 import org.opensearch.ad.rest.handler.ValidateAnomalyDetectorActionHandler;
+import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.ValidateAnomalyDetectorResponse;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.client.node.NodeClient;
 import org.opensearch.cluster.service.ClusterService;
@@ -53,7 +56,10 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.ValidationException;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.ValidationAspect;
+import org.opensearch.timeseries.task.TaskManager;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableList;
@@ -76,7 +82,7 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
     protected Integer maxAnomalyFeatures;
     protected Settings settings;
     protected RestRequest.Method method;
-    protected ADTaskManager adTaskManager;
+    protected TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement> adTaskManager;
     protected SearchFeatureDao searchFeatureDao;
     protected Clock clock;
 
@@ -143,7 +149,7 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
             .getCustomNodeClient(detectorResponse, userIndexResponse, singleEntityDetector, threadPool);
 
         NodeClient clientSpy = spy(client);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         SecurityClientUtil clientUtil = new SecurityClientUtil(nodeStateManager, settings);
 
         handler = new ValidateAnomalyDetectorActionHandler(
@@ -174,7 +180,7 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         String errorMsg = String
             .format(
                 Locale.ROOT,
-                IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_SINGLE_ENTITY_DETECTORS_PREFIX_MSG,
+                IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_SINGLE_STREAM_DETECTORS_PREFIX_MSG,
                 maxSingleEntityAnomalyDetectors
             );
         assertTrue(value.getMessage().contains(errorMsg));
@@ -197,7 +203,7 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         NodeClient client = IndexAnomalyDetectorActionHandlerTests
             .getCustomNodeClient(detectorResponse, userIndexResponse, detector, threadPool);
         NodeClient clientSpy = spy(client);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         SecurityClientUtil clientUtil = new SecurityClientUtil(nodeStateManager, settings);
 
         handler = new ValidateAnomalyDetectorActionHandler(
@@ -226,11 +232,7 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         Exception value = response.getValue();
         assertTrue(value instanceof ValidationException);
         String errorMsg = String
-            .format(
-                Locale.ROOT,
-                IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_MULTI_ENTITY_DETECTORS_PREFIX_MSG,
-                maxMultiEntityAnomalyDetectors
-            );
+            .format(Locale.ROOT, IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG, maxMultiEntityAnomalyDetectors);
         assertTrue(value.getMessage().contains(errorMsg));
     }
 }

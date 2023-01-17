@@ -18,8 +18,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyZeroInteractions;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.BACKOFF_MINUTES;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_BACKOFF_MINUTES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -44,10 +44,8 @@ import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.AnomalyResultTests;
-import org.opensearch.ad.util.ClientUtil;
 import org.opensearch.ad.util.Throttler;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -65,6 +63,7 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.Job;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -84,7 +83,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
     private GetResponse checkpointResponse;
     private ClusterService clusterService;
     private ClusterSettings clusterSettings;
-    private AnomalyDetectorJob jobToCheck;
+    private Job jobToCheck;
 
     @Override
     protected NamedXContentRegistry xContentRegistry() {
@@ -119,8 +118,8 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
 
         clientUtil = new ClientUtil(Settings.EMPTY, client, throttler, mock(ThreadPool.class));
         Set<Setting<?>> nodestateSetting = new HashSet<>(ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
-        nodestateSetting.add(MAX_RETRY_FOR_UNRESPONSIVE_NODE);
-        nodestateSetting.add(BACKOFF_MINUTES);
+        nodestateSetting.add(AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE);
+        nodestateSetting.add(AD_BACKOFF_MINUTES);
         clusterSettings = new ClusterSettings(Settings.EMPTY, nodestateSetting);
 
         DiscoveryNode discoveryNode = new DiscoveryNode(
@@ -132,7 +131,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         );
 
         clusterService = ClusterServiceUtils.createClusterService(threadPool, discoveryNode, clusterSettings);
-        stateManager = new NodeStateManager(client, xContentRegistry(), settings, clientUtil, clock, duration, clusterService);
+        stateManager = new ADNodeStateManager(client, xContentRegistry(), settings, clientUtil, clock, duration, clusterService);
 
         checkpointResponse = mock(GetResponse.class);
         jobToCheck = TestHelpers.randomAnomalyDetectorJob(true, Instant.ofEpochMilli(1602401500000L), null);
@@ -205,7 +204,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
 
     public void testGetLastError() throws IOException, InterruptedException {
         String error = "blah";
-        assertEquals(NodeStateManager.NO_ERROR, stateManager.getLastDetectionError(adId));
+        assertEquals(ADNodeStateManager.NO_ERROR, stateManager.getLastDetectionError(adId));
         stateManager.setLastDetectionError(adId, error);
         assertEquals(error, stateManager.getLastDetectionError(adId));
     }
@@ -236,7 +235,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
     }
 
     public void testHasRunningQuery() throws IOException {
-        stateManager = new NodeStateManager(
+        stateManager = new ADNodeStateManager(
             client,
             xContentRegistry(),
             settings,
@@ -257,7 +256,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         String detectorId = setupDetector();
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        stateManager.getAnomalyDetector(detectorId, ActionListener.wrap(asDetector -> {
+        stateManager.getConfig(detectorId, ActionListener.wrap(asDetector -> {
             assertEquals(detectorToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -277,7 +276,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         String detectorId = setupDetector();
         final CountDownLatch inProgressLatch = new CountDownLatch(2);
 
-        stateManager.getAnomalyDetector(detectorId, ActionListener.wrap(asDetector -> {
+        stateManager.getConfig(detectorId, ActionListener.wrap(asDetector -> {
             assertEquals(detectorToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -285,7 +284,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
             inProgressLatch.countDown();
         }));
 
-        stateManager.getAnomalyDetector(detectorId, ActionListener.wrap(asDetector -> {
+        stateManager.getConfig(detectorId, ActionListener.wrap(asDetector -> {
             assertEquals(detectorToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -363,7 +362,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         // In setUp method, we mute after 3 tries
         assertTrue(!stateManager.isMuted(nodeId, adId));
 
-        Settings newSettings = Settings.builder().put(AnomalyDetectorSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE.getKey(), "1").build();
+        Settings newSettings = Settings.builder().put(AnomalyDetectorSettings.AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE.getKey(), "1").build();
         Settings.Builder target = Settings.builder();
         clusterSettings.updateDynamicSettings(newSettings, target, Settings.builder(), "test");
         clusterSettings.applySettings(target.build());
@@ -381,7 +380,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
 
         assertTrue(stateManager.isMuted(nodeId, adId));
 
-        Settings newSettings = Settings.builder().put(AnomalyDetectorSettings.BACKOFF_MINUTES.getKey(), "1m").build();
+        Settings newSettings = Settings.builder().put(AnomalyDetectorSettings.AD_BACKOFF_MINUTES.getKey(), "1m").build();
         Settings.Builder target = Settings.builder();
         clusterSettings.updateDynamicSettings(newSettings, target, Settings.builder(), "test");
         clusterSettings.applySettings(target.build());
@@ -412,7 +411,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
     public void testGetAnomalyJob() throws IOException, InterruptedException {
         String detectorId = setupJob();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        stateManager.getAnomalyDetectorJob(detectorId, ActionListener.wrap(asDetector -> {
+        stateManager.getJob(detectorId, ActionListener.wrap(asDetector -> {
             assertEquals(jobToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -432,7 +431,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         String detectorId = setupJob();
         final CountDownLatch inProgressLatch = new CountDownLatch(2);
 
-        stateManager.getAnomalyDetectorJob(detectorId, ActionListener.wrap(asDetector -> {
+        stateManager.getJob(detectorId, ActionListener.wrap(asDetector -> {
             assertEquals(jobToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -440,7 +439,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
             inProgressLatch.countDown();
         }));
 
-        stateManager.getAnomalyDetectorJob(detectorId, ActionListener.wrap(asDetector -> {
+        stateManager.getJob(detectorId, ActionListener.wrap(asDetector -> {
             assertEquals(jobToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {

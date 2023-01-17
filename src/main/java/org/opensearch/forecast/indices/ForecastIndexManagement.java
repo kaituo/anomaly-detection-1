@@ -171,6 +171,7 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
      *
      * @param actionListener action called after create index
      */
+    @Override
     public void initStateIndex(ActionListener<CreateIndexResponse> actionListener) {
         try {
             CreateIndexRequest request = new CreateIndexRequest(ForecastCommonName.FORECAST_STATE_INDEX)

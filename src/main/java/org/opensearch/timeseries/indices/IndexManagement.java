@@ -983,4 +983,6 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
     protected abstract void rolloverAndDeleteHistoryIndex();
 
     public abstract void initCustomResultIndexDirectly(String resultIndex, ActionListener<CreateIndexResponse> actionListener);
+
+    public abstract void initStateIndex(ActionListener<CreateIndexResponse> actionListener);
 }

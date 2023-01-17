@@ -42,13 +42,15 @@ import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.transport.JobRequest;
+import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.transport.TransportService;
 
 public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
     private AnomalyDetectorJobTransportAction action;
     private Task task;
-    private AnomalyDetectorJobRequest request;
-    private ActionListener<AnomalyDetectorJobResponse> response;
+    private JobRequest request;
+    private ActionListener<JobResponse> response;
 
     @Override
     @Before
@@ -57,7 +59,7 @@ public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
         ClusterService clusterService = mock(ClusterService.class);
         ClusterSettings clusterSettings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
 
         Settings build = Settings.builder().build();
@@ -81,10 +83,10 @@ public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
             mock(ExecuteADResultResponseRecorder.class)
         );
         task = mock(Task.class);
-        request = new AnomalyDetectorJobRequest("1234", 4567, 7890, "_start");
-        response = new ActionListener<AnomalyDetectorJobResponse>() {
+        request = new JobRequest("1234", 4567, 7890, "_start");
+        response = new ActionListener<JobResponse>() {
             @Override
-            public void onResponse(AnomalyDetectorJobResponse adResponse) {
+            public void onResponse(JobResponse adResponse) {
                 // Will not be called as there is no detector
                 Assert.assertTrue(false);
             }
@@ -104,7 +106,7 @@ public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
 
     @Test
     public void testStopAdJobTransportAction() {
-        AnomalyDetectorJobRequest stopRequest = new AnomalyDetectorJobRequest("1234", 4567, 7890, "_stop");
+        JobRequest stopRequest = new JobRequest("1234", 4567, 7890, "_stop");
         action.doExecute(task, stopRequest, response);
     }
 
@@ -117,13 +119,13 @@ public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
     @Test
     public void testAdJobRequest() throws IOException {
         DateRange detectionDateRange = new DateRange(Instant.MIN, Instant.now());
-        request = new AnomalyDetectorJobRequest("1234", detectionDateRange, false, 4567, 7890, "_start");
+        request = new JobRequest("1234", detectionDateRange, false, 4567, 7890, "_start");
 
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
         StreamInput input = out.bytes().streamInput();
-        AnomalyDetectorJobRequest newRequest = new AnomalyDetectorJobRequest(input);
-        Assert.assertEquals(request.getDetectorID(), newRequest.getDetectorID());
+        JobRequest newRequest = new JobRequest(input);
+        Assert.assertEquals(request.getConfigID(), newRequest.getConfigID());
     }
 
     @Test
@@ -131,17 +133,17 @@ public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
         StreamInput input = out.bytes().streamInput();
-        AnomalyDetectorJobRequest newRequest = new AnomalyDetectorJobRequest(input);
-        Assert.assertEquals(request.getDetectorID(), newRequest.getDetectorID());
+        JobRequest newRequest = new JobRequest(input);
+        Assert.assertEquals(request.getConfigID(), newRequest.getConfigID());
     }
 
     @Test
     public void testAdJobResponse() throws IOException {
         BytesStreamOutput out = new BytesStreamOutput();
-        AnomalyDetectorJobResponse response = new AnomalyDetectorJobResponse("1234", 45, 67, 890, RestStatus.OK);
+        JobResponse response = new JobResponse("1234", 45, 67, 890, RestStatus.OK);
         response.writeTo(out);
         StreamInput input = out.bytes().streamInput();
-        AnomalyDetectorJobResponse newResponse = new AnomalyDetectorJobResponse(input);
+        JobResponse newResponse = new JobResponse(input);
         Assert.assertEquals(response.getId(), newResponse.getId());
     }
 }

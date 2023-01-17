@@ -23,9 +23,10 @@ import org.opensearch.common.io.stream.Writeable;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.timeseries.model.ConfigState;
 
 public class DetectorProfile implements Writeable, ToXContentObject, Mergeable {
-    private DetectorState state;
+    private ConfigState state;
     private String error;
     private ModelProfileOnNode[] modelProfile;
     private int shingleSize;
@@ -43,7 +44,7 @@ public class DetectorProfile implements Writeable, ToXContentObject, Mergeable {
 
     public DetectorProfile(StreamInput in) throws IOException {
         if (in.readBoolean()) {
-            this.state = in.readEnum(DetectorState.class);
+            this.state = in.readEnum(ConfigState.class);
         }
 
         this.error = in.readOptionalString();
@@ -65,7 +66,7 @@ public class DetectorProfile implements Writeable, ToXContentObject, Mergeable {
     private DetectorProfile() {}
 
     public static class Builder {
-        private DetectorState state = null;
+        private ConfigState state = null;
         private String error = null;
         private ModelProfileOnNode[] modelProfile = null;
         private int shingleSize = -1;
@@ -79,7 +80,7 @@ public class DetectorProfile implements Writeable, ToXContentObject, Mergeable {
 
         public Builder() {}
 
-        public Builder state(DetectorState state) {
+        public Builder state(ConfigState state) {
             this.state = state;
             return this;
         }
@@ -227,11 +228,11 @@ public class DetectorProfile implements Writeable, ToXContentObject, Mergeable {
         return xContentBuilder.endObject();
     }
 
-    public DetectorState getState() {
+    public ConfigState getState() {
         return state;
     }
 
-    public void setState(DetectorState state) {
+    public void setState(ConfigState state) {
         this.state = state;
     }
 
