@@ -29,11 +29,9 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.ad.AbstractADTest;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
 import org.opensearch.ad.transport.AnomalyResultTests;
-import org.opensearch.ad.util.ClientUtil;
-import org.opensearch.ad.util.IndexUtils;
 import org.opensearch.ad.util.Throttler;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterState;
@@ -43,6 +41,8 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 
 public abstract class AbstractIndexHandlerTest extends AbstractADTest {
     enum IndexCreation {
@@ -104,7 +104,7 @@ public abstract class AbstractIndexHandlerTest extends AbstractADTest {
         Settings settings = blocked
             ? Settings.builder().put(IndexMetadata.INDEX_BLOCKS_WRITE_SETTING.getKey(), true).build()
             : Settings.EMPTY;
-        ClusterState blockedClusterState = createIndexBlockedState(indexName, settings, CommonName.ANOMALY_RESULT_INDEX_ALIAS);
+        ClusterState blockedClusterState = createIndexBlockedState(indexName, settings, ADCommonName.ANOMALY_RESULT_INDEX_ALIAS);
         when(clusterService.state()).thenReturn(blockedClusterState);
         when(indexNameResolver.concreteIndexNames(any(), any(), any(String.class))).thenReturn(new String[] { indexName });
     }
@@ -124,21 +124,21 @@ public abstract class AbstractIndexHandlerTest extends AbstractADTest {
                     listener.onFailure(new RuntimeException());
                     break;
                 case RESOURCE_EXISTS_EXCEPTION:
-                    listener.onFailure(new ResourceAlreadyExistsException(CommonName.ANOMALY_RESULT_INDEX_ALIAS));
+                    listener.onFailure(new ResourceAlreadyExistsException(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS));
                     break;
                 case ACKED:
-                    listener.onResponse(new CreateIndexResponse(true, true, CommonName.ANOMALY_RESULT_INDEX_ALIAS));
+                    listener.onResponse(new CreateIndexResponse(true, true, ADCommonName.ANOMALY_RESULT_INDEX_ALIAS));
                     break;
                 case NOT_ACKED:
-                    listener.onResponse(new CreateIndexResponse(false, false, CommonName.ANOMALY_RESULT_INDEX_ALIAS));
+                    listener.onResponse(new CreateIndexResponse(false, false, ADCommonName.ANOMALY_RESULT_INDEX_ALIAS));
                     break;
                 default:
                     assertTrue("should not reach here", false);
                     break;
             }
             return null;
-        }).when(anomalyDetectionIndices).initDefaultAnomalyResultIndexDirectly(any());
-        when(anomalyDetectionIndices.doesDefaultAnomalyResultIndexExist()).thenReturn(anomalyResultIndexExists);
+        }).when(anomalyDetectionIndices).initDefaultResultIndexDirectly(any());
+        when(anomalyDetectionIndices.doesDefaultResultIndexExist()).thenReturn(anomalyResultIndexExists);
     }
 
     protected void setUpSavingAnomalyResultIndex(boolean anomalyResultIndexExists) throws IOException {

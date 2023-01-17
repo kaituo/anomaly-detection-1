@@ -19,18 +19,18 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
 
 public class NodeStateTests extends OpenSearchTestCase {
-    private NodeState state;
+    private ADNodeState state;
     private Clock clock;
 
     @Override
     public void setUp() throws Exception {
         super.setUp();
         clock = mock(Clock.class);
-        state = new NodeState("123", clock);
+        state = new ADNodeState("123", clock);
     }
 
     private Duration duration = Duration.ofHours(1);
@@ -89,14 +89,14 @@ public class NodeStateTests extends OpenSearchTestCase {
 
     public void testMaintenanceLastColdStartRemoved() {
         when(clock.instant()).thenReturn(Instant.ofEpochMilli(1000));
-        state.setException(new AnomalyDetectionException("123", ""));
+        state.setException(new TimeSeriesException("123", ""));
         when(clock.instant()).thenReturn(Instant.ofEpochSecond(3700));
         assertTrue(state.expired(duration));
     }
 
     public void testMaintenanceLastColdStartNotRemoved() {
         when(clock.instant()).thenReturn(Instant.ofEpochMilli(1_000_000L));
-        state.setException(new AnomalyDetectionException("123", ""));
+        state.setException(new TimeSeriesException("123", ""));
         when(clock.instant()).thenReturn(Instant.ofEpochSecond(3700));
         assertTrue(!state.expired(duration));
     }

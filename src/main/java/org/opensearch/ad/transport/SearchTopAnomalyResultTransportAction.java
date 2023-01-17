@@ -32,8 +32,6 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
-import org.opensearch.ad.common.exception.ResourceNotFoundException;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.AnomalyResultBucket;
@@ -63,6 +61,9 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.FieldSortBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableMap;
@@ -309,7 +310,7 @@ public class SearchTopAnomalyResultTransportAction extends
             SearchRequest searchRequest = generateSearchRequest(request);
 
             // Adding search over any custom result indices
-            String rawCustomResultIndex = getAdResponse.getDetector().getResultIndex();
+            String rawCustomResultIndex = getAdResponse.getDetector().getCustomResultIndex();
             String customResultIndex = rawCustomResultIndex == null ? null : rawCustomResultIndex.trim();
             if (!Strings.isNullOrEmpty(customResultIndex)) {
                 searchRequest.indices(defaultIndex, customResultIndex);
@@ -423,7 +424,7 @@ public class SearchTopAnomalyResultTransportAction extends
                     listener.onResponse(new SearchTopAnomalyResultResponse(getDescendingOrderListFromHeap(topResultsHeap)));
                 } else if (expirationEpochMs < clock.millis()) {
                     if (topResultsHeap.isEmpty()) {
-                        listener.onFailure(new AnomalyDetectionException("Timed out getting all top anomaly results. Please retry later."));
+                        listener.onFailure(new TimeSeriesException("Timed out getting all top anomaly results. Please retry later."));
                     } else {
                         logger.info("Timed out getting all top anomaly results. Sending back partial results.");
                         listener.onResponse(new SearchTopAnomalyResultResponse(getDescendingOrderListFromHeap(topResultsHeap)));
@@ -486,7 +487,7 @@ public class SearchTopAnomalyResultTransportAction extends
 
         // Adding the date range and anomaly grade filters (needed regardless of real-time or historical)
         RangeQueryBuilder dateRangeFilter = QueryBuilders
-            .rangeQuery(AnomalyResult.DATA_END_TIME_FIELD)
+            .rangeQuery(CommonName.DATA_END_TIME_FIELD)
             .gte(request.getStartTime().toEpochMilli())
             .lte(request.getEndTime().toEpochMilli());
         RangeQueryBuilder anomalyGradeFilter = QueryBuilders.rangeQuery(AnomalyResult.ANOMALY_GRADE_FIELD).gt(0);

@@ -41,6 +41,8 @@ import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.index.IndexingPressure;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.transport.TimeSeriesResultBulkResponse;
 import org.opensearch.transport.TransportService;
 
 public class ADResultBulkTransportActionTests extends AbstractADTest {
@@ -68,11 +70,11 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
         Settings settings = Settings
             .builder()
             .put(IndexingPressure.MAX_INDEXING_BYTES.getKey(), "1KB")
-            .put(AnomalyDetectorSettings.INDEX_PRESSURE_SOFT_LIMIT.getKey(), 0.8)
+            .put(AnomalyDetectorSettings.AD_INDEX_PRESSURE_SOFT_LIMIT.getKey(), 0.8)
             .build();
 
         // without register these settings, the constructor of ADResultBulkTransportAction cannot invoke update consumer
-        setupTestNodes(AnomalyDetectorSettings.INDEX_PRESSURE_SOFT_LIMIT, AnomalyDetectorSettings.INDEX_PRESSURE_HARD_LIMIT);
+        setupTestNodes(AnomalyDetectorSettings.AD_INDEX_PRESSURE_SOFT_LIMIT, AnomalyDetectorSettings.AD_INDEX_PRESSURE_HARD_LIMIT);
         transportService = testNodes[0].transportService;
         clusterService = testNodes[0].clusterService;
 
@@ -118,7 +120,7 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
             return null;
         }).when(client).execute(any(), any(), any());
 
-        PlainActionFuture<ADResultBulkResponse> future = PlainActionFuture.newFuture();
+        PlainActionFuture<TimeSeriesResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
 
         future.actionGet();
@@ -151,7 +153,7 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
             return null;
         }).when(client).execute(any(), any(), any());
 
-        PlainActionFuture<ADResultBulkResponse> future = PlainActionFuture.newFuture();
+        PlainActionFuture<TimeSeriesResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
 
         future.actionGet();
@@ -190,7 +192,7 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
             return null;
         }).when(client).execute(any(), any(), any());
 
-        PlainActionFuture<ADResultBulkResponse> future = PlainActionFuture.newFuture();
+        PlainActionFuture<TimeSeriesResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
 
         future.actionGet();
@@ -210,6 +212,6 @@ public class ADResultBulkTransportActionTests extends AbstractADTest {
 
     public void testValidateRequest() {
         ActionRequestValidationException e = new ADResultBulkRequest().validate();
-        assertThat(e.validationErrors(), hasItem(ADResultBulkRequest.NO_REQUESTS_ADDED_ERR));
+        assertThat(e.validationErrors(), hasItem(CommonMessages.NO_REQUESTS_ADDED_ERR));
     }
 }

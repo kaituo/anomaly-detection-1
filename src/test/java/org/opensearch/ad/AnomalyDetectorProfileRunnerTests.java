@@ -16,9 +16,9 @@ import static java.util.Collections.emptySet;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
-import static org.opensearch.ad.model.AnomalyDetector.ANOMALY_DETECTORS_INDEX;
-import static org.opensearch.ad.model.AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -40,32 +40,33 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
-import org.opensearch.ad.common.exception.ResourceNotFoundException;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.ad.model.DetectorInternalState;
 import org.opensearch.ad.model.DetectorProfile;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.DetectorState;
 import org.opensearch.ad.model.InitProgressProfile;
-import org.opensearch.ad.model.IntervalTimeConfiguration;
 import org.opensearch.ad.model.ModelProfileOnNode;
 import org.opensearch.ad.transport.ProfileAction;
 import org.opensearch.ad.transport.ProfileNodeResponse;
 import org.opensearch.ad.transport.ProfileResponse;
 import org.opensearch.ad.transport.RCFPollingAction;
 import org.opensearch.ad.transport.RCFPollingResponse;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.io.stream.NotSerializableExceptionWrapper;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.transport.TransportAddress;
 import org.opensearch.index.IndexNotFoundException;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.ConfigState;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.RemoteTransportException;
 
 public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTests {
@@ -98,12 +99,12 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         ErrorResultStatus errorResultStatus
     ) throws IOException {
         detector = TestHelpers.randomAnomalyDetectorWithInterval(new IntervalTimeConfiguration(detectorIntervalMin, ChronoUnit.MINUTES));
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(anyString(), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(anyString(), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         runner = new AnomalyDetectorProfileRunner(
             client,
@@ -120,16 +121,16 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
             GetRequest request = (GetRequest) args[0];
             ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
 
-            if (request.index().equals(ANOMALY_DETECTORS_INDEX)) {
+            if (request.index().equals(CommonName.CONFIG_INDEX)) {
                 switch (detectorStatus) {
                     case EXIST:
                         listener
                             .onResponse(
-                                TestHelpers.createGetResponse(detector, detector.getDetectorId(), AnomalyDetector.ANOMALY_DETECTORS_INDEX)
+                                TestHelpers.createGetResponse(detector, detector.getId(), CommonName.CONFIG_INDEX)
                             );
                         break;
                     case INDEX_NOT_EXIST:
-                        listener.onFailure(new IndexNotFoundException(ANOMALY_DETECTORS_INDEX));
+                        listener.onFailure(new IndexNotFoundException(CommonName.CONFIG_INDEX));
                         break;
                     case NO_DOC:
                         when(detectorGetReponse.isExists()).thenReturn(false);
@@ -139,24 +140,24 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
                         assertTrue("should not reach here", false);
                         break;
                 }
-            } else if (request.index().equals(ANOMALY_DETECTOR_JOB_INDEX)) {
+            } else if (request.index().equals(CommonName.JOB_INDEX)) {
                 AnomalyDetectorJob job = null;
                 switch (jobStatus) {
                     case INDEX_NOT_EXIT:
-                        listener.onFailure(new IndexNotFoundException(ANOMALY_DETECTOR_JOB_INDEX));
+                        listener.onFailure(new IndexNotFoundException(CommonName.JOB_INDEX));
                         break;
                     case DISABLED:
                         job = TestHelpers.randomAnomalyDetectorJob(false, jobEnabledTime, null);
                         listener
                             .onResponse(
-                                TestHelpers.createGetResponse(job, detector.getDetectorId(), AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX)
+                                TestHelpers.createGetResponse(job, detector.getId(), CommonName.JOB_INDEX)
                             );
                         break;
                     case ENABLED:
                         job = TestHelpers.randomAnomalyDetectorJob(true, jobEnabledTime, null);
                         listener
                             .onResponse(
-                                TestHelpers.createGetResponse(job, detector.getDetectorId(), AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX)
+                                TestHelpers.createGetResponse(job, detector.getId(), CommonName.JOB_INDEX)
                             );
                         break;
                     default:
@@ -165,7 +166,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
                 }
             } else {
                 if (errorResultStatus == ErrorResultStatus.INDEX_NOT_EXIT) {
-                    listener.onFailure(new IndexNotFoundException(CommonName.DETECTION_STATE_INDEX));
+                    listener.onFailure(new IndexNotFoundException(ADCommonName.DETECTION_STATE_INDEX));
                     return null;
                 }
                 DetectorInternalState.Builder result = new DetectorInternalState.Builder().lastUpdateTime(Instant.now());
@@ -175,7 +176,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
                     result.error(error);
                 }
                 listener
-                    .onResponse(TestHelpers.createGetResponse(result.build(), detector.getDetectorId(), CommonName.DETECTION_STATE_INDEX));
+                    .onResponse(TestHelpers.createGetResponse(result.build(), detector.getId(), ADCommonName.DETECTION_STATE_INDEX));
 
             }
 
@@ -208,7 +209,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
             assertTrue("Should not reach here", false);
             inProgressLatch.countDown();
         }, exception -> {
-            assertTrue(exception.getMessage().contains(CommonErrorMessages.FAIL_TO_FIND_DETECTOR_MSG));
+            assertTrue(exception.getMessage().contains(CommonMessages.FAIL_TO_FIND_CONFIG_MSG));
             inProgressLatch.countDown();
         }), stateNError);
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
@@ -216,10 +217,10 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
 
     public void testDisabledJobIndexTemplate(JobStatus status) throws IOException, InterruptedException {
         setUpClientGet(DetectorStatus.EXIST, status, RCFPollingStatus.EMPTY, ErrorResultStatus.NO_ERROR);
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.DISABLED).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.DISABLED).build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -237,13 +238,13 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         testDisabledJobIndexTemplate(JobStatus.DISABLED);
     }
 
-    public void testInitOrRunningStateTemplate(RCFPollingStatus status, DetectorState expectedState) throws IOException,
+    public void testInitOrRunningStateTemplate(RCFPollingStatus status, ConfigState expectedState) throws IOException,
         InterruptedException {
         setUpClientGet(DetectorStatus.EXIST, JobStatus.ENABLED, status, ErrorResultStatus.NO_ERROR);
         DetectorProfile expectedProfile = new DetectorProfile.Builder().state(expectedState).build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -258,34 +259,34 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
     }
 
     public void testResultNotExist() throws IOException, InterruptedException {
-        testInitOrRunningStateTemplate(RCFPollingStatus.INIT_NOT_EXIT, DetectorState.INIT);
+        testInitOrRunningStateTemplate(RCFPollingStatus.INIT_NOT_EXIT, ConfigState.INIT);
     }
 
     public void testRemoteResultNotExist() throws IOException, InterruptedException {
-        testInitOrRunningStateTemplate(RCFPollingStatus.REMOTE_INIT_NOT_EXIT, DetectorState.INIT);
+        testInitOrRunningStateTemplate(RCFPollingStatus.REMOTE_INIT_NOT_EXIT, ConfigState.INIT);
     }
 
     public void testCheckpointIndexNotExist() throws IOException, InterruptedException {
-        testInitOrRunningStateTemplate(RCFPollingStatus.INDEX_NOT_FOUND, DetectorState.INIT);
+        testInitOrRunningStateTemplate(RCFPollingStatus.INDEX_NOT_FOUND, ConfigState.INIT);
     }
 
     public void testRemoteCheckpointIndexNotExist() throws IOException, InterruptedException {
-        testInitOrRunningStateTemplate(RCFPollingStatus.REMOTE_INDEX_NOT_FOUND, DetectorState.INIT);
+        testInitOrRunningStateTemplate(RCFPollingStatus.REMOTE_INDEX_NOT_FOUND, ConfigState.INIT);
     }
 
     public void testResultEmpty() throws IOException, InterruptedException {
-        testInitOrRunningStateTemplate(RCFPollingStatus.EMPTY, DetectorState.INIT);
+        testInitOrRunningStateTemplate(RCFPollingStatus.EMPTY, ConfigState.INIT);
     }
 
     public void testResultGreaterThanZero() throws IOException, InterruptedException {
-        testInitOrRunningStateTemplate(RCFPollingStatus.INIT_DONE, DetectorState.RUNNING);
+        testInitOrRunningStateTemplate(RCFPollingStatus.INIT_DONE, ConfigState.RUNNING);
     }
 
     @SuppressWarnings("unchecked")
     public void testErrorStateTemplate(
         RCFPollingStatus initStatus,
         ErrorResultStatus status,
-        DetectorState state,
+        ConfigState state,
         String error,
         JobStatus jobStatus,
         Set<DetectorProfileName> profilesToCollect
@@ -313,7 +314,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         DetectorProfile expectedProfile = builder.build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -330,7 +331,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
     public void testErrorStateTemplate(
         RCFPollingStatus initStatus,
         ErrorResultStatus status,
-        DetectorState state,
+        ConfigState state,
         String error,
         JobStatus jobStatus
     ) throws IOException,
@@ -339,14 +340,14 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
     }
 
     public void testRunningNoError() throws IOException, InterruptedException {
-        testErrorStateTemplate(RCFPollingStatus.INIT_DONE, ErrorResultStatus.NO_ERROR, DetectorState.RUNNING, null, JobStatus.ENABLED);
+        testErrorStateTemplate(RCFPollingStatus.INIT_DONE, ErrorResultStatus.NO_ERROR, ConfigState.RUNNING, null, JobStatus.ENABLED);
     }
 
     public void testRunningWithError() throws IOException, InterruptedException {
         testErrorStateTemplate(
             RCFPollingStatus.INIT_DONE,
             ErrorResultStatus.SHINGLE_ERROR,
-            DetectorState.RUNNING,
+            ConfigState.RUNNING,
             noFullShingleError,
             JobStatus.ENABLED
         );
@@ -356,7 +357,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         testErrorStateTemplate(
             RCFPollingStatus.INITTING,
             ErrorResultStatus.STOPPED_ERROR,
-            DetectorState.DISABLED,
+            ConfigState.DISABLED,
             stoppedError,
             JobStatus.DISABLED
         );
@@ -366,7 +367,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         testErrorStateTemplate(
             RCFPollingStatus.INITTING,
             ErrorResultStatus.STOPPED_ERROR,
-            DetectorState.DISABLED,
+            ConfigState.DISABLED,
             stoppedError,
             JobStatus.DISABLED,
             stateInitProgress
@@ -377,7 +378,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         testErrorStateTemplate(
             RCFPollingStatus.EMPTY,
             ErrorResultStatus.SHINGLE_ERROR,
-            DetectorState.INIT,
+            ConfigState.INIT,
             noFullShingleError,
             JobStatus.ENABLED
         );
@@ -479,13 +480,13 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
                         break;
                     case INDEX_NOT_FOUND:
                     case REMOTE_INDEX_NOT_FOUND:
-                        cause = new IndexNotFoundException(detectorId, CommonName.CHECKPOINT_INDEX_NAME);
+                        cause = new IndexNotFoundException(detectorId, ADCommonName.CHECKPOINT_INDEX_NAME);
                         break;
                     default:
                         assertTrue("should not reach here", false);
                         break;
                 }
-                cause = new AnomalyDetectionException(detectorId, cause);
+                cause = new TimeSeriesException(detectorId, cause);
                 if (inittedEverResultStatus == RCFPollingStatus.REMOTE_INIT_NOT_EXIT
                     || inittedEverResultStatus == RCFPollingStatus.REMOTE_INDEX_NOT_FOUND) {
                     cause = new RemoteTransportException(RCFPollingAction.NAME, new NotSerializableExceptionWrapper(cause));
@@ -524,7 +525,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(profileResponse -> {
+        runner.profile(detector.getId(), ActionListener.wrap(profileResponse -> {
             assertEquals(node1, profileResponse.getCoordinatingNode());
             assertEquals(shingleSize, profileResponse.getShingleSize());
             assertEquals(modelSize * 2, profileResponse.getTotalSizeInBytes());
@@ -549,14 +550,14 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
 
     public void testInitProgress() throws IOException, InterruptedException {
         setUpClientGet(DetectorStatus.EXIST, JobStatus.ENABLED, RCFPollingStatus.INITTING, ErrorResultStatus.NO_ERROR);
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.INIT).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.INIT).build();
 
         // 123 / 128 rounded to 96%
         InitProgressProfile profile = new InitProgressProfile("96%", neededSamples * detectorIntervalMin, neededSamples);
         expectedProfile.setInitProgress(profile);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -568,18 +569,18 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
 
     public void testInitProgressFailImmediately() throws IOException, InterruptedException {
         setUpClientGet(DetectorStatus.NO_DOC, JobStatus.ENABLED, RCFPollingStatus.INITTING, ErrorResultStatus.NO_ERROR);
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.INIT).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.INIT).build();
 
         // 123 / 128 rounded to 96%
         InitProgressProfile profile = new InitProgressProfile("96%", neededSamples * detectorIntervalMin, neededSamples);
         expectedProfile.setInitProgress(profile);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {
-            assertTrue(exception.getMessage().contains(CommonErrorMessages.FAIL_TO_FIND_DETECTOR_MSG));
+            assertTrue(exception.getMessage().contains(CommonMessages.FAIL_TO_FIND_CONFIG_MSG));
             inProgressLatch.countDown();
         }), stateInitProgress);
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
@@ -588,12 +589,12 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
     public void testInitNoUpdateNoIndex() throws IOException, InterruptedException {
         setUpClientGet(DetectorStatus.EXIST, JobStatus.ENABLED, RCFPollingStatus.EMPTY, ErrorResultStatus.NO_ERROR);
         DetectorProfile expectedProfile = new DetectorProfile.Builder()
-            .state(DetectorState.INIT)
+            .state(ConfigState.INIT)
             .initProgress(new InitProgressProfile("0%", detectorIntervalMin * requiredSamples, requiredSamples))
             .build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -610,12 +611,12 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
     public void testInitNoIndex() throws IOException, InterruptedException {
         setUpClientGet(DetectorStatus.EXIST, JobStatus.ENABLED, RCFPollingStatus.INDEX_NOT_FOUND, ErrorResultStatus.NO_ERROR);
         DetectorProfile expectedProfile = new DetectorProfile.Builder()
-            .state(DetectorState.INIT)
+            .state(ConfigState.INIT)
             .initProgress(new InitProgressProfile("0%", 0, requiredSamples))
             .build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -640,7 +641,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         setUpClientGet(DetectorStatus.EXIST, JobStatus.ENABLED, RCFPollingStatus.EXCEPTION, ErrorResultStatus.NO_ERROR);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detector.getDetectorId(), ActionListener.wrap(response -> {
+        runner.profile(detector.getId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {

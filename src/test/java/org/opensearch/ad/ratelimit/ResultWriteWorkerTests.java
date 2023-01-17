@@ -35,14 +35,11 @@ import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.ADResultBulkRequest;
-import org.opensearch.ad.transport.ADResultBulkResponse;
-import org.opensearch.ad.transport.handler.MultiEntityResultHandler;
-import org.opensearch.ad.util.RestHandlerUtils;
+import org.opensearch.ad.transport.handler.ADHCResultHandler;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
@@ -50,11 +47,16 @@ import org.opensearch.common.util.concurrent.OpenSearchRejectedExecutionExceptio
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
+import org.opensearch.timeseries.ratelimit.ResultWriteRequest;
+import org.opensearch.timeseries.transport.TimeSeriesResultBulkResponse;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 
 public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
-    ResultWriteWorker resultWriteQueue;
+    ADResultWriteWorker resultWriteQueue;
     ClusterService clusterService;
-    MultiEntityResultHandler resultHandler;
+    ADHCResultHandler resultHandler;
     AnomalyResult detectResult;
 
     @Override
@@ -70,8 +72,8 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
                         Arrays
                             .asList(
                                 AnomalyDetectorSettings.RESULT_WRITE_QUEUE_MAX_HEAP_PERCENT,
-                                AnomalyDetectorSettings.RESULT_WRITE_QUEUE_CONCURRENCY,
-                                AnomalyDetectorSettings.RESULT_WRITE_QUEUE_BATCH_SIZE
+                                AnomalyDetectorSettings.AD_RESULT_WRITE_QUEUE_CONCURRENCY,
+                                AnomalyDetectorSettings.AD_RESULT_WRITE_QUEUE_BATCH_SIZE
                             )
                     )
                 )
@@ -81,15 +83,15 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
         threadPool = mock(ThreadPool.class);
         setUpADThreadPool(threadPool);
 
-        resultHandler = mock(MultiEntityResultHandler.class);
+        resultHandler = mock(ADHCResultHandler.class);
 
-        resultWriteQueue = new ResultWriteWorker(
+        resultWriteQueue = new ADResultWriteWorker(
             Integer.MAX_VALUE,
             AnomalyDetectorSettings.RESULT_WRITE_QUEUE_SIZE_IN_BYTES,
             AnomalyDetectorSettings.RESULT_WRITE_QUEUE_MAX_HEAP_PERCENT,
             clusterService,
             new Random(42),
-            mock(ADCircuitBreakerService.class),
+            mock(TimeSeriesCircuitBreakerService.class),
             threadPool,
             Settings.EMPTY,
             AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
@@ -110,7 +112,7 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
     public void testRegular() {
         List<IndexRequest> retryRequests = new ArrayList<>();
 
-        ADResultBulkResponse resp = new ADResultBulkResponse(retryRequests);
+        TimeSeriesResultBulkResponse resp = new TimeSeriesResultBulkResponse(retryRequests);
 
         ADResultBulkRequest request = new ADResultBulkRequest();
         ResultWriteRequest resultWriteRequest = new ResultWriteRequest(
@@ -123,7 +125,7 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
         request.add(resultWriteRequest);
 
         doAnswer(invocation -> {
-            ActionListener<ADResultBulkResponse> listener = invocation.getArgument(1);
+            ActionListener<TimeSeriesResultBulkResponse> listener = invocation.getArgument(1);
             listener.onResponse(resp);
             return null;
         }).when(resultHandler).flush(any(), any());
@@ -137,12 +139,12 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
     public void testSingleRetryRequest() throws IOException {
         List<IndexRequest> retryRequests = new ArrayList<>();
         try (XContentBuilder builder = jsonBuilder()) {
-            IndexRequest indexRequest = new IndexRequest(CommonName.ANOMALY_RESULT_INDEX_ALIAS)
+            IndexRequest indexRequest = new IndexRequest(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS)
                 .source(detectResult.toXContent(builder, RestHandlerUtils.XCONTENT_WITH_TYPE));
             retryRequests.add(indexRequest);
         }
 
-        ADResultBulkResponse resp = new ADResultBulkResponse(retryRequests);
+        TimeSeriesResultBulkResponse resp = new TimeSeriesResultBulkResponse(retryRequests);
 
         ADResultBulkRequest request = new ADResultBulkRequest();
         ResultWriteRequest resultWriteRequest = new ResultWriteRequest(
@@ -156,9 +158,9 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
 
         final AtomicBoolean retried = new AtomicBoolean();
         doAnswer(invocation -> {
-            ActionListener<ADResultBulkResponse> listener = invocation.getArgument(1);
+            ActionListener<TimeSeriesResultBulkResponse> listener = invocation.getArgument(1);
             if (retried.get()) {
-                listener.onResponse(new ADResultBulkResponse());
+                listener.onResponse(new TimeSeriesResultBulkResponse());
             } else {
                 retried.set(true);
                 listener.onResponse(resp);
@@ -175,9 +177,9 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
     public void testRetryException() {
         final AtomicBoolean retried = new AtomicBoolean();
         doAnswer(invocation -> {
-            ActionListener<ADResultBulkResponse> listener = invocation.getArgument(1);
+            ActionListener<TimeSeriesResultBulkResponse> listener = invocation.getArgument(1);
             if (retried.get()) {
-                listener.onResponse(new ADResultBulkResponse());
+                listener.onResponse(new TimeSeriesResultBulkResponse());
             } else {
                 retried.set(true);
                 listener.onFailure(new OpenSearchStatusException("blah", RestStatus.REQUEST_TIMEOUT));
@@ -194,7 +196,7 @@ public class ResultWriteWorkerTests extends AbstractRateLimitingTest {
 
     public void testOverloaded() {
         doAnswer(invocation -> {
-            ActionListener<ADResultBulkResponse> listener = invocation.getArgument(1);
+            ActionListener<TimeSeriesResultBulkResponse> listener = invocation.getArgument(1);
             listener.onFailure(new OpenSearchRejectedExecutionException("blah", true));
 
             return null;

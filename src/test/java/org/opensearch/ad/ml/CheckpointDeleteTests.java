@@ -28,14 +28,15 @@ import org.mockito.Mock;
 import org.opensearch.OpenSearchException;
 import org.opensearch.action.ActionListener;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.util.ClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.ScrollableHitSource;
+import org.opensearch.timeseries.ml.TimeSeriesCheckpointDao;
+import org.opensearch.timeseries.util.ClientUtil;
 
 import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestMapper;
 import com.amazon.randomcutforest.parkservices.state.ThresholdedRandomCutForestState;
@@ -60,7 +61,7 @@ public class CheckpointDeleteTests extends AbstractADTest {
         PARTIAL_FAILURE
     }
 
-    private CheckpointDao checkpointDao;
+    private ADCheckpointDao checkpointDao;
     private Client client;
     private ClientUtil clientUtil;
     private Gson gson;
@@ -82,7 +83,7 @@ public class CheckpointDeleteTests extends AbstractADTest {
     @Before
     public void setUp() throws Exception {
         super.setUp();
-        super.setUpLog4jForJUnit(CheckpointDao.class);
+        super.setUpLog4jForJUnit(ADCheckpointDao.class);
 
         client = mock(Client.class);
         clientUtil = mock(ClientUtil.class);
@@ -97,10 +98,10 @@ public class CheckpointDeleteTests extends AbstractADTest {
         objectPool = mock(GenericObjectPool.class);
         int deserializeRCFBufferSize = 512;
         anomalyRate = 0.005;
-        checkpointDao = new CheckpointDao(
+        checkpointDao = new ADCheckpointDao(
             client,
             clientUtil,
-            CommonName.CHECKPOINT_INDEX_NAME,
+            ADCommonName.CHECKPOINT_INDEX_NAME,
             gson,
             mapper,
             converter,
@@ -140,7 +141,7 @@ public class CheckpointDeleteTests extends AbstractADTest {
 
             assertTrue(listener != null);
             if (mode == DeleteExecutionMode.INDEX_NOT_FOUND) {
-                listener.onFailure(new IndexNotFoundException(CommonName.CHECKPOINT_INDEX_NAME));
+                listener.onFailure(new IndexNotFoundException(ADCommonName.CHECKPOINT_INDEX_NAME));
             } else if (mode == DeleteExecutionMode.FAILURE) {
                 listener.onFailure(new OpenSearchException(""));
             } else {
@@ -162,22 +163,22 @@ public class CheckpointDeleteTests extends AbstractADTest {
 
     public void testDeleteSingleNormal() throws Exception {
         delete_by_detector_id_template(DeleteExecutionMode.NORMAL);
-        assertTrue(testAppender.containsMessage(CheckpointDao.DOC_GOT_DELETED_LOG_MSG));
+        assertTrue(testAppender.containsMessage(TimeSeriesCheckpointDao.DOC_GOT_DELETED_LOG_MSG));
     }
 
     public void testDeleteSingleIndexNotFound() throws Exception {
         delete_by_detector_id_template(DeleteExecutionMode.INDEX_NOT_FOUND);
-        assertTrue(testAppender.containsMessage(CheckpointDao.INDEX_DELETED_LOG_MSG));
+        assertTrue(testAppender.containsMessage(TimeSeriesCheckpointDao.INDEX_DELETED_LOG_MSG));
     }
 
     public void testDeleteSingleResultFailure() throws Exception {
         delete_by_detector_id_template(DeleteExecutionMode.FAILURE);
-        assertTrue(testAppender.containsMessage(CheckpointDao.NOT_ABLE_TO_DELETE_LOG_MSG));
+        assertTrue(testAppender.containsMessage(ADCheckpointDao.NOT_ABLE_TO_DELETE_CHECKPOINT_MSG));
     }
 
     public void testDeleteSingleResultPartialFailure() throws Exception {
         delete_by_detector_id_template(DeleteExecutionMode.PARTIAL_FAILURE);
-        assertTrue(testAppender.containsMessage(CheckpointDao.SEARCH_FAILURE_LOG_MSG));
-        assertTrue(testAppender.containsMessage(CheckpointDao.DOC_GOT_DELETED_LOG_MSG));
+        assertTrue(testAppender.containsMessage(TimeSeriesCheckpointDao.SEARCH_FAILURE_LOG_MSG));
+        assertTrue(testAppender.containsMessage(TimeSeriesCheckpointDao.DOC_GOT_DELETED_LOG_MSG));
     }
 }

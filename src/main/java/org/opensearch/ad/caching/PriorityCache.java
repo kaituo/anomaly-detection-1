@@ -39,43 +39,49 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.action.ActionListener;
-import org.opensearch.ad.AnomalyDetectorPlugin;
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.MemoryTracker.Origin;
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
-import org.opensearch.ad.common.exception.LimitExceededException;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelManager.ModelType;
-import org.opensearch.ad.ml.ModelState;
-import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.model.ModelProfile;
-import org.opensearch.ad.ratelimit.CheckpointMaintainWorker;
-import org.opensearch.ad.ratelimit.CheckpointWriteWorker;
+import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADModelState;
+import org.opensearch.ad.ratelimit.ADCheckpointMaintainWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.settings.EnabledSetting;
-import org.opensearch.ad.util.DateUtils;
+import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.Strings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.MemoryTracker.Origin;
+import org.opensearch.timeseries.caching.DoorKeeper;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.ml.EntityModel;
+import org.opensearch.timeseries.ml.ModelManager;
+import org.opensearch.timeseries.ml.ModelManager.ModelType;
+import org.opensearch.timeseries.ml.TimeSeriesModelState;
+import org.opensearch.timeseries.common.exception.LimitExceededException;
+import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.ModelProfile;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
+import org.opensearch.timeseries.util.DateUtils;
 
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 
-public class PriorityCache implements EntityCache {
+public class PriorityCache implements EntityCache<ThresholdedRandomCutForest, ADModelState<EntityModel<ThresholdedRandomCutForest>>> {
     private final Logger LOG = LogManager.getLogger(PriorityCache.class);
 
     // detector id -> CacheBuffer, weight based
     private final Map<String, CacheBuffer> activeEnities;
-    private final CheckpointDao checkpointDao;
+    private final ADCheckpointDao checkpointDao;
     private volatile int dedicatedCacheSize;
     // LRU Cache, key is model id
-    private Cache<String, ModelState<EntityModel>> inActiveEntities;
+    private Cache<String, ADModelState<EntityModel<ThresholdedRandomCutForest>>> inActiveEntities;
     private final MemoryTracker memoryTracker;
     private final ReentrantLock maintenanceLock;
     private final int numberOfTrees;
@@ -87,16 +93,16 @@ public class PriorityCache implements EntityCache {
     private Map<String, DoorKeeper> doorKeepers;
     private ThreadPool threadPool;
     private Random random;
-    private CheckpointWriteWorker checkpointWriteQueue;
+    private ADCheckpointWriteWorker checkpointWriteQueue;
     // iterating through all of inactive entities is heavy. We don't want to do
     // it again and again for no obvious benefits.
     private Instant lastInActiveEntityMaintenance;
     protected int maintenanceFreqConstant;
-    private CheckpointMaintainWorker checkpointMaintainQueue;
+    private ADCheckpointMaintainWorker checkpointMaintainQueue;
     private int checkpointIntervalHrs;
 
     public PriorityCache(
-        CheckpointDao checkpointDao,
+        ADCheckpointDao checkpointDao,
         int dedicatedCacheSize,
         Setting<TimeValue> checkpointTtl,
         int maxInactiveStates,
@@ -106,9 +112,9 @@ public class PriorityCache implements EntityCache {
         ClusterService clusterService,
         Duration modelTtl,
         ThreadPool threadPool,
-        CheckpointWriteWorker checkpointWriteQueue,
+        ADCheckpointWriteWorker checkpointWriteQueue,
         int maintenanceFreqConstant,
-        CheckpointMaintainWorker checkpointMaintainQueue,
+        ADCheckpointMaintainWorker checkpointMaintainQueue,
         Settings settings,
         Setting<TimeValue> checkpointSavingFreq
     ) {
@@ -155,23 +161,23 @@ public class PriorityCache implements EntityCache {
     }
 
     @Override
-    public ModelState<EntityModel> get(String modelId, AnomalyDetector detector) {
-        String detectorId = detector.getDetectorId();
+    public ADModelState<EntityModel<ThresholdedRandomCutForest>> get(String modelId, Config detector) {
+        String detectorId = detector.getId();
         CacheBuffer buffer = computeBufferIfAbsent(detector, detectorId);
-        ModelState<EntityModel> modelState = buffer.get(modelId);
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> modelState = buffer.get(modelId);
 
         // during maintenance period, stop putting new entries
         if (!maintenanceLock.isLocked() && modelState == null) {
-            if (EnabledSetting.isDoorKeeperInCacheEnabled()) {
+            if (ADEnabledSetting.isDoorKeeperInCacheEnabled()) {
                 DoorKeeper doorKeeper = doorKeepers
                     .computeIfAbsent(
                         detectorId,
                         id -> {
                             // reset every 60 intervals
                             return new DoorKeeper(
-                                AnomalyDetectorSettings.DOOR_KEEPER_FOR_CACHE_MAX_INSERTION,
-                                AnomalyDetectorSettings.DOOR_KEEPER_FAULSE_POSITIVE_RATE,
-                                detector.getDetectionIntervalDuration().multipliedBy(AnomalyDetectorSettings.DOOR_KEEPER_MAINTENANCE_FREQ),
+                                TimeSeriesSettings.DOOR_KEEPER_FOR_CACHE_MAX_INSERTION,
+                                TimeSeriesSettings.DOOR_KEEPER_FAULSE_POSITIVE_RATE,
+                                detector.getIntervalDuration().multipliedBy(TimeSeriesSettings.DOOR_KEEPER_MAINTENANCE_FREQ),
                                 clock
                             );
                         }
@@ -190,10 +196,10 @@ public class PriorityCache implements EntityCache {
             }
 
             try {
-                ModelState<EntityModel> state = inActiveEntities.get(modelId, new Callable<ModelState<EntityModel>>() {
+                ADModelState<EntityModel<ThresholdedRandomCutForest>> state = inActiveEntities.get(modelId, new Callable<ADModelState<EntityModel<ThresholdedRandomCutForest>>>() {
                     @Override
-                    public ModelState<EntityModel> call() {
-                        return new ModelState<>(null, modelId, detectorId, ModelType.ENTITY.getName(), clock, 0);
+                    public ADModelState<EntityModel<ThresholdedRandomCutForest>> call() {
+                        return new ADModelState<>(null, modelId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, 0);
                     }
                 });
 
@@ -236,7 +242,7 @@ public class PriorityCache implements EntityCache {
         return modelState;
     }
 
-    private Optional<ModelState<EntityModel>> getStateFromInactiveEntiiyCache(String modelId) {
+    private Optional<ADModelState<EntityModel<ThresholdedRandomCutForest>>> getStateFromInactiveEntiiyCache(String modelId) {
         if (modelId == null) {
             return Optional.empty();
         }
@@ -246,12 +252,12 @@ public class PriorityCache implements EntityCache {
     }
 
     @Override
-    public boolean hostIfPossible(AnomalyDetector detector, ModelState<EntityModel> toUpdate) {
+    public boolean hostIfPossible(Config detector, TimeSeriesModelState<EntityModel<ThresholdedRandomCutForest>> toUpdate) {
         if (toUpdate == null) {
             return false;
         }
         String modelId = toUpdate.getModelId();
-        String detectorId = toUpdate.getDetectorId();
+        String detectorId = toUpdate.getId();
 
         if (Strings.isEmpty(modelId) || Strings.isEmpty(detectorId)) {
             return false;
@@ -259,12 +265,12 @@ public class PriorityCache implements EntityCache {
 
         CacheBuffer buffer = computeBufferIfAbsent(detector, detectorId);
 
-        Optional<ModelState<EntityModel>> state = getStateFromInactiveEntiiyCache(modelId);
+        Optional<ADModelState<EntityModel<ThresholdedRandomCutForest>>> state = getStateFromInactiveEntiiyCache(modelId);
         if (false == state.isPresent()) {
             return false;
         }
 
-        ModelState<EntityModel> modelState = state.get();
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> modelState = state.get();
 
         float priority = modelState.getPriority();
 
@@ -286,7 +292,7 @@ public class PriorityCache implements EntityCache {
 
         // can replace an entity in the same CacheBuffer living in reserved or shared cache
         if (buffer.canReplaceWithinDetector(priority)) {
-            ModelState<EntityModel> removed = buffer.replace(modelId, toUpdate);
+            ADModelState<EntityModel<ThresholdedRandomCutForest>> removed = buffer.replace(modelId, toUpdate);
             // null in the case of some other threads have emptied the queue at
             // the same time so there is nothing to replace
             if (removed != null) {
@@ -301,7 +307,7 @@ public class PriorityCache implements EntityCache {
         Triple<CacheBuffer, String, Float> bufferToRemoveEntity = canReplaceInSharedCache(buffer, scaledPriority);
         CacheBuffer bufferToRemove = bufferToRemoveEntity.getLeft();
         String entityModelId = bufferToRemoveEntity.getMiddle();
-        ModelState<EntityModel> removed = null;
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> removed = null;
         if (bufferToRemove != null && ((removed = bufferToRemove.remove(entityModelId)) != null)) {
             buffer.put(modelId, toUpdate);
             addIntoInactiveCache(removed);
@@ -311,7 +317,7 @@ public class PriorityCache implements EntityCache {
         return false;
     }
 
-    private void addIntoInactiveCache(ModelState<EntityModel> removed) {
+    private void addIntoInactiveCache(ADModelState<EntityModel<ThresholdedRandomCutForest>> removed) {
         if (removed == null) {
             return;
         }
@@ -335,7 +341,7 @@ public class PriorityCache implements EntityCache {
     public Pair<List<Entity>, List<Entity>> selectUpdateCandidate(
         Collection<Entity> cacheMissEntities,
         String detectorId,
-        AnomalyDetector detector
+        Config detector
     ) {
         List<Entity> hotEntities = new ArrayList<>();
         List<Entity> coldEntities = new ArrayList<>();
@@ -383,13 +389,13 @@ public class PriorityCache implements EntityCache {
                 continue;
             }
 
-            Optional<ModelState<EntityModel>> state = getStateFromInactiveEntiiyCache(modelId.get());
+            Optional<ADModelState<EntityModel<ThresholdedRandomCutForest>>> state = getStateFromInactiveEntiiyCache(modelId.get());
             if (false == state.isPresent()) {
                 // not even recorded in inActiveEntities yet because of doorKeeper
                 continue;
             }
 
-            ModelState<EntityModel> modelState = state.get();
+            ADModelState<EntityModel<ThresholdedRandomCutForest>> modelState = state.get();
             float priority = modelState.getPriority();
 
             if (buffer.canReplaceWithinDetector(priority)) {
@@ -418,13 +424,13 @@ public class PriorityCache implements EntityCache {
                 continue;
             }
 
-            Optional<ModelState<EntityModel>> inactiveState = getStateFromInactiveEntiiyCache(modelId.get());
+            Optional<ADModelState<EntityModel<ThresholdedRandomCutForest>>> inactiveState = getStateFromInactiveEntiiyCache(modelId.get());
             if (false == inactiveState.isPresent()) {
                 // empty state should not stand a chance to replace others
                 continue;
             }
 
-            ModelState<EntityModel> state = inactiveState.get();
+            ADModelState<EntityModel<ThresholdedRandomCutForest>> state = inactiveState.get();
 
             float priority = state.getPriority();
             float scaledPriority = buffer.getPriorityTracker().getScaledPriority(priority);
@@ -456,13 +462,13 @@ public class PriorityCache implements EntityCache {
         return Pair.of(hotEntities, coldEntities);
     }
 
-    private CacheBuffer computeBufferIfAbsent(AnomalyDetector detector, String detectorId) {
+    private CacheBuffer computeBufferIfAbsent(Config detector, String detectorId) {
         CacheBuffer buffer = activeEnities.get(detectorId);
         if (buffer == null) {
             long requiredBytes = getRequiredMemory(detector, dedicatedCacheSize);
             if (memoryTracker.canAllocateReserved(requiredBytes)) {
                 memoryTracker.consumeMemory(requiredBytes, true, Origin.HC_DETECTOR);
-                long intervalSecs = detector.getDetectorIntervalInSeconds();
+                long intervalSecs = detector.getIntervalInSeconds();
 
                 buffer = new CacheBuffer(
                     dedicatedCacheSize,
@@ -482,7 +488,7 @@ public class PriorityCache implements EntityCache {
                 // Put tryClearUpMemory after consumeMemory to prevent that.
                 tryClearUpMemory();
             } else {
-                throw new LimitExceededException(detectorId, CommonErrorMessages.MEMORY_LIMIT_EXCEEDED_ERR_MSG);
+                throw new LimitExceededException(detectorId, ADCommonMessages.MEMORY_LIMIT_EXCEEDED_ERR_MSG);
             }
 
         }
@@ -495,7 +501,7 @@ public class PriorityCache implements EntityCache {
      * @param numberOfEntity number of entities
      * @return Memory in bytes required for hosting numberOfEntity entities
      */
-    private long getRequiredMemory(AnomalyDetector detector, int numberOfEntity) {
+    private long getRequiredMemory(Config detector, int numberOfEntity) {
         int dimension = detector.getEnabledFeatureIds().size() * detector.getShingleSize();
         return numberOfEntity * memoryTracker
             .estimateTRCFModelSize(
@@ -548,7 +554,7 @@ public class PriorityCache implements EntityCache {
     private void tryClearUpMemory() {
         try {
             if (maintenanceLock.tryLock()) {
-                threadPool.executor(AnomalyDetectorPlugin.AD_THREAD_POOL_NAME).execute(() -> clearMemory());
+                threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME).execute(() -> clearMemory());
             } else {
                 threadPool.schedule(() -> {
                     try {
@@ -556,7 +562,7 @@ public class PriorityCache implements EntityCache {
                     } catch (Exception e) {
                         LOG.error("Fail to clear up memory taken by CacheBuffer.  Will retry during maintenance.");
                     }
-                }, new TimeValue(random.nextInt(90), TimeUnit.SECONDS), AnomalyDetectorPlugin.AD_THREAD_POOL_NAME);
+                }, new TimeValue(random.nextInt(90), TimeUnit.SECONDS), TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME);
             }
         } finally {
             if (maintenanceLock.isHeldByCurrentThread()) {
@@ -590,7 +596,7 @@ public class PriorityCache implements EntityCache {
                 CacheBuffer minPriorityBuffer = toRemove.getMiddle();
                 String minPriorityEntityModelId = toRemove.getRight();
 
-                ModelState<EntityModel> removed = minPriorityBuffer.remove(minPriorityEntityModelId);
+                ADModelState<EntityModel<ThresholdedRandomCutForest>> removed = minPriorityBuffer.remove(minPriorityEntityModelId);
                 memoryToShed -= minPriorityBuffer.getMemoryConsumptionPerEntity();
                 addIntoInactiveCache(removed);
 
@@ -644,8 +650,8 @@ public class PriorityCache implements EntityCache {
                     activeEnities.remove(detectorId);
                     cacheBuffer.clear();
                 } else {
-                    List<ModelState<EntityModel>> removedStates = cacheBuffer.maintenance();
-                    for (ModelState<EntityModel> state : removedStates) {
+                    List<ADModelState<EntityModel<ThresholdedRandomCutForest>>> removedStates = cacheBuffer.maintenance();
+                    for (ADModelState<EntityModel<ThresholdedRandomCutForest>> state : removedStates) {
                         addIntoInactiveCache(state);
                     }
                 }
@@ -665,7 +671,7 @@ public class PriorityCache implements EntityCache {
             });
         } catch (Exception e) {
             // will be thrown to ES's transport broadcast handler
-            throw new AnomalyDetectionException("Fail to maintain cache", e);
+            throw new TimeSeriesException("Fail to maintain cache", e);
         }
 
     }
@@ -732,14 +738,14 @@ public class PriorityCache implements EntityCache {
     public long getTotalUpdates(String detectorId, String entityModelId) {
         CacheBuffer cacheBuffer = activeEnities.get(detectorId);
         if (cacheBuffer != null) {
-            Optional<EntityModel> modelOptional = cacheBuffer.getModel(entityModelId);
+            Optional<EntityModel<ThresholdedRandomCutForest>> modelOptional = cacheBuffer.getModel(entityModelId);
             // TODO: make it work for shingles. samples.size() is not the real shingle
             long accumulatedShingles = modelOptional
-                .flatMap(model -> model.getTrcf())
+                .flatMap(model -> model.getModel())
                 .map(trcf -> trcf.getForest())
                 .map(rcf -> rcf.getTotalUpdates())
                 .orElseGet(
-                    () -> modelOptional.map(model -> model.getSamples()).map(samples -> samples.size()).map(Long::valueOf).orElse(0L)
+                    () -> modelOptional.map(model -> model.getValueOnlySamples()).map(samples -> samples.size()).map(Long::valueOf).orElse(0L)
                 );
             return accumulatedShingles;
         }
@@ -763,8 +769,8 @@ public class PriorityCache implements EntityCache {
      * @return list of modelStates
      */
     @Override
-    public List<ModelState<?>> getAllModels() {
-        List<ModelState<?>> states = new ArrayList<>();
+    public List<ADModelState<EntityModel<ThresholdedRandomCutForest>>> getAllModels() {
+        List<ADModelState<EntityModel<ThresholdedRandomCutForest>>> states = new ArrayList<>();
         activeEnities.values().stream().forEach(cacheBuffer -> states.addAll(cacheBuffer.getAllModels()));
         return states;
     }
@@ -808,7 +814,7 @@ public class PriorityCache implements EntityCache {
                 return lastUsedMs;
             }
         }
-        ModelState<EntityModel> stateInActive = inActiveEntities.getIfPresent(entityModelId);
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> stateInActive = inActiveEntities.getIfPresent(entityModelId);
         if (stateInActive != null) {
             lastUsedMs = stateInActive.getLastUsedTime().toEpochMilli();
         }
@@ -822,7 +828,7 @@ public class PriorityCache implements EntityCache {
         tryClearUpMemory();
         activeEnities.values().stream().forEach(cacheBuffer -> {
             if (cacheBuffer.canRemove()) {
-                ModelState<EntityModel> removed = cacheBuffer.remove();
+                ADModelState<EntityModel<ThresholdedRandomCutForest>> removed = cacheBuffer.remove();
                 addIntoInactiveCache(removed);
             }
         });
@@ -838,9 +844,9 @@ public class PriorityCache implements EntityCache {
         inActiveEntities.cleanUp();
 
         // // make sure no model has been stored due to bugs
-        for (ModelState<EntityModel> state : inActiveEntities.asMap().values()) {
-            EntityModel model = state.getModel();
-            if (model != null && model.getTrcf().isPresent()) {
+        for (ADModelState<EntityModel<ThresholdedRandomCutForest>> state : inActiveEntities.asMap().values()) {
+            EntityModel<ThresholdedRandomCutForest> model = state.getModel();
+            if (model != null && model.getModel().isPresent()) {
                 LOG.warn(new ParameterizedMessage("Inactive entity's model is null: [{}]. Maybe there are bugs.", state.getModelId()));
                 state.setModel(null);
             }
@@ -868,7 +874,7 @@ public class PriorityCache implements EntityCache {
         if (cacheBuffer != null) {
             long size = cacheBuffer.getMemoryConsumptionPerEntity();
             cacheBuffer.getAllModels().forEach(entry -> {
-                EntityModel model = entry.getModel();
+                EntityModel<ThresholdedRandomCutForest> model = entry.getModel();
                 Entity entity = null;
                 if (model != null && model.getEntity().isPresent()) {
                     entity = model.getEntity().get();
@@ -890,7 +896,7 @@ public class PriorityCache implements EntityCache {
     public Optional<ModelProfile> getModelProfile(String detectorId, String entityModelId) {
         CacheBuffer cacheBuffer = activeEnities.get(detectorId);
         if (cacheBuffer != null && cacheBuffer.getModel(entityModelId).isPresent()) {
-            EntityModel model = cacheBuffer.getModel(entityModelId).get();
+            EntityModel<ThresholdedRandomCutForest> model = cacheBuffer.getModel(entityModelId).get();
             Entity entity = null;
             if (model != null && model.getEntity().isPresent()) {
                 entity = model.getEntity().get();
@@ -927,7 +933,7 @@ public class PriorityCache implements EntityCache {
      * @return Model state
      */
     @Override
-    public Optional<ModelState<EntityModel>> getForMaintainance(String detectorId, String modelId) {
+    public Optional<ADModelState<EntityModel<ThresholdedRandomCutForest>>> getForMaintainance(String detectorId, String modelId) {
         CacheBuffer buffer = activeEnities.get(detectorId);
         if (buffer == null) {
             return Optional.empty();
@@ -944,7 +950,7 @@ public class PriorityCache implements EntityCache {
     public void removeEntityModel(String detectorId, String entityModelId) {
         CacheBuffer buffer = activeEnities.get(detectorId);
         if (buffer != null) {
-            ModelState<EntityModel> removed = null;
+            ADModelState<EntityModel<ThresholdedRandomCutForest>> removed = null;
             if ((removed = buffer.remove(entityModelId, false)) != null) {
                 addIntoInactiveCache(removed);
             }
@@ -960,7 +966,7 @@ public class PriorityCache implements EntityCache {
             );
     }
 
-    private Cache<String, ModelState<EntityModel>> createInactiveCache(Duration inactiveEntityTtl, int maxInactiveStates) {
+    private Cache<String, ADModelState<EntityModel<ThresholdedRandomCutForest>>> createInactiveCache(Duration inactiveEntityTtl, int maxInactiveStates) {
         return CacheBuilder
             .newBuilder()
             .expireAfterAccess(inactiveEntityTtl.toHours(), TimeUnit.HOURS)

@@ -20,7 +20,7 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.constant.CommonName.ANOMALY_RESULT_INDEX_ALIAS;
+import static org.opensearch.ad.constant.ADCommonName.ANOMALY_RESULT_INDEX_ALIAS;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -37,8 +37,6 @@ import org.opensearch.ad.ADUnitTestCase;
 import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
 import org.opensearch.ad.model.AnomalyResult;
-import org.opensearch.ad.util.ClientUtil;
-import org.opensearch.ad.util.IndexUtils;
 import org.opensearch.ad.util.Throttler;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
@@ -47,12 +45,15 @@ import org.opensearch.index.Index;
 import org.opensearch.index.engine.VersionConflictEngineException;
 import org.opensearch.index.shard.ShardId;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.transport.handler.TimeSeriesResultBulkIndexHandler;
+import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 
 import com.google.common.collect.ImmutableList;
 
 public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
 
-    private AnomalyResultBulkIndexHandler bulkIndexHandler;
+    private TimeSeriesResultBulkIndexHandler bulkIndexHandler;
     private Client client;
     private IndexUtils indexUtils;
     private ActionListener<BulkResponse> listener;
@@ -71,7 +72,7 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
         indexUtils = mock(IndexUtils.class);
         ClusterService clusterService = mock(ClusterService.class);
         ThreadPool threadPool = mock(ThreadPool.class);
-        bulkIndexHandler = new AnomalyResultBulkIndexHandler(
+        bulkIndexHandler = new TimeSeriesResultBulkIndexHandler(
             client,
             settings,
             threadPool,
@@ -92,7 +93,7 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
     public void testNullAnomalyResults() {
         bulkIndexHandler.bulkIndexAnomalyResult(null, null, listener);
         verify(listener, times(1)).onResponse(null);
-        verify(anomalyDetectionIndices, never()).doesAnomalyDetectorIndexExist();
+        verify(anomalyDetectionIndices, never()).doesConfigIndexExist();
     }
 
     public void testAnomalyResultBulkIndexHandler_IndexNotExist() {
@@ -133,7 +134,7 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
             listener.onResponse(new CreateIndexResponse(false, false, ANOMALY_RESULT_INDEX_ALIAS));
             return null;
-        }).when(anomalyDetectionIndices).initDefaultAnomalyResultIndexDirectly(any());
+        }).when(anomalyDetectionIndices).initDefaultResultIndexDirectly(any());
         bulkIndexHandler.bulkIndexAnomalyResult(null, ImmutableList.of(mock(AnomalyResult.class)), listener);
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertEquals("Creating anomaly result index with mappings call not acknowledged", exceptionCaptor.getValue().getMessage());
@@ -142,7 +143,7 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
     public void testWrongAnomalyResult() {
         BulkRequestBuilder bulkRequestBuilder = new BulkRequestBuilder(client, BulkAction.INSTANCE);
         doReturn(bulkRequestBuilder).when(client).prepareBulk();
-        doReturn(true).when(anomalyDetectionIndices).doesDefaultAnomalyResultIndexExist();
+        doReturn(true).when(anomalyDetectionIndices).doesDefaultResultIndexExist();
         doAnswer(invocation -> {
             ActionListener<BulkResponse> listener = invocation.getArgument(1);
             BulkItemResponse[] bulkItemResponses = new BulkItemResponse[2];
@@ -176,7 +177,7 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
     public void testBulkSaveException() {
         BulkRequestBuilder bulkRequestBuilder = mock(BulkRequestBuilder.class);
         doReturn(bulkRequestBuilder).when(client).prepareBulk();
-        doReturn(true).when(anomalyDetectionIndices).doesDefaultAnomalyResultIndexExist();
+        doReturn(true).when(anomalyDetectionIndices).doesDefaultResultIndexExist();
 
         String testError = randomAlphaOfLength(5);
         doAnswer(invocation -> {

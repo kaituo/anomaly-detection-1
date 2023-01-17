@@ -18,8 +18,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.common.exception.LimitExceededException;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
@@ -30,6 +28,9 @@ import org.opensearch.monitor.jvm.JvmInfo;
 import org.opensearch.monitor.jvm.JvmInfo.Mem;
 import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.common.exception.LimitExceededException;
 
 import com.amazon.randomcutforest.config.Precision;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
@@ -56,7 +57,7 @@ public class MemoryTrackerTests extends OpenSearchTestCase {
     double modelDesiredSizePercentage;
     JvmService jvmService;
     AnomalyDetector detector;
-    ADCircuitBreakerService circuitBreaker;
+    TimeSeriesCircuitBreakerService circuitBreaker;
 
     @Override
     public void setUp() throws Exception {
@@ -114,7 +115,7 @@ public class MemoryTrackerTests extends OpenSearchTestCase {
         when(detector.getEnabledFeatureIds()).thenReturn(Collections.singletonList("a"));
         when(detector.getShingleSize()).thenReturn(1);
 
-        circuitBreaker = mock(ADCircuitBreakerService.class);
+        circuitBreaker = mock(TimeSeriesCircuitBreakerService.class);
         when(circuitBreaker.isOpen()).thenReturn(false);
     }
 

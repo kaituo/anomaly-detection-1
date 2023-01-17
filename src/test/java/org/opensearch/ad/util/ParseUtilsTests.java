@@ -11,7 +11,7 @@
 
 package org.opensearch.ad.util;
 
-import static org.opensearch.ad.util.ParseUtils.addUserBackendRolesFilter;
+import static org.opensearch.ad.util.ADParseUtils.addUserBackendRolesFilter;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -19,9 +19,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.common.exception.AnomalyDetectionException;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Feature;
 import org.opensearch.common.ParsingException;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.commons.authuser.User;
@@ -31,6 +29,9 @@ import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregatorFactories;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.model.Feature;
+import org.opensearch.timeseries.util.ParseUtils;
 
 import com.google.common.collect.ImmutableList;
 
@@ -76,7 +77,7 @@ public class ParseUtilsTests extends OpenSearchTestCase {
 
     public void testToAggregationBuilder() throws IOException {
         XContentParser parser = TestHelpers.parser("{\"aa\":{\"value_count\":{\"field\":\"ok\"}}}");
-        AggregationBuilder aggregationBuilder = ParseUtils.toAggregationBuilder(parser);
+        AggregationBuilder aggregationBuilder = ADParseUtils.toAggregationBuilder(parser);
         assertNotNull(aggregationBuilder);
         assertEquals("aa", aggregationBuilder.getName());
     }
@@ -88,22 +89,22 @@ public class ParseUtilsTests extends OpenSearchTestCase {
     }
 
     public void testParseAggregatorsWithInvalidAggregationName() throws IOException {
-        XContentParser parser = ParseUtils.parser("{\"aa\":{\"value_count\":{\"field\":\"ok\"}}}", TestHelpers.xContentRegistry());
-        Exception ex = expectThrows(ParsingException.class, () -> ParseUtils.parseAggregators(parser, 0, "#@?><:{"));
+        XContentParser parser = ADParseUtils.parser("{\"aa\":{\"value_count\":{\"field\":\"ok\"}}}", TestHelpers.xContentRegistry());
+        Exception ex = expectThrows(ParsingException.class, () -> ADParseUtils.parseAggregators(parser, 0, "#@?><:{"));
         assertTrue(ex.getMessage().contains("Aggregation names must be alpha-numeric and can only contain '_' and '-'"));
     }
 
     public void testParseAggregatorsWithTwoAggregationTypes() throws IOException {
-        XContentParser parser = ParseUtils
+        XContentParser parser = ADParseUtils
             .parser("{\"test\":{\"avg\":{\"field\":\"value\"},\"sum\":{\"field\":\"value\"}}}", TestHelpers.xContentRegistry());
-        Exception ex = expectThrows(ParsingException.class, () -> ParseUtils.parseAggregators(parser, 0, "test"));
+        Exception ex = expectThrows(ParsingException.class, () -> ADParseUtils.parseAggregators(parser, 0, "test"));
         assertTrue(ex.getMessage().contains("Found two aggregation type definitions in"));
     }
 
     public void testParseAggregatorsWithNullAggregationDefinition() throws IOException {
         String aggName = "test";
-        XContentParser parser = ParseUtils.parser("{\"test\":{}}", TestHelpers.xContentRegistry());
-        Exception ex = expectThrows(ParsingException.class, () -> ParseUtils.parseAggregators(parser, 0, aggName));
+        XContentParser parser = ADParseUtils.parser("{\"test\":{}}", TestHelpers.xContentRegistry());
+        Exception ex = expectThrows(ParsingException.class, () -> ADParseUtils.parseAggregators(parser, 0, aggName));
         assertTrue(ex.getMessage().contains("Missing definition for aggregation [" + aggName + "]"));
     }
 
@@ -117,7 +118,7 @@ public class ParseUtilsTests extends OpenSearchTestCase {
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(null, Instant.now());
         long startTime = randomLong();
         long endTime = randomLong();
-        SearchSourceBuilder builder = ParseUtils.generateInternalFeatureQuery(detector, startTime, endTime, TestHelpers.xContentRegistry());
+        SearchSourceBuilder builder = ADParseUtils.generateInternalFeatureQuery(detector, startTime, endTime, TestHelpers.xContentRegistry());
         for (Feature feature : detector.getFeatureAttributes()) {
             assertTrue(builder.toString().contains(feature.getId()));
         }
@@ -125,7 +126,7 @@ public class ParseUtilsTests extends OpenSearchTestCase {
 
     public void testGenerateInternalFeatureQueryTemplate() throws IOException {
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(null, Instant.now());
-        String builder = ParseUtils.generateInternalFeatureQueryTemplate(detector, TestHelpers.xContentRegistry());
+        String builder = ADParseUtils.generateInternalFeatureQueryTemplate(detector, TestHelpers.xContentRegistry());
         for (Feature feature : detector.getFeatureAttributes()) {
             assertTrue(builder.contains(feature.getId()));
         }
@@ -206,7 +207,7 @@ public class ParseUtilsTests extends OpenSearchTestCase {
 
         long startTime = now.minus(10, ChronoUnit.DAYS).toEpochMilli();
         long endTime = now.plus(10, ChronoUnit.DAYS).toEpochMilli();
-        SearchSourceBuilder searchSourceBuilder = ParseUtils
+        SearchSourceBuilder searchSourceBuilder = ADParseUtils
             .batchFeatureQuery(detector, null, startTime, endTime, TestHelpers.xContentRegistry());
         assertEquals(
             "{\"size\":0,\"query\":{\"bool\":{\"must\":[{\"range\":{\""
@@ -241,9 +242,9 @@ public class ParseUtilsTests extends OpenSearchTestCase {
         long startTime = now.minus(10, ChronoUnit.DAYS).toEpochMilli();
         long endTime = now.plus(10, ChronoUnit.DAYS).toEpochMilli();
 
-        AnomalyDetectionException exception = expectThrows(
-            AnomalyDetectionException.class,
-            () -> ParseUtils.batchFeatureQuery(detector, null, startTime, endTime, TestHelpers.xContentRegistry())
+        TimeSeriesException exception = expectThrows(
+            TimeSeriesException.class,
+            () -> ADParseUtils.batchFeatureQuery(detector, null, startTime, endTime, TestHelpers.xContentRegistry())
         );
         assertEquals("No enabled feature configured", exception.getMessage());
     }
@@ -256,9 +257,9 @@ public class ParseUtilsTests extends OpenSearchTestCase {
 
         long startTime = now.minus(10, ChronoUnit.DAYS).toEpochMilli();
         long endTime = now.plus(10, ChronoUnit.DAYS).toEpochMilli();
-        AnomalyDetectionException exception = expectThrows(
-            AnomalyDetectionException.class,
-            () -> ParseUtils.batchFeatureQuery(detector, null, startTime, endTime, TestHelpers.xContentRegistry())
+        TimeSeriesException exception = expectThrows(
+            TimeSeriesException.class,
+            () -> ADParseUtils.batchFeatureQuery(detector, null, startTime, endTime, TestHelpers.xContentRegistry())
         );
         assertEquals("No enabled feature configured", exception.getMessage());
     }
@@ -283,7 +284,7 @@ public class ParseUtilsTests extends OpenSearchTestCase {
         Feature feature2 = TestHelpers.randomFeature("feature-name2", "field-name2", "sum", true);
         Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableList.of(feature1, feature2), null, now);
-        List<String> fieldNames = ParseUtils.getFeatureFieldNames(detector, TestHelpers.xContentRegistry());
+        List<String> fieldNames = ADParseUtils.getFeatureFieldNames(detector, TestHelpers.xContentRegistry());
         assertTrue(fieldNames.contains("field-name1"));
         assertTrue(fieldNames.contains("field-name2"));
     }

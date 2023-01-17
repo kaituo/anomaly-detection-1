@@ -26,13 +26,12 @@ import org.junit.*;
 import org.mockito.Mockito;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.ad.NodeStateManager;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
-import org.opensearch.ad.model.Entity;
 import org.opensearch.ad.model.EntityProfile;
 import org.opensearch.ad.model.InitProgressProfile;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
@@ -52,6 +51,10 @@ import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.RestHandlerUtils;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableMap;
@@ -87,7 +90,7 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         adTaskManager = mock(ADTaskManager.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         SecurityClientUtil clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         action = new GetAnomalyDetectorTransportAction(
             Mockito.mock(TransportService.class),
@@ -245,7 +248,7 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
 
         // {init_progress={percentage=99%, estimated_minutes_left=2, needed_shingles=2}}
         Map<String, Object> map = TestHelpers.XContentBuilderToMap(builder);
-        Map<String, Object> parsedInitProgress = (Map<String, Object>) (map.get(CommonName.INIT_PROGRESS));
+        Map<String, Object> parsedInitProgress = (Map<String, Object>) (map.get(ADCommonName.INIT_PROGRESS));
         Assert.assertEquals(initProgress.getPercentage(), parsedInitProgress.get(InitProgressProfile.PERCENTAGE).toString());
         assertTrue(initProgress.toString().contains("[percentage=99%,estimated_minutes_left=2,needed_shingles=2]"));
         Assert

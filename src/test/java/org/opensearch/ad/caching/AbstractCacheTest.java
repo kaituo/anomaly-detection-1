@@ -23,20 +23,23 @@ import java.util.Random;
 
 import org.junit.Before;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelManager.ModelType;
-import org.opensearch.ad.ml.ModelState;
+import org.opensearch.ad.ml.ADModelState;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.ratelimit.CheckpointMaintainWorker;
-import org.opensearch.ad.ratelimit.CheckpointWriteWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointMaintainWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
+import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.ml.ModelManager;
+import org.opensearch.timeseries.ml.ModelManager.ModelType;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
+import org.opensearch.timeseries.model.Entity;
+
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class AbstractCacheTest extends AbstractADTest {
     protected String modelId1, modelId2, modelId3, modelId4;
     protected Entity entity1, entity2, entity3, entity4;
-    protected ModelState<EntityModel> modelState1, modelState2, modelState3, modelState4;
+    protected ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> modelState1, modelState2, modelState3, modelState4;
     protected String detectorId;
     protected AnomalyDetector detector;
     protected Clock clock;
@@ -45,8 +48,8 @@ public class AbstractCacheTest extends AbstractADTest {
     protected CacheBuffer cacheBuffer;
     protected long memoryPerEntity;
     protected MemoryTracker memoryTracker;
-    protected CheckpointWriteWorker checkpointWriteQueue;
-    protected CheckpointMaintainWorker checkpointMaintainQueue;
+    protected ADCheckpointWriteWorker checkpointWriteQueue;
+    protected ADCheckpointMaintainWorker checkpointMaintainQueue;
     protected Random random;
     protected int shingleSize;
 
@@ -56,10 +59,10 @@ public class AbstractCacheTest extends AbstractADTest {
         super.setUp();
         detector = mock(AnomalyDetector.class);
         detectorId = "123";
-        when(detector.getDetectorId()).thenReturn(detectorId);
+        when(detector.getId()).thenReturn(detectorId);
         detectorDuration = Duration.ofMinutes(5);
-        when(detector.getDetectionIntervalDuration()).thenReturn(detectorDuration);
-        when(detector.getDetectorIntervalInSeconds()).thenReturn(detectorDuration.getSeconds());
+        when(detector.getIntervalDuration()).thenReturn(detectorDuration);
+        when(detector.getIntervalInSeconds()).thenReturn(detectorDuration.getSeconds());
         when(detector.getEnabledFeatureIds()).thenReturn(new ArrayList<String>() {
             {
                 add("a");
@@ -85,8 +88,8 @@ public class AbstractCacheTest extends AbstractADTest {
         memoryPerEntity = 81920;
         memoryTracker = mock(MemoryTracker.class);
 
-        checkpointWriteQueue = mock(CheckpointWriteWorker.class);
-        checkpointMaintainQueue = mock(CheckpointMaintainWorker.class);
+        checkpointWriteQueue = mock(ADCheckpointWriteWorker.class);
+        checkpointMaintainQueue = mock(ADCheckpointMaintainWorker.class);
 
         cacheBuffer = new CacheBuffer(
             1,
@@ -103,38 +106,38 @@ public class AbstractCacheTest extends AbstractADTest {
 
         initialPriority = cacheBuffer.getPriorityTracker().getUpdatedPriority(0);
 
-        modelState1 = new ModelState<>(
-            new EntityModel(entity1, new ArrayDeque<>(), null),
+        modelState1 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity1, new ArrayDeque<>(), null),
             modelId1,
             detectorId,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );
 
-        modelState2 = new ModelState<>(
-            new EntityModel(entity2, new ArrayDeque<>(), null),
+        modelState2 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity2, new ArrayDeque<>(), null),
             modelId2,
             detectorId,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );
 
-        modelState3 = new ModelState<>(
-            new EntityModel(entity3, new ArrayDeque<>(), null),
+        modelState3 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity3, new ArrayDeque<>(), null),
             modelId3,
             detectorId,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );
 
-        modelState4 = new ModelState<>(
-            new EntityModel(entity4, new ArrayDeque<>(), null),
+        modelState4 = new ADModelState<>(
+            new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity4, new ArrayDeque<>(), null),
             modelId4,
             detectorId,
-            ModelType.ENTITY.getName(),
+            ModelManager.ModelType.ENTITY.getName(),
             clock,
             0
         );

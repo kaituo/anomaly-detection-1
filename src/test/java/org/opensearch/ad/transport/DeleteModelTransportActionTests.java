@@ -28,14 +28,11 @@ import org.opensearch.Version;
 import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.NodeStateManager;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
-import org.opensearch.ad.constant.CommonErrorMessages;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.ml.ADEntityColdStarter;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -47,6 +44,9 @@ import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.caching.CacheProvider;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.transport.TransportService;
 
 import test.org.opensearch.ad.util.JsonDeserializer;
@@ -70,14 +70,14 @@ public class DeleteModelTransportActionTests extends AbstractADTest {
 
         TransportService transportService = mock(TransportService.class);
         ActionFilters actionFilters = mock(ActionFilters.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        ModelManager modelManager = mock(ModelManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
+        ADModelManager modelManager = mock(ADModelManager.class);
         FeatureManager featureManager = mock(FeatureManager.class);
         CacheProvider cacheProvider = mock(CacheProvider.class);
         EntityCache entityCache = mock(EntityCache.class);
         when(cacheProvider.get()).thenReturn(entityCache);
         ADTaskCacheManager adTaskCacheManager = mock(ADTaskCacheManager.class);
-        EntityColdStarter coldStarter = mock(EntityColdStarter.class);
+        ADEntityColdStarter coldStarter = mock(ADEntityColdStarter.class);
 
         action = new DeleteModelTransportAction(
             threadPool,
@@ -135,6 +135,6 @@ public class DeleteModelTransportActionTests extends AbstractADTest {
 
     public void testEmptyDetectorID() {
         ActionRequestValidationException e = new DeleteModelRequest().validate();
-        assertThat(e.validationErrors(), Matchers.hasItem(CommonErrorMessages.AD_ID_MISSING_MSG));
+        assertThat(e.validationErrors(), Matchers.hasItem(ADCommonMessages.AD_ID_MISSING_MSG));
     }
 }

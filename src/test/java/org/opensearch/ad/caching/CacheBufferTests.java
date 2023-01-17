@@ -22,8 +22,8 @@ import java.util.Map.Entry;
 import java.util.Optional;
 
 import org.mockito.ArgumentCaptor;
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.ratelimit.CheckpointMaintainRequest;
+import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.ratelimit.CheckpointMaintainRequest;
 
 import test.org.opensearch.ad.util.MLUtil;
 import test.org.opensearch.ad.util.RandomModelStateConfig;

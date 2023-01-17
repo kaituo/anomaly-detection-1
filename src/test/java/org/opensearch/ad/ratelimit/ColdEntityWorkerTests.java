@@ -27,17 +27,19 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.timeseries.breaker.TimeSeriesCircuitBreakerService;
+import org.opensearch.timeseries.ratelimit.EntityFeatureRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 
 public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
     ClusterService clusterService;
-    ColdEntityWorker coldWorker;
-    CheckpointReadWorker readWorker;
+    ADColdEntityWorker coldWorker;
+    ADCheckpointReadWorker readWorker;
     EntityFeatureRequest request, request2, invalidRequest;
     List<EntityFeatureRequest> requests;
 
@@ -45,7 +47,7 @@ public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
     public void setUp() throws Exception {
         super.setUp();
         clusterService = mock(ClusterService.class);
-        Settings settings = Settings.builder().put(AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_BATCH_SIZE.getKey(), 1).build();
+        Settings settings = Settings.builder().put(AnomalyDetectorSettings.AD_CHECKPOINT_READ_QUEUE_BATCH_SIZE.getKey(), 1).build();
         ClusterSettings clusterSettings = new ClusterSettings(
             settings,
             Collections
@@ -55,23 +57,23 @@ public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
                             .asList(
                                 AnomalyDetectorSettings.EXPECTED_COLD_ENTITY_EXECUTION_TIME_IN_MILLISECS,
                                 AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
-                                AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_BATCH_SIZE
+                                AnomalyDetectorSettings.AD_CHECKPOINT_READ_QUEUE_BATCH_SIZE
                             )
                     )
                 )
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        readWorker = mock(CheckpointReadWorker.class);
+        readWorker = mock(ADCheckpointReadWorker.class);
 
         // Integer.MAX_VALUE makes a huge heap
-        coldWorker = new ColdEntityWorker(
+        coldWorker = new ADColdEntityWorker(
             Integer.MAX_VALUE,
             AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
             AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
             clusterService,
             new Random(42),
-            mock(ADCircuitBreakerService.class),
+            mock(TimeSeriesCircuitBreakerService.class),
             threadPool,
             settings,
             AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,
@@ -145,7 +147,7 @@ public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
                             .asList(
                                 AnomalyDetectorSettings.EXPECTED_COLD_ENTITY_EXECUTION_TIME_IN_MILLISECS,
                                 AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
-                                AnomalyDetectorSettings.CHECKPOINT_READ_QUEUE_BATCH_SIZE
+                                AnomalyDetectorSettings.AD_CHECKPOINT_READ_QUEUE_BATCH_SIZE
                             )
                     )
                 )
@@ -153,13 +155,13 @@ public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
         // Integer.MAX_VALUE makes a huge heap
-        coldWorker = new ColdEntityWorker(
+        coldWorker = new ADColdEntityWorker(
             Integer.MAX_VALUE,
             AnomalyDetectorSettings.ENTITY_FEATURE_REQUEST_SIZE_IN_BYTES,
             AnomalyDetectorSettings.COLD_ENTITY_QUEUE_MAX_HEAP_PERCENT,
             clusterService,
             new Random(42),
-            mock(ADCircuitBreakerService.class),
+            mock(TimeSeriesCircuitBreakerService.class),
             threadPool,
             Settings.EMPTY,
             AnomalyDetectorSettings.MAX_QUEUED_TASKS_RATIO,

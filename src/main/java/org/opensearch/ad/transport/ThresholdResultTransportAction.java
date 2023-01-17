@@ -16,7 +16,7 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.ActionListener;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.tasks.Task;
 import org.opensearch.transport.TransportService;
@@ -24,10 +24,10 @@ import org.opensearch.transport.TransportService;
 public class ThresholdResultTransportAction extends HandledTransportAction<ThresholdResultRequest, ThresholdResultResponse> {
 
     private static final Logger LOG = LogManager.getLogger(ThresholdResultTransportAction.class);
-    private ModelManager manager;
+    private ADModelManager manager;
 
     @Inject
-    public ThresholdResultTransportAction(ActionFilters actionFilters, TransportService transportService, ModelManager manager) {
+    public ThresholdResultTransportAction(ActionFilters actionFilters, TransportService transportService, ADModelManager manager) {
         super(ThresholdResultAction.NAME, transportService, actionFilters, ThresholdResultRequest::new);
         this.manager = manager;
     }

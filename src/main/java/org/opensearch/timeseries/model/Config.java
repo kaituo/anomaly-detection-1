@@ -1,0 +1,532 @@
+package org.opensearch.timeseries.model;
+
+
+import static org.opensearch.ad.constant.ADCommonName.CUSTOM_RESULT_INDEX_PREFIX;
+import static org.opensearch.timeseries.constant.CommonMessages.INVALID_CHAR_IN_RESULT_INDEX_NAME;
+import static org.opensearch.timeseries.constant.CommonMessages.INVALID_RESULT_INDEX_NAME_SIZE;
+import static org.opensearch.timeseries.constant.CommonMessages.INVALID_RESULT_INDEX_PREFIX;
+
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.logging.log4j.util.Strings;
+import org.opensearch.common.io.stream.StreamInput;
+import org.opensearch.common.io.stream.StreamOutput;
+import org.opensearch.common.io.stream.Writeable;
+import org.opensearch.core.xcontent.ToXContentObject;
+import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.commons.authuser.User;
+import org.opensearch.index.query.QueryBuilder;
+import org.opensearch.timeseries.annotation.Generated;
+import org.opensearch.timeseries.constant.CommonMessages;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.dataprocessor.FixedValueInterpolator;
+import org.opensearch.timeseries.dataprocessor.InterpolationMethod;
+import org.opensearch.timeseries.dataprocessor.InterpolationOption;
+import org.opensearch.timeseries.dataprocessor.Interpolator;
+import org.opensearch.timeseries.dataprocessor.LinearUniformInterpolator;
+import org.opensearch.timeseries.dataprocessor.PreviousValueInterpolator;
+import org.opensearch.timeseries.dataprocessor.ZeroInterpolator;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
+
+import com.google.common.base.Objects;
+import com.google.common.collect.ImmutableList;
+
+public abstract class Config implements Writeable, ToXContentObject {
+    private static final Logger logger = LogManager.getLogger(Config.class);
+
+    public static final int MAX_RESULT_INDEX_NAME_SIZE = 255;
+    // OS doesn’t allow uppercase: https://tinyurl.com/yse2xdbx
+    public static final String RESULT_INDEX_NAME_PATTERN = "[a-z0-9_-]+";
+
+    public static final String NO_ID = "";
+    public static final String TIMEOUT = "timeout";
+    public static final String GENERAL_SETTINGS = "general_settings";
+    public static final String AGGREGATION = "aggregation_issue";
+
+    // field in JSON representation
+    public static final String NAME_FIELD = "name";
+    public static final String DESCRIPTION_FIELD = "description";
+    public static final String TIMEFIELD_FIELD = "time_field";
+    public static final String INDICES_FIELD = "indices";
+    public static final String UI_METADATA_FIELD = "ui_metadata";
+    public static final String FILTER_QUERY_FIELD = "filter_query";
+    public static final String FEATURE_ATTRIBUTES_FIELD = "feature_attributes";
+    public static final String WINDOW_DELAY_FIELD = "window_delay";
+    public static final String SHINGLE_SIZE_FIELD = "shingle_size";
+    public static final String LAST_UPDATE_TIME_FIELD = "last_update_time";
+    public static final String CATEGORY_FIELD = "category_field";
+    public static final String USER_FIELD = "user";
+    public static final String RESULT_INDEX_FIELD = "result_index";
+    public static final String INTERPOLATION_OPTION_FIELD = "interpolation_option";
+
+    private static final Interpolator zeroInterpolator;
+    private static final Interpolator previousInterpolator;
+    private static final Interpolator linearInterpolator;
+
+    protected String id;
+    protected Long version;
+    protected String name;
+    protected String description;
+    protected String timeField;
+    protected List<String> indices;
+    protected List<Feature> featureAttributes;
+    protected QueryBuilder filterQuery;
+    protected TimeConfiguration interval;
+    protected TimeConfiguration windowDelay;
+    protected Integer shingleSize;
+    protected String resultIndex;
+    protected Map<String, Object> uiMetadata;
+    protected Integer schemaVersion;
+    protected Instant lastUpdateTime;
+    protected List<String> categoryFields;
+    protected User user;
+    protected InterpolationOption interpolationOption;
+
+    // validation error
+    protected String errorMessage;
+    protected ValidationIssueType issueType;
+
+    protected Interpolator interpolator;
+
+    static {
+        zeroInterpolator = new ZeroInterpolator();
+        previousInterpolator = new PreviousValueInterpolator();
+        linearInterpolator = new LinearUniformInterpolator();
+    }
+
+    protected Config(String id, Long version, String name, String description, String timeField,
+            List<String> indices, List<Feature> features, QueryBuilder filterQuery,
+            TimeConfiguration windowDelay, Integer shingleSize, Map<String, Object> uiMetadata, Integer schemaVersion,
+            Instant lastUpdateTime, List<String> categoryFields, User user, String resultIndex,
+            TimeConfiguration interval, InterpolationOption interpolationOption) {
+        if (Strings.isBlank(name)) {
+            errorMessage =
+                CommonMessages.EMPTY_NAME;
+            issueType = ValidationIssueType.NAME;
+            return;
+        }
+        if (Strings.isBlank(timeField)) {
+            errorMessage =
+                CommonMessages.NULL_TIME_FIELD;
+                issueType = ValidationIssueType.TIMEFIELD_FIELD;
+                return;
+        }
+        if (indices == null || indices.isEmpty()) {
+            errorMessage =
+                CommonMessages.EMPTY_INDICES;
+            issueType = ValidationIssueType.INDICES;
+                return;
+        }
+
+        if (invalidShingleSizeRange(shingleSize)) {
+            errorMessage =
+                "Shingle size must be a positive integer no larger than "
+                    + TimeSeriesSettings.MAX_SHINGLE_SIZE
+                    + ". Got "
+                    + shingleSize;
+            issueType = ValidationIssueType.SHINGLE_SIZE_FIELD;
+            return;
+        }
+
+        errorMessage = validateResultIndex(this.resultIndex);
+        if (errorMessage != null) {
+            issueType = ValidationIssueType.RESULT_INDEX;
+            return;
+        }
+
+        if (interpolationOption.getMethod() == InterpolationMethod.FIXED_VALUES && interpolationOption.getDefaultFill().isEmpty()) {
+            issueType = ValidationIssueType.INTERPOLATION;
+            errorMessage = "No given values for fixed value interpolation";
+            return;
+        }
+
+        this.id = id;
+        this.version = version;
+        this.name = name;
+        this.description = description;
+        this.timeField = timeField;
+        this.indices = indices;
+        this.featureAttributes = features == null ? ImmutableList.of() : ImmutableList.copyOf(features);
+        this.filterQuery = filterQuery;
+        this.interval = interval;
+        this.windowDelay = windowDelay;
+        this.shingleSize = getShingleSize(shingleSize);
+        this.uiMetadata = uiMetadata;
+        this.schemaVersion = schemaVersion;
+        this.lastUpdateTime = lastUpdateTime;
+        this.categoryFields = categoryFields;
+        this.user = user;
+        this.resultIndex = Strings.trimToNull(resultIndex);
+        this.interpolationOption = interpolationOption;
+        this.interpolator = createInterpolator();
+    }
+
+    public Config(StreamInput input) throws IOException {
+        id = input.readOptionalString();
+        version = input.readOptionalLong();
+        name = input.readString();
+        description = input.readOptionalString();
+        timeField = input.readString();
+        indices = input.readStringList();
+        featureAttributes = input.readList(Feature::new);
+        filterQuery = input.readNamedWriteable(QueryBuilder.class);
+        interval = IntervalTimeConfiguration.readFrom(input);
+        windowDelay = IntervalTimeConfiguration.readFrom(input);
+        shingleSize = input.readInt();
+        schemaVersion = input.readInt();
+        this.categoryFields = input.readOptionalStringList();
+        lastUpdateTime = input.readInstant();
+        if (input.readBoolean()) {
+            this.user = new User(input);
+        } else {
+            user = null;
+        }
+        if (input.readBoolean()) {
+            this.uiMetadata = input.readMap();
+        } else {
+            this.uiMetadata = null;
+        }
+        resultIndex = input.readOptionalString();
+        if (input.readBoolean()) {
+            this.interpolationOption = new InterpolationOption(input);
+        } else {
+            this.interpolationOption = null;
+        }
+        this.interpolator = createInterpolator();
+    }
+
+    /*
+     * Implicit constructor that be called implicitly when a subtype
+     * needs to call like AnomalyDetector(StreamInput). Otherwise,
+     * we will have compiler error:
+     * "Implicit super constructor Config() is undefined.
+     * Must explicitly invoke another constructor".
+     */
+    public Config() {
+        this.interpolator = null;
+    }
+
+    @Override
+    public void writeTo(StreamOutput output) throws IOException {
+        output.writeOptionalString(id);
+        output.writeOptionalLong(version);
+        output.writeString(name);
+        output.writeOptionalString(description);
+        output.writeString(timeField);
+        output.writeStringCollection(indices);
+        output.writeList(featureAttributes);
+        output.writeNamedWriteable(filterQuery);
+        interval.writeTo(output);
+        windowDelay.writeTo(output);
+        output.writeInt(shingleSize);
+        output.writeInt(schemaVersion);
+        output.writeOptionalStringCollection(categoryFields);
+        output.writeInstant(lastUpdateTime);
+        if (user != null) {
+            output.writeBoolean(true); // user exists
+            user.writeTo(output);
+        } else {
+            output.writeBoolean(false); // user does not exist
+        }
+        if (uiMetadata != null) {
+            output.writeBoolean(true);
+            output.writeMap(uiMetadata);
+        } else {
+            output.writeBoolean(false);
+        }
+        output.writeOptionalString(resultIndex);
+        if (interpolationOption != null) {
+            output.writeBoolean(true);
+            interpolationOption.writeTo(output);
+        } else {
+            output.writeBoolean(false);
+        }
+    }
+
+    /**
+     * If the given shingle size is null, return default based on the kind of detector;
+     * otherwise, return the given shingle size.
+     *
+     * @param customShingleSize Given shingle size
+     * @return Shingle size
+     */
+    protected static Integer getShingleSize(Integer customShingleSize) {
+        return customShingleSize == null ? TimeSeriesSettings.DEFAULT_SHINGLE_SIZE : customShingleSize;
+    }
+
+    public boolean invalidShingleSizeRange(Integer shingleSizeToTest) {
+        return shingleSizeToTest != null && (shingleSizeToTest < 1 || shingleSizeToTest > TimeSeriesSettings.MAX_SHINGLE_SIZE);
+    }
+
+    /**
+     *
+     * @return either ValidationAspect.FORECASTER or ValidationAspect.DETECTOR
+     *  depending on this is a forecaster or detector config.
+     */
+    protected abstract ValidationAspect getConfigValidationAspect();
+
+    @Generated
+    @Override
+    public boolean equals(Object o) {
+        if (this == o)
+            return true;
+        if (o == null || getClass() != o.getClass())
+            return false;
+        Config config = (Config) o;
+        return Objects.equal(id, config.id)
+            && Objects.equal(name, config.name)
+            && Objects.equal(description, config.description)
+            && Objects.equal(timeField, config.timeField)
+            && Objects.equal(indices, config.indices)
+            && Objects.equal(featureAttributes, config.featureAttributes)
+            && Objects.equal(filterQuery, config.filterQuery)
+            && Objects.equal(interval, config.interval)
+            && Objects.equal(windowDelay, config.windowDelay)
+            && Objects.equal(shingleSize, config.shingleSize)
+            && Objects.equal(categoryFields, config.categoryFields)
+            && Objects.equal(uiMetadata, config.uiMetadata)
+            && Objects.equal(schemaVersion, config.schemaVersion)
+            && Objects.equal(lastUpdateTime, config.lastUpdateTime)
+            && Objects.equal(user, config.user)
+            && Objects.equal(resultIndex, config.resultIndex)
+            && Objects.equal(interpolationOption, config.interpolationOption);
+    }
+
+    @Generated
+    @Override
+    public int hashCode() {
+        return Objects
+            .hashCode(
+                id,
+                name,
+                description,
+                timeField,
+                indices,
+                featureAttributes,
+                filterQuery,
+                interval,
+                windowDelay,
+                shingleSize,
+                categoryFields,
+                uiMetadata,
+                schemaVersion,
+                lastUpdateTime,
+                user,
+                resultIndex,
+                interpolationOption
+            );
+    }
+
+    @Override
+    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+        builder
+            .field(NAME_FIELD, name)
+            .field(DESCRIPTION_FIELD, description)
+            .field(TIMEFIELD_FIELD, timeField)
+            .field(INDICES_FIELD, indices.toArray())
+            .field(FILTER_QUERY_FIELD, filterQuery)
+            .field(WINDOW_DELAY_FIELD, windowDelay)
+            .field(SHINGLE_SIZE_FIELD, shingleSize)
+            .field(CommonName.SCHEMA_VERSION_FIELD, schemaVersion)
+            .field(FEATURE_ATTRIBUTES_FIELD, featureAttributes.toArray());
+
+        if (uiMetadata != null && !uiMetadata.isEmpty()) {
+            builder.field(UI_METADATA_FIELD, uiMetadata);
+        }
+        if (lastUpdateTime != null) {
+            builder.field(LAST_UPDATE_TIME_FIELD, lastUpdateTime.toEpochMilli());
+        }
+        if (categoryFields != null) {
+            builder.field(CATEGORY_FIELD, categoryFields.toArray());
+        }
+        if (user != null) {
+            builder.field(USER_FIELD, user);
+        }
+        if (resultIndex != null) {
+            builder.field(RESULT_INDEX_FIELD, resultIndex);
+        }
+        if (interpolationOption != null) {
+            builder.field(INTERPOLATION_OPTION_FIELD, interpolationOption);
+        }
+        return builder;
+    }
+
+    public Long getVersion() {
+        return version;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+
+    public String getTimeField() {
+        return timeField;
+    }
+
+    public List<String> getIndices() {
+        return indices;
+    }
+
+    public List<Feature> getFeatureAttributes() {
+        return featureAttributes;
+    }
+
+    public QueryBuilder getFilterQuery() {
+        return filterQuery;
+    }
+
+    /**
+     * Returns enabled feature ids in the same order in feature attributes.
+     *
+     * @return a list of filtered feature ids.
+     */
+    public List<String> getEnabledFeatureIds() {
+        return featureAttributes.stream().filter(Feature::getEnabled).map(Feature::getId).collect(Collectors.toList());
+    }
+
+    public List<String> getEnabledFeatureNames() {
+        return featureAttributes.stream().filter(Feature::getEnabled).map(Feature::getName).collect(Collectors.toList());
+    }
+
+    public TimeConfiguration getInterval() {
+        return interval;
+    }
+
+    public TimeConfiguration getWindowDelay() {
+        return windowDelay;
+    }
+
+    public Integer getShingleSize() {
+        return shingleSize;
+    }
+
+    public Map<String, Object> getUiMetadata() {
+        return uiMetadata;
+    }
+
+    public Integer getSchemaVersion() {
+        return schemaVersion;
+    }
+
+    public Instant getLastUpdateTime() {
+        return lastUpdateTime;
+    }
+
+    public List<String> getCategoryField() {
+        return this.categoryFields;
+    }
+
+    public String getId() {
+        return id;
+    }
+
+    public long getIntervalInMilliseconds() {
+        return ((IntervalTimeConfiguration) getInterval()).toDuration().toMillis();
+    }
+
+    public long getIntervalInSeconds() {
+        return getIntervalInMilliseconds() / 1000;
+    }
+
+    public long getIntervalInMinutes() {
+        return getIntervalInMilliseconds() / 1000 / 60;
+    }
+
+    public Duration getIntervalDuration() {
+        return ((IntervalTimeConfiguration) getInterval()).toDuration();
+    }
+
+    public User getUser() {
+        return user;
+    }
+
+    public void setUser(User user) {
+        this.user = user;
+    }
+
+    public String getCustomResultIndex() {
+        return resultIndex;
+    }
+
+    public boolean isHC() {
+        return Config.isHC(getCategoryField());
+    }
+
+    public boolean isMultipleCategories() {
+        return categoryFields != null && categoryFields.size() > 1;
+    }
+
+    public static String validateResultIndex(String resultIndex) {
+        if (resultIndex == null) {
+            return null;
+        }
+        if (!resultIndex.startsWith(CUSTOM_RESULT_INDEX_PREFIX)) {
+            return INVALID_RESULT_INDEX_PREFIX;
+        }
+        if (resultIndex.length() > MAX_RESULT_INDEX_NAME_SIZE) {
+            return INVALID_RESULT_INDEX_NAME_SIZE;
+        }
+        if (!resultIndex.matches(RESULT_INDEX_NAME_PATTERN)) {
+            return INVALID_CHAR_IN_RESULT_INDEX_NAME;
+        }
+        return null;
+    }
+
+    public static boolean isHC(List<String> categoryFields) {
+        return categoryFields != null && categoryFields.size() > 0;
+    }
+
+    public InterpolationOption getInterpolationOption() {
+        return interpolationOption;
+    }
+
+    public Interpolator getInterpolator() {
+        if (interpolator != null) {
+            return interpolator;
+        }
+        interpolator = createInterpolator();
+        return interpolator;
+    }
+
+    private Interpolator createInterpolator() {
+        Interpolator interpolator = null;
+
+        // default interpolator is using last known value
+        if (interpolationOption == null) {
+            return previousInterpolator;
+        }
+
+        switch(interpolationOption.getMethod()) {
+        case ZERO:
+            interpolator = zeroInterpolator;
+            break;
+        case FIXED_VALUES:
+            // we did validate default fill is not empty in the constructor
+            interpolator = new FixedValueInterpolator(interpolationOption.getDefaultFill().get());
+            break;
+        case PREVIOUS:
+            interpolator = previousInterpolator;
+            break;
+        case LINEAR:
+            interpolator = linearInterpolator;
+            break;
+        default:
+            logger.error("unsupported method: " + interpolationOption.getMethod());
+            interpolator = new PreviousValueInterpolator();
+            break;
+        }
+        return interpolator;
+    }
+}

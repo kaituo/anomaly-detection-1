@@ -25,17 +25,21 @@ import org.apache.commons.lang.builder.EqualsBuilder;
 import org.apache.commons.lang.builder.HashCodeBuilder;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.ad.ExpiringState;
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.MemoryTracker.Origin;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelState;
+import org.opensearch.ad.ml.ADModelState;
 import org.opensearch.ad.model.InitProgressProfile;
-import org.opensearch.ad.ratelimit.CheckpointMaintainRequest;
-import org.opensearch.ad.ratelimit.CheckpointMaintainWorker;
-import org.opensearch.ad.ratelimit.CheckpointWriteWorker;
-import org.opensearch.ad.ratelimit.RequestPriority;
-import org.opensearch.ad.util.DateUtils;
+import org.opensearch.ad.ratelimit.ADCheckpointMaintainWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
+import org.opensearch.timeseries.ExpiringState;
+import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.MemoryTracker.Origin;
+import org.opensearch.timeseries.caching.PriorityTracker;
+import org.opensearch.timeseries.ml.EntityModel;
+import org.opensearch.timeseries.ml.TimeSeriesModelState;
+import org.opensearch.timeseries.ratelimit.CheckpointMaintainRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
+import org.opensearch.timeseries.util.DateUtils;
+
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 /**
  * We use a layered cache to manage active entities’ states.  We have a two-level
@@ -66,7 +70,7 @@ public class CacheBuffer implements ExpiringState {
     private int minimumCapacity;
 
     // key is model id
-    private final ConcurrentHashMap<String, ModelState<EntityModel>> items;
+    private final ConcurrentHashMap<String, ADModelState<EntityModel<ThresholdedRandomCutForest>>> items;
     // memory consumption per entity
     private final long memoryConsumptionPerEntity;
     private final MemoryTracker memoryTracker;
@@ -76,8 +80,8 @@ public class CacheBuffer implements ExpiringState {
     private long reservedBytes;
     private final PriorityTracker priorityTracker;
     private final Clock clock;
-    private final CheckpointWriteWorker checkpointWriteQueue;
-    private final CheckpointMaintainWorker checkpointMaintainQueue;
+    private final ADCheckpointWriteWorker checkpointWriteQueue;
+    private final ADCheckpointMaintainWorker checkpointMaintainQueue;
     private int checkpointIntervalHrs;
 
     public CacheBuffer(
@@ -88,8 +92,8 @@ public class CacheBuffer implements ExpiringState {
         Clock clock,
         Duration modelTtl,
         String detectorId,
-        CheckpointWriteWorker checkpointWriteQueue,
-        CheckpointMaintainWorker checkpointMaintainQueue,
+        ADCheckpointWriteWorker checkpointWriteQueue,
+        ADCheckpointMaintainWorker checkpointMaintainQueue,
         int checkpointIntervalHrs
     ) {
         this.memoryConsumptionPerEntity = memoryConsumptionPerEntity;
@@ -128,7 +132,7 @@ public class CacheBuffer implements ExpiringState {
      * @param entityModelId the model Id
      * @param value the ModelState
      */
-    public void put(String entityModelId, ModelState<EntityModel> value) {
+    public void put(String entityModelId, ADModelState<EntityModel<ThresholdedRandomCutForest>> value) {
         // race conditions can happen between the put and one of the following operations:
         // remove: not a problem as it is unlikely we are removing and putting the same thing
         // maintenance: not a problem as we are unlikely to maintain an entry that's not
@@ -147,8 +151,8 @@ public class CacheBuffer implements ExpiringState {
     * @param value the ModelState
     * @param priority the priority
     */
-    private void put(String entityModelId, ModelState<EntityModel> value, float priority) {
-        ModelState<EntityModel> contentNode = items.get(entityModelId);
+    private void put(String entityModelId, ADModelState<EntityModel<ThresholdedRandomCutForest>> value, float priority) {
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> contentNode = items.get(entityModelId);
         if (contentNode == null) {
             priorityTracker.addPriority(entityModelId, priority);
             items.put(entityModelId, value);
@@ -174,11 +178,11 @@ public class CacheBuffer implements ExpiringState {
      * @return the Model state to which the specified model Id is mapped, or null
      * if this CacheBuffer contains no mapping for the model Id
      */
-    public ModelState<EntityModel> get(String key) {
+    public ADModelState<EntityModel<ThresholdedRandomCutForest>> get(String key) {
         // We can get an item that is to be removed soon due to race condition.
         // This is acceptable as it won't cause any corruption and exception.
         // And this item is used for scoring one last time.
-        ModelState<EntityModel> node = items.get(key);
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> node = items.get(key);
         if (node == null) {
             return null;
         }
@@ -195,11 +199,11 @@ public class CacheBuffer implements ExpiringState {
      * @return the Model state to which the specified model Id is mapped, or null
      * if this CacheBuffer contains no mapping for the model Id
      */
-    public ModelState<EntityModel> getWithoutUpdatePriority(String key) {
+    public ADModelState<EntityModel<ThresholdedRandomCutForest>> getWithoutUpdatePriority(String key) {
         // We can get an item that is to be removed soon due to race condition.
         // This is acceptable as it won't cause any corruption and exception.
         // And this item is used for scoring one last time.
-        ModelState<EntityModel> node = items.get(key);
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> node = items.get(key);
         if (node == null) {
             return null;
         }
@@ -219,7 +223,7 @@ public class CacheBuffer implements ExpiringState {
      * @return the associated ModelState associated with the key, or null if there
      * is no associated ModelState for the key
      */
-    public ModelState<EntityModel> remove() {
+    public ADModelState<EntityModel<ThresholdedRandomCutForest>> remove() {
         // race conditions can happen between the put and one of the following operations:
         // remove from other threads: not a problem. If they remove the same item,
         // our method is idempotent. If they remove two different items,
@@ -244,7 +248,7 @@ public class CacheBuffer implements ExpiringState {
      * @return the associated ModelState associated with the key, or null if there
      * is no associated ModelState for the key
      */
-    public ModelState<EntityModel> remove(String keyToRemove) {
+    public ADModelState<EntityModel<ThresholdedRandomCutForest>> remove(String keyToRemove) {
         return remove(keyToRemove, true);
     }
 
@@ -256,13 +260,13 @@ public class CacheBuffer implements ExpiringState {
      * @return the associated ModelState associated with the key, or null if there
      * is no associated ModelState for the key
      */
-    public ModelState<EntityModel> remove(String keyToRemove, boolean saveCheckpoint) {
+    public ADModelState<EntityModel<ThresholdedRandomCutForest>> remove(String keyToRemove, boolean saveCheckpoint) {
         priorityTracker.removePriority(keyToRemove);
 
         // if shared cache is empty, we are using reserved memory
         boolean reserved = sharedCacheEmpty();
 
-        ModelState<EntityModel> valueRemoved = items.remove(keyToRemove);
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> valueRemoved = items.remove(keyToRemove);
 
         if (valueRemoved != null) {
             if (!reserved) {
@@ -270,13 +274,13 @@ public class CacheBuffer implements ExpiringState {
                 memoryTracker.releaseMemory(memoryConsumptionPerEntity, false, Origin.HC_DETECTOR);
             }
 
-            EntityModel modelRemoved = valueRemoved.getModel();
+            EntityModel<ThresholdedRandomCutForest> modelRemoved = valueRemoved.getModel();
             if (modelRemoved != null) {
                 if (saveCheckpoint) {
                     // null model has only samples. For null model we save a checkpoint
                     // regardless of last checkpoint time. whether If we don't save,
                     // we throw the new samples and might never be able to initialize the model
-                    boolean isNullModel = !modelRemoved.getTrcf().isPresent();
+                    boolean isNullModel = !modelRemoved.getModel().isPresent();
                     checkpointWriteQueue.write(valueRemoved, isNullModel, RequestPriority.MEDIUM);
                 }
 
@@ -332,8 +336,8 @@ public class CacheBuffer implements ExpiringState {
      * @return the associated ModelState associated with the key, or null if there
      * is no associated ModelState for the key
      */
-    public ModelState<EntityModel> replace(String entityModelId, ModelState<EntityModel> value) {
-        ModelState<EntityModel> replaced = remove();
+    public ADModelState<EntityModel<ThresholdedRandomCutForest>> replace(String entityModelId, TimeSeriesModelState<EntityModel<ThresholdedRandomCutForest>> value) {
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> replaced = remove();
         put(entityModelId, value);
         return replaced;
     }
@@ -342,16 +346,16 @@ public class CacheBuffer implements ExpiringState {
      * Remove expired state and save checkpoints of existing states
      * @return removed states
      */
-    public List<ModelState<EntityModel>> maintenance() {
+    public List<ADModelState<EntityModel<ThresholdedRandomCutForest>>> maintenance() {
         List<CheckpointMaintainRequest> modelsToSave = new ArrayList<>();
-        List<ModelState<EntityModel>> removedStates = new ArrayList<>();
+        List<ADModelState<EntityModel<ThresholdedRandomCutForest>>> removedStates = new ArrayList<>();
         Instant now = clock.instant();
         int currentHour = DateUtils.getUTCHourOfDay(now);
         int currentSlot = currentHour % checkpointIntervalHrs;
         items.entrySet().stream().forEach(entry -> {
             String entityModelId = entry.getKey();
             try {
-                ModelState<EntityModel> modelState = entry.getValue();
+                ADModelState<EntityModel<ThresholdedRandomCutForest>> modelState = entry.getValue();
 
                 if (modelState.getLastUsedTime().plus(modelTtl).isBefore(now)) {
                     // race conditions can happen between the put and one of the following operations:
@@ -436,7 +440,7 @@ public class CacheBuffer implements ExpiringState {
      * @return Last used time of the model
      */
     public long getLastUsedTime(String entityModelId) {
-        ModelState<EntityModel> state = items.get(entityModelId);
+        ADModelState<EntityModel<ThresholdedRandomCutForest>> state = items.get(entityModelId);
         if (state != null) {
             return state.getLastUsedTime().toEpochMilli();
         }
@@ -448,7 +452,7 @@ public class CacheBuffer implements ExpiringState {
      * @param entityModelId entity Id
      * @return Get the model of an entity
      */
-    public Optional<EntityModel> getModel(String entityModelId) {
+    public Optional<EntityModel<ThresholdedRandomCutForest>> getModel(String entityModelId) {
         return Optional.of(items).map(map -> map.get(entityModelId)).map(state -> state.getModel());
     }
 
@@ -521,7 +525,7 @@ public class CacheBuffer implements ExpiringState {
         return detectorId;
     }
 
-    public List<ModelState<EntityModel>> getAllModels() {
+    public List<ADModelState<EntityModel<ThresholdedRandomCutForest>>> getAllModels() {
         return items.values().stream().collect(Collectors.toList());
     }
 

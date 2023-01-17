@@ -20,14 +20,14 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.nodes.BaseNodesResponse;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.model.ModelProfile;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ModelProfileOnNode;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ToXContentFragment;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.timeseries.model.ModelProfile;
 
 /**
  * This class consists of the aggregated responses from the nodes
@@ -35,13 +35,13 @@ import org.opensearch.core.xcontent.XContentBuilder;
 public class ProfileResponse extends BaseNodesResponse<ProfileNodeResponse> implements ToXContentFragment {
     private static final Logger LOG = LogManager.getLogger(ProfileResponse.class);
     // filed name in toXContent
-    static final String COORDINATING_NODE = CommonName.COORDINATING_NODE;
-    static final String SHINGLE_SIZE = CommonName.SHINGLE_SIZE;
-    static final String TOTAL_SIZE = CommonName.TOTAL_SIZE_IN_BYTES;
-    static final String ACTIVE_ENTITY = CommonName.ACTIVE_ENTITIES;
-    static final String MODELS = CommonName.MODELS;
-    static final String TOTAL_UPDATES = CommonName.TOTAL_UPDATES;
-    static final String MODEL_COUNT = CommonName.MODEL_COUNT;
+    static final String COORDINATING_NODE = ADCommonName.COORDINATING_NODE;
+    static final String SHINGLE_SIZE = ADCommonName.SHINGLE_SIZE;
+    static final String TOTAL_SIZE = ADCommonName.TOTAL_SIZE_IN_BYTES;
+    static final String ACTIVE_ENTITY = ADCommonName.ACTIVE_ENTITIES;
+    static final String MODELS = ADCommonName.MODELS;
+    static final String TOTAL_UPDATES = ADCommonName.TOTAL_UPDATES;
+    static final String MODEL_COUNT = ADCommonName.MODEL_COUNT;
 
     // changed from ModelProfile to ModelProfileOnNode since Opensearch 1.1
     private ModelProfileOnNode[] modelProfile;

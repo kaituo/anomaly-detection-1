@@ -17,8 +17,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.opensearch.ad.model.AnomalyDetector.ANOMALY_DETECTORS_INDEX;
-import static org.opensearch.ad.model.AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -45,7 +43,7 @@ import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
@@ -53,7 +51,6 @@ import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.DetectorInternalState;
 import org.opensearch.ad.model.DetectorProfile;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.DetectorState;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyResultTests;
 import org.opensearch.ad.transport.ProfileAction;
@@ -65,6 +62,10 @@ import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.transport.TransportAddress;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.ConfigState;
+import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
 public class MultiEntityProfileRunnerTests extends AbstractADTest {
@@ -116,7 +117,7 @@ public class MultiEntityProfileRunnerTests extends AbstractADTest {
         super.setUp();
         client = mock(Client.class);
         Clock clock = mock(Clock.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         nodeFilter = mock(DiscoveryNodeFilterer.class);
         requiredSamples = 128;
@@ -150,16 +151,16 @@ public class MultiEntityProfileRunnerTests extends AbstractADTest {
             ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
 
             String indexName = request.index();
-            if (indexName.equals(ANOMALY_DETECTORS_INDEX)) {
+            if (indexName.equals(CommonName.CONFIG_INDEX)) {
                 listener
-                    .onResponse(TestHelpers.createGetResponse(detector, detector.getDetectorId(), AnomalyDetector.ANOMALY_DETECTORS_INDEX));
-            } else if (indexName.equals(CommonName.DETECTION_STATE_INDEX)) {
+                    .onResponse(TestHelpers.createGetResponse(detector, detector.getId(), CommonName.CONFIG_INDEX));
+            } else if (indexName.equals(ADCommonName.DETECTION_STATE_INDEX)) {
                 listener
-                    .onResponse(TestHelpers.createGetResponse(result.build(), detector.getDetectorId(), CommonName.DETECTION_STATE_INDEX));
-            } else if (indexName.equals(ANOMALY_DETECTOR_JOB_INDEX)) {
+                    .onResponse(TestHelpers.createGetResponse(result.build(), detector.getId(), ADCommonName.DETECTION_STATE_INDEX));
+            } else if (indexName.equals(CommonName.JOB_INDEX)) {
                 listener
                     .onResponse(
-                        TestHelpers.createGetResponse(job, detector.getDetectorId(), AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX)
+                        TestHelpers.createGetResponse(job, detector.getId(), CommonName.JOB_INDEX)
                     );
             }
 
@@ -286,7 +287,7 @@ public class MultiEntityProfileRunnerTests extends AbstractADTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.INIT).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.INIT).build();
         runner.profile(detectorId, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
@@ -303,7 +304,7 @@ public class MultiEntityProfileRunnerTests extends AbstractADTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.RUNNING).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.RUNNING).build();
         runner.profile(detectorId, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
@@ -324,7 +325,7 @@ public class MultiEntityProfileRunnerTests extends AbstractADTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.RUNNING).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.RUNNING).build();
         runner.profile(detectorId, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();

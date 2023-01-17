@@ -27,29 +27,33 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.action.update.UpdateRequest;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.constant.CommonName;
-import org.opensearch.ad.ml.CheckpointDao;
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelState;
+import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADModelState;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.timeseries.caching.CacheProvider;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.ml.createFromValueOnlySamples;
+import org.opensearch.timeseries.ratelimit.CheckPointMaintainRequestAdapter;
+import org.opensearch.timeseries.ratelimit.CheckpointMaintainRequest;
+import org.opensearch.timeseries.ratelimit.CheckpointWriteRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 
 import test.org.opensearch.ad.util.MLUtil;
 import test.org.opensearch.ad.util.RandomModelStateConfig;
 
 public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingTest {
     private CacheProvider cache;
-    private CheckpointDao checkpointDao;
+    private ADCheckpointDao checkpointDao;
     private String indexName;
     private Setting<TimeValue> checkpointInterval;
     private CheckPointMaintainRequestAdapter adapter;
-    private ModelState<EntityModel> state;
+    private ADModelState<createFromValueOnlySamples> state;
     private CheckpointMaintainRequest request;
     private ClusterService clusterService;
 
@@ -57,8 +61,8 @@ public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingT
     public void setUp() throws Exception {
         super.setUp();
         cache = mock(CacheProvider.class);
-        checkpointDao = mock(CheckpointDao.class);
-        indexName = CommonName.CHECKPOINT_INDEX_NAME;
+        checkpointDao = mock(ADCheckpointDao.class);
+        indexName = ADCommonName.CHECKPOINT_INDEX_NAME;
         checkpointInterval = AnomalyDetectorSettings.CHECKPOINT_SAVING_FREQ;
         EntityCache entityCache = mock(EntityCache.class);
         when(cache.get()).thenReturn(entityCache);

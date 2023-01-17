@@ -14,7 +14,7 @@ package org.opensearch.ad.transport;
 import static org.opensearch.ad.TestHelpers.HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE;
-import static org.opensearch.ad.settings.EnabledSetting.AD_PLUGIN_ENABLED;
+import static org.opensearch.ad.settings.ADEnabledSetting.AD_ENABLED;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -26,15 +26,16 @@ import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.ad.HistoricalAnalysisIntegTestCase;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.common.exception.EndRunException;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.DetectionDateRange;
-import org.opensearch.ad.util.ExceptionUtil;
 import org.opensearch.common.io.stream.NotSerializableExceptionWrapper;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.test.OpenSearchIntegTestCase;
+import org.opensearch.timeseries.common.exception.EndRunException;
+import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.util.ExceptionUtil;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -47,7 +48,7 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
     private Instant endTime;
     private String type = "error";
     private int detectionIntervalInMinutes = 1;
-    private DetectionDateRange dateRange;
+    private DateRange dateRange;
 
     @Override
     @Before
@@ -56,7 +57,7 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
         testIndex = "test_historical_data";
         startTime = Instant.now().minus(10, ChronoUnit.DAYS);
         endTime = Instant.now();
-        dateRange = new DetectionDateRange(endTime, endTime.plus(10, ChronoUnit.DAYS));
+        dateRange = new DateRange(endTime, endTime.plus(10, ChronoUnit.DAYS));
         ingestTestData(testIndex, startTime, detectionIntervalInMinutes, type);
         createDetectionStateIndex();
     }
@@ -82,32 +83,32 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
     }
 
     public void testHistoricalAnalysisWithFutureDateRange() throws IOException, InterruptedException {
-        DetectionDateRange dateRange = new DetectionDateRange(endTime, endTime.plus(10, ChronoUnit.DAYS));
+        DateRange dateRange = new DateRange(endTime, endTime.plus(10, ChronoUnit.DAYS));
         testInvalidDetectionDateRange(dateRange);
     }
 
     public void testHistoricalAnalysisWithInvalidHistoricalDateRange() throws IOException, InterruptedException {
-        DetectionDateRange dateRange = new DetectionDateRange(startTime.minus(10, ChronoUnit.DAYS), startTime);
+        DateRange dateRange = new DateRange(startTime.minus(10, ChronoUnit.DAYS), startTime);
         testInvalidDetectionDateRange(dateRange);
     }
 
     public void testHistoricalAnalysisWithSmallHistoricalDateRange() throws IOException, InterruptedException {
-        DetectionDateRange dateRange = new DetectionDateRange(startTime, startTime.plus(10, ChronoUnit.MINUTES));
+        DateRange dateRange = new DateRange(startTime, startTime.plus(10, ChronoUnit.MINUTES));
         testInvalidDetectionDateRange(dateRange, "There is not enough data to train model");
     }
 
     public void testHistoricalAnalysisWithValidDateRange() throws IOException, InterruptedException {
-        DetectionDateRange dateRange = new DetectionDateRange(startTime, endTime);
+        DateRange dateRange = new DateRange(startTime, endTime);
         ADBatchAnomalyResultRequest request = adBatchAnomalyResultRequest(dateRange);
         client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(5000);
         Thread.sleep(20000);
-        GetResponse doc = getDoc(CommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
-        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(ADTask.STATE_FIELD)));
+        GetResponse doc = getDoc(ADCommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
+        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(TimeSeriesTask.STATE_FIELD)));
     }
 
     public void testHistoricalAnalysisWithNonExistingIndex() throws IOException {
         ADBatchAnomalyResultRequest request = adBatchAnomalyResultRequest(
-            new DetectionDateRange(startTime, endTime),
+            new DateRange(startTime, endTime),
             randomAlphaOfLength(5)
         );
         client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(10_000);
@@ -116,12 +117,12 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
     public void testHistoricalAnalysisExceedsMaxRunningTaskLimit() throws IOException, InterruptedException {
         updateTransientSettings(ImmutableMap.of(MAX_BATCH_TASK_PER_NODE.getKey(), 1));
         updateTransientSettings(ImmutableMap.of(BATCH_TASK_PIECE_INTERVAL_SECONDS.getKey(), 5));
-        DetectionDateRange dateRange = new DetectionDateRange(startTime, endTime);
+        DateRange dateRange = new DateRange(startTime, endTime);
         int totalDataNodes = getDataNodes().size();
         for (int i = 0; i < totalDataNodes; i++) {
             client().execute(ADBatchAnomalyResultAction.INSTANCE, adBatchAnomalyResultRequest(dateRange)).actionGet(5000);
         }
-        waitUntil(() -> countDocs(CommonName.DETECTION_STATE_INDEX) >= totalDataNodes, 10, TimeUnit.SECONDS);
+        waitUntil(() -> countDocs(ForecastCommonName.DETECTION_STATE_INDEX) >= totalDataNodes, 10, TimeUnit.SECONDS);
 
         ADBatchAnomalyResultRequest request = adBatchAnomalyResultRequest(dateRange);
         try {
@@ -137,43 +138,43 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
 
     public void testDisableADPlugin() throws IOException {
         try {
-            updateTransientSettings(ImmutableMap.of(AD_PLUGIN_ENABLED, false));
-            ADBatchAnomalyResultRequest request = adBatchAnomalyResultRequest(new DetectionDateRange(startTime, endTime));
+            updateTransientSettings(ImmutableMap.of(AD_ENABLED, false));
+            ADBatchAnomalyResultRequest request = adBatchAnomalyResultRequest(new DateRange(startTime, endTime));
             RuntimeException exception = expectThrowsAnyOf(
                 ImmutableList.of(NotSerializableExceptionWrapper.class, EndRunException.class),
                 () -> client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(10000)
             );
             assertTrue(exception.getMessage(), exception.getMessage().contains("AD plugin is disabled"));
-            updateTransientSettings(ImmutableMap.of(AD_PLUGIN_ENABLED, false));
+            updateTransientSettings(ImmutableMap.of(AD_ENABLED, false));
         } finally {
             // guarantee reset back to default
-            updateTransientSettings(ImmutableMap.of(AD_PLUGIN_ENABLED, true));
+            updateTransientSettings(ImmutableMap.of(AD_ENABLED, true));
         }
     }
 
     public void testMultipleTasks() throws IOException, InterruptedException {
         updateTransientSettings(ImmutableMap.of(MAX_BATCH_TASK_PER_NODE.getKey(), 2));
 
-        DetectionDateRange dateRange = new DetectionDateRange(startTime, endTime);
+        DateRange dateRange = new DateRange(startTime, endTime);
         for (int i = 0; i < getDataNodes().size(); i++) {
             client().execute(ADBatchAnomalyResultAction.INSTANCE, adBatchAnomalyResultRequest(dateRange));
         }
 
         ADBatchAnomalyResultRequest request = adBatchAnomalyResultRequest(
-            new DetectionDateRange(startTime, startTime.plus(2000, ChronoUnit.MINUTES))
+            new DateRange(startTime, startTime.plus(2000, ChronoUnit.MINUTES))
         );
         client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(5000);
         Thread.sleep(25000);
-        GetResponse doc = getDoc(CommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
-        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(ADTask.STATE_FIELD)));
+        GetResponse doc = getDoc(ADCommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
+        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(TimeSeriesTask.STATE_FIELD)));
         updateTransientSettings(ImmutableMap.of(MAX_BATCH_TASK_PER_NODE.getKey(), 1));
     }
 
-    private ADBatchAnomalyResultRequest adBatchAnomalyResultRequest(DetectionDateRange dateRange) throws IOException {
+    private ADBatchAnomalyResultRequest adBatchAnomalyResultRequest(DateRange dateRange) throws IOException {
         return adBatchAnomalyResultRequest(dateRange, testIndex);
     }
 
-    private ADBatchAnomalyResultRequest adBatchAnomalyResultRequest(DetectionDateRange dateRange, String indexName) throws IOException {
+    private ADBatchAnomalyResultRequest adBatchAnomalyResultRequest(DateRange dateRange, String indexName) throws IOException {
         AnomalyDetector detector = TestHelpers
             .randomDetector(ImmutableList.of(maxValueFeature()), indexName, detectionIntervalInMinutes, timeField);
         ADTask adTask = randomCreatedADTask(randomAlphaOfLength(5), detector, dateRange);
@@ -181,15 +182,15 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
         return new ADBatchAnomalyResultRequest(adTask);
     }
 
-    private void testInvalidDetectionDateRange(DetectionDateRange dateRange) throws IOException, InterruptedException {
+    private void testInvalidDetectionDateRange(DateRange dateRange) throws IOException, InterruptedException {
         testInvalidDetectionDateRange(dateRange, "There is no data in the detection date range");
     }
 
-    private void testInvalidDetectionDateRange(DetectionDateRange dateRange, String error) throws IOException, InterruptedException {
+    private void testInvalidDetectionDateRange(DateRange dateRange, String error) throws IOException, InterruptedException {
         ADBatchAnomalyResultRequest request = adBatchAnomalyResultRequest(dateRange);
         client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(5000);
         Thread.sleep(5000);
-        GetResponse doc = getDoc(CommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
-        assertEquals(error, doc.getSourceAsMap().get(ADTask.ERROR_FIELD));
+        GetResponse doc = getDoc(ADCommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
+        assertEquals(error, doc.getSourceAsMap().get(TimeSeriesTask.ERROR_FIELD));
     }
 }

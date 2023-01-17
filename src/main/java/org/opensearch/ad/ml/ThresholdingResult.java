@@ -19,8 +19,8 @@ import java.util.Objects;
 import org.apache.commons.lang.builder.ToStringBuilder;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.model.FeatureData;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.FeatureData;
 
 /**
  * Data object containing thresholding results.
@@ -317,8 +317,8 @@ public class ThresholdingResult {
     ) {
         return AnomalyResult
             .fromRawTRCFResult(
-                detector.getDetectorId(),
-                detector.getDetectorIntervalInMilliseconds(),
+                detector.getId(),
+                detector.getIntervalInMilliseconds(),
                 taskId,
                 rcfScore,
                 grade,

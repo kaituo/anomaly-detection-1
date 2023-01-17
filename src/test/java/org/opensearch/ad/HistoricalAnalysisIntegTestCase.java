@@ -12,12 +12,9 @@
 package org.opensearch.ad;
 
 import static org.opensearch.ad.model.ADTask.DETECTOR_ID_FIELD;
-import static org.opensearch.ad.model.ADTask.EXECUTION_START_TIME_FIELD;
-import static org.opensearch.ad.model.ADTask.IS_LATEST_FIELD;
-import static org.opensearch.ad.model.ADTask.PARENT_TASK_ID_FIELD;
-import static org.opensearch.ad.util.RestHandlerUtils.START_JOB;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_PRIMARY_TERM;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_SEQ_NO;
+import static org.opensearch.timeseries.util.RestHandlerUtils.START_JOB;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -34,15 +31,12 @@ import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
-import org.opensearch.ad.constant.CommonName;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.mock.plugin.MockReindexPlugin;
 import org.opensearch.ad.model.ADTask;
-import org.opensearch.ad.model.ADTaskState;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
-import org.opensearch.ad.model.DetectionDateRange;
-import org.opensearch.ad.model.Feature;
 import org.opensearch.ad.transport.AnomalyDetectorJobAction;
 import org.opensearch.ad.transport.AnomalyDetectorJobRequest;
 import org.opensearch.ad.transport.AnomalyDetectorJobResponse;
@@ -55,6 +49,11 @@ import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.test.transport.MockTransportService;
+import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.TaskState;
+import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.model.Feature;
 
 import com.google.common.collect.ImmutableList;
 
@@ -127,21 +126,21 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
         return TestHelpers.randomDetector(features, testIndex, detectionIntervalInMinutes, timeField);
     }
 
-    public ADTask randomCreatedADTask(String taskId, AnomalyDetector detector, DetectionDateRange detectionDateRange) {
-        String detectorId = detector == null ? null : detector.getDetectorId();
+    public ADTask randomCreatedADTask(String taskId, AnomalyDetector detector, DateRange detectionDateRange) {
+        String detectorId = detector == null ? null : detector.getId();
         return randomCreatedADTask(taskId, detector, detectorId, detectionDateRange);
     }
 
-    public ADTask randomCreatedADTask(String taskId, AnomalyDetector detector, String detectorId, DetectionDateRange detectionDateRange) {
-        return randomADTask(taskId, detector, detectorId, detectionDateRange, ADTaskState.CREATED);
+    public ADTask randomCreatedADTask(String taskId, AnomalyDetector detector, String detectorId, DateRange detectionDateRange) {
+        return randomADTask(taskId, detector, detectorId, detectionDateRange, TaskState.CREATED);
     }
 
     public ADTask randomADTask(
         String taskId,
         AnomalyDetector detector,
         String detectorId,
-        DetectionDateRange detectionDateRange,
-        ADTaskState state
+        DateRange detectionDateRange,
+        TaskState state
     ) {
         ADTask.Builder builder = ADTask
             .builder()
@@ -156,12 +155,12 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
             .isLatest(true)
             .startedBy(randomAlphaOfLength(5))
             .executionStartTime(Instant.now().minus(randomLongBetween(10, 100), ChronoUnit.MINUTES));
-        if (ADTaskState.FINISHED == state) {
+        if (TaskState.FINISHED == state) {
             setPropertyForNotRunningTask(builder);
-        } else if (ADTaskState.FAILED == state) {
+        } else if (TaskState.FAILED == state) {
             setPropertyForNotRunningTask(builder);
             builder.error(randomAlphaOfLength(5));
-        } else if (ADTaskState.STOPPED == state) {
+        } else if (TaskState.STOPPED == state) {
             setPropertyForNotRunningTask(builder);
             builder.error(randomAlphaOfLength(5));
             builder.stoppedBy(randomAlphaOfLength(5));
@@ -183,15 +182,15 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
         BoolQueryBuilder query = new BoolQueryBuilder();
         query.filter(new TermQueryBuilder(DETECTOR_ID_FIELD, detectorId));
         if (isLatest != null) {
-            query.filter(new TermQueryBuilder(IS_LATEST_FIELD, isLatest));
+            query.filter(new TermQueryBuilder(TimeSeriesTask.IS_LATEST_FIELD, isLatest));
         }
         if (parentTaskId != null) {
-            query.filter(new TermQueryBuilder(PARENT_TASK_ID_FIELD, parentTaskId));
+            query.filter(new TermQueryBuilder(TimeSeriesTask.PARENT_TASK_ID_FIELD, parentTaskId));
         }
         SearchRequest searchRequest = new SearchRequest();
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
-        sourceBuilder.query(query).sort(EXECUTION_START_TIME_FIELD, SortOrder.DESC).trackTotalHits(true).size(size);
-        searchRequest.source(sourceBuilder).indices(CommonName.DETECTION_STATE_INDEX);
+        sourceBuilder.query(query).sort(TimeSeriesTask.EXECUTION_START_TIME_FIELD, SortOrder.DESC).trackTotalHits(true).size(size);
+        searchRequest.source(sourceBuilder).indices(ADCommonName.DETECTION_STATE_INDEX);
         SearchResponse searchResponse = client().search(searchRequest).actionGet();
         Iterator<SearchHit> iterator = searchResponse.getHits().iterator();
 
@@ -205,13 +204,13 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
     }
 
     public ADTask getADTask(String taskId) throws IOException {
-        ADTask adTask = toADTask(getDoc(CommonName.DETECTION_STATE_INDEX, taskId));
+        ADTask adTask = toADTask(getDoc(ADCommonName.DETECTION_STATE_INDEX, taskId));
         adTask.setTaskId(taskId);
         return adTask;
     }
 
     public AnomalyDetectorJob getADJob(String detectorId) throws IOException {
-        return toADJob(getDoc(AnomalyDetectorJob.ANOMALY_DETECTOR_JOB_INDEX, detectorId));
+        return toADJob(getDoc(CommonName.JOB_INDEX, detectorId));
     }
 
     public ADTask toADTask(GetResponse doc) throws IOException {
@@ -223,7 +222,7 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
     }
 
     public ADTask startHistoricalAnalysis(Instant startTime, Instant endTime) throws IOException {
-        DetectionDateRange dateRange = new DetectionDateRange(startTime, endTime);
+        DateRange dateRange = new DateRange(startTime, endTime);
         AnomalyDetector detector = TestHelpers
             .randomDetector(ImmutableList.of(maxValueFeature()), testIndex, detectionIntervalInMinutes, timeField);
         String detectorId = createDetector(detector);
@@ -240,7 +239,7 @@ public abstract class HistoricalAnalysisIntegTestCase extends ADIntegTestCase {
     }
 
     public ADTask startHistoricalAnalysis(String detectorId, Instant startTime, Instant endTime) throws IOException {
-        DetectionDateRange dateRange = new DetectionDateRange(startTime, endTime);
+        DateRange dateRange = new DateRange(startTime, endTime);
         AnomalyDetectorJobRequest request = new AnomalyDetectorJobRequest(
             detectorId,
             dateRange,

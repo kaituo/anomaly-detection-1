@@ -56,16 +56,10 @@ import org.opensearch.action.search.SearchResponse.Clusters;
 import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.ad.AbstractADTest;
-import org.opensearch.ad.NodeStateManager;
+import org.opensearch.ad.ADNodeStateManager;
 import org.opensearch.ad.TestHelpers;
-import org.opensearch.ad.dataprocessor.LinearUniformInterpolator;
-import org.opensearch.ad.dataprocessor.SingleFeatureLinearUniformInterpolator;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.model.Feature;
-import org.opensearch.ad.model.IntervalTimeConfiguration;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.lease.Releasables;
@@ -100,6 +94,13 @@ import org.opensearch.search.aggregations.metrics.InternalCardinality;
 import org.opensearch.search.aggregations.metrics.InternalMax;
 import org.opensearch.search.aggregations.metrics.SumAggregationBuilder;
 import org.opensearch.search.internal.InternalSearchResponse;
+import org.opensearch.timeseries.dataprocessor.LinearUniformInterpolator;
+import org.opensearch.timeseries.dataprocessor.SingleFeatureLinearUniformInterpolator;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.Feature;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 
 import com.carrotsearch.hppc.BitMixer;
 import com.google.common.collect.ImmutableList;
@@ -141,14 +142,14 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractADTest {
         hostField = "host";
 
         detector = mock(AnomalyDetector.class);
-        when(detector.isMultientityDetector()).thenReturn(true);
+        when(detector.isHC()).thenReturn(true);
         when(detector.getCategoryField()).thenReturn(Arrays.asList(new String[] { serviceField, hostField }));
         detectorId = "123";
-        when(detector.getDetectorId()).thenReturn(detectorId);
+        when(detector.getId()).thenReturn(detectorId);
         when(detector.getTimeField()).thenReturn("testTimeField");
         when(detector.getIndices()).thenReturn(Arrays.asList("testIndices"));
         IntervalTimeConfiguration detectionInterval = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);
-        when(detector.getDetectionInterval()).thenReturn(detectionInterval);
+        when(detector.getInterval()).thenReturn(detectionInterval);
         when(detector.getFilterQuery()).thenReturn(QueryBuilders.matchAllQuery());
 
         client = mock(Client.class);
@@ -167,12 +168,12 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractADTest {
         clusterService = mock(ClusterService.class);
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         clock = mock(Clock.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
 
         searchFeatureDao = new SearchFeatureDao(

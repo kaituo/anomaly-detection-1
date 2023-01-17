@@ -13,7 +13,7 @@ package org.opensearch.ad.mock.transport;
 
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.REQUEST_TIMEOUT;
-import static org.opensearch.ad.util.ParseUtils.resolveUserAndExecute;
+import static org.opensearch.ad.util.ADParseUtils.resolveUserAndExecute;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -22,13 +22,11 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
 import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.model.DetectionDateRange;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorJobActionHandler;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyDetectorJobRequest;
 import org.opensearch.ad.transport.AnomalyDetectorJobResponse;
 import org.opensearch.ad.transport.AnomalyDetectorJobTransportAction;
-import org.opensearch.ad.util.RestHandlerUtils;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -38,6 +36,8 @@ import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
 public class MockAnomalyDetectorJobTransportActionWithUser extends
@@ -86,7 +86,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
     @Override
     protected void doExecute(Task task, AnomalyDetectorJobRequest request, ActionListener<AnomalyDetectorJobResponse> listener) {
         String detectorId = request.getDetectorID();
-        DetectionDateRange detectionDateRange = request.getDetectionDateRange();
+        DateRange detectionDateRange = request.getDetectionDateRange();
         boolean historical = request.isHistorical();
         long seqNo = request.getSeqNo();
         long primaryTerm = request.getPrimaryTerm();
@@ -130,7 +130,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends
         String rawPath,
         TimeValue requestTimeout,
         User user,
-        DetectionDateRange detectionDateRange,
+        DateRange detectionDateRange,
         boolean historical
     ) {
         IndexAnomalyDetectorJobActionHandler handler = new IndexAnomalyDetectorJobActionHandler(

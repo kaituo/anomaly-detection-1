@@ -11,10 +11,9 @@
 
 package org.opensearch.ad.ml;
 
-import java.util.concurrent.ConcurrentHashMap;
 
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.MemoryTracker.Origin;
+import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.ml.TimeSeriesMemoryAwareConcurrentHashmap;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
@@ -25,30 +24,14 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  *
  * Note: this is mainly used for single-entity detectors.
  */
-public class TRCFMemoryAwareConcurrentHashmap<K> extends ConcurrentHashMap<K, ModelState<ThresholdedRandomCutForest>> {
-    private final MemoryTracker memoryTracker;
+public class TRCFMemoryAwareConcurrentHashmap<K> extends TimeSeriesMemoryAwareConcurrentHashmap<K, ThresholdedRandomCutForest, ADModelState<ThresholdedRandomCutForest>> {
 
     public TRCFMemoryAwareConcurrentHashmap(MemoryTracker memoryTracker) {
-        this.memoryTracker = memoryTracker;
+        super(memoryTracker);
     }
 
     @Override
-    public ModelState<ThresholdedRandomCutForest> remove(Object key) {
-        ModelState<ThresholdedRandomCutForest> deletedModelState = super.remove(key);
-        if (deletedModelState != null && deletedModelState.getModel() != null) {
-            long memoryToRelease = memoryTracker.estimateTRCFModelSize(deletedModelState.getModel());
-            memoryTracker.releaseMemory(memoryToRelease, true, Origin.SINGLE_ENTITY_DETECTOR);
-        }
-        return deletedModelState;
-    }
-
-    @Override
-    public ModelState<ThresholdedRandomCutForest> put(K key, ModelState<ThresholdedRandomCutForest> value) {
-        ModelState<ThresholdedRandomCutForest> previousAssociatedState = super.put(key, value);
-        if (value != null && value.getModel() != null) {
-            long memoryToConsume = memoryTracker.estimateTRCFModelSize(value.getModel());
-            memoryTracker.consumeMemory(memoryToConsume, true, Origin.SINGLE_ENTITY_DETECTOR);
-        }
-        return previousAssociatedState;
+    protected long estimateModelSize(ThresholdedRandomCutForest model) {
+        return memoryTracker.estimateTRCFModelSize(model);
     }
 }

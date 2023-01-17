@@ -64,6 +64,7 @@ import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.FixedExecutorBuilder;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.transport.TransportInterceptor;
 import org.opensearch.transport.TransportService;
 
@@ -260,10 +261,10 @@ public class AbstractADTest extends OpenSearchTestCase {
             name,
             new FixedExecutorBuilder(
                 Settings.EMPTY,
-                AnomalyDetectorPlugin.AD_THREAD_POOL_NAME,
+                TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
                 1,
                 1000,
-                "opensearch.ad." + AnomalyDetectorPlugin.AD_THREAD_POOL_NAME
+                "opensearch.ad." + TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
             )
         );
     }
@@ -445,7 +446,7 @@ public class AbstractADTest extends OpenSearchTestCase {
     protected void setUpADThreadPool(ThreadPool mockThreadPool) {
         ExecutorService executorService = mock(ExecutorService.class);
 
-        when(mockThreadPool.executor(AnomalyDetectorPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(mockThreadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();

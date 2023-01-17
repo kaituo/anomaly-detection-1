@@ -23,16 +23,16 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.caching.CacheProvider;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.model.ModelProfile;
 import org.opensearch.transport.TransportService;
 
 /**
@@ -40,7 +40,7 @@ import org.opensearch.transport.TransportService;
  */
 public class ProfileTransportAction extends TransportNodesAction<ProfileRequest, ProfileResponse, ProfileNodeRequest, ProfileNodeResponse> {
     private static final Logger LOG = LogManager.getLogger(ProfileTransportAction.class);
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private FeatureManager featureManager;
     private CacheProvider cacheProvider;
     // the number of models to return. Defaults to 10.
@@ -64,7 +64,7 @@ public class ProfileTransportAction extends TransportNodesAction<ProfileRequest,
         ClusterService clusterService,
         TransportService transportService,
         ActionFilters actionFilters,
-        ModelManager modelManager,
+        ADModelManager modelManager,
         FeatureManager featureManager,
         CacheProvider cacheProvider,
         Settings settings

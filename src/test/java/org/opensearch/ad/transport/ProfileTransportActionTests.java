@@ -29,19 +29,19 @@ import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
-import org.opensearch.ad.AnomalyDetectorPlugin;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.caching.EntityCache;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.Entity;
-import org.opensearch.ad.model.ModelProfile;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.OpenSearchIntegTestCase;
+import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.caching.CacheProvider;
+import org.opensearch.timeseries.caching.EntityCache;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.model.ModelProfile;
 import org.opensearch.transport.TransportService;
 
 public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
@@ -57,7 +57,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     private int activeEntities = 10;
     private long totalUpdates = 127;
     private long multiEntityModelSize = 712480L;
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private FeatureManager featureManager;
 
     @Override
@@ -65,7 +65,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     public void setUp() throws Exception {
         super.setUp();
 
-        modelManager = mock(ModelManager.class);
+        modelManager = mock(ADModelManager.class);
         featureManager = mock(FeatureManager.class);
 
         when(featureManager.getShingleSize(any(String.class))).thenReturn(shingleSize);
@@ -120,7 +120,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
 
     @Override
     protected Collection<Class<? extends Plugin>> nodePlugins() {
-        return Arrays.asList(AnomalyDetectorPlugin.class);
+        return Arrays.asList(TimeSeriesAnalyticsPlugin.class);
     }
 
     @Test
