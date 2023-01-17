@@ -13,7 +13,6 @@ package org.opensearch.ad.rest.handler;
 
 import static org.opensearch.action.DocWriteResponse.Result.CREATED;
 import static org.opensearch.action.DocWriteResponse.Result.UPDATED;
-import static org.opensearch.ad.util.ExceptionUtil.getShardsFailure;
 import static org.opensearch.common.xcontent.XContentParserUtils.ensureExpectedToken;
 import static org.opensearch.timeseries.util.RestHandlerUtils.createXContentParserFromRegistry;
 
@@ -31,8 +30,7 @@ import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.model.ADTaskState;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorJob;
 import org.opensearch.ad.task.ADTaskManager;
@@ -51,7 +49,10 @@ import org.opensearch.jobscheduler.spi.schedule.IntervalSchedule;
 import org.opensearch.jobscheduler.spi.schedule.Schedule;
 import org.opensearch.rest.RestStatus;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.TaskState;
+import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
@@ -62,7 +63,7 @@ import com.google.common.base.Throwables;
  */
 public class IndexAnomalyDetectorJobActionHandler {
 
-    private final AnomalyDetectionIndices anomalyDetectionIndices;
+    private final ADIndexManagement anomalyDetectionIndices;
     private final String detectorId;
     private final Long seqNo;
     private final Long primaryTerm;
@@ -91,7 +92,7 @@ public class IndexAnomalyDetectorJobActionHandler {
      */
     public IndexAnomalyDetectorJobActionHandler(
         Client client,
-        AnomalyDetectionIndices anomalyDetectionIndices,
+        ADIndexManagement anomalyDetectionIndices,
         String detectorId,
         Long seqNo,
         Long primaryTerm,
@@ -160,8 +161,8 @@ public class IndexAnomalyDetectorJobActionHandler {
             listener.onResponse(r);
 
         }, listener::onFailure);
-        if (!anomalyDetectionIndices.doesAnomalyDetectorJobIndexExist()) {
-            anomalyDetectionIndices.initAnomalyDetectorJobIndex(ActionListener.wrap(response -> {
+        if (!anomalyDetectionIndices.doesJobIndexExist()) {
+            anomalyDetectionIndices.initJobIndex(ActionListener.wrap(response -> {
                 if (response.isAcknowledged()) {
                     logger.info("Created {} with mappings.", CommonName.CONFIG_INDEX);
                     createJob(detector, startListener);
@@ -290,7 +291,7 @@ public class IndexAnomalyDetectorJobActionHandler {
 
     private void indexAnomalyDetectorJob(
         AnomalyDetectorJob job,
-        AnomalyDetectorFunction function,
+        ExecutorFunction function,
         ActionListener<AnomalyDetectorJobResponse> listener
     ) throws IOException {
         IndexRequest indexRequest = new IndexRequest(CommonName.JOB_INDEX)
@@ -313,11 +314,11 @@ public class IndexAnomalyDetectorJobActionHandler {
 
     private void onIndexAnomalyDetectorJobResponse(
         IndexResponse response,
-        AnomalyDetectorFunction function,
+        ExecutorFunction function,
         ActionListener<AnomalyDetectorJobResponse> listener
     ) {
         if (response == null || (response.getResult() != CREATED && response.getResult() != UPDATED)) {
-            String errorMsg = getShardsFailure(response);
+            String errorMsg = ExceptionUtil.getShardsFailure(response);
             listener.onFailure(new OpenSearchStatusException(errorMsg, response.status()));
             return;
         }
@@ -352,7 +353,7 @@ public class IndexAnomalyDetectorJobActionHandler {
                     ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                     AnomalyDetectorJob job = AnomalyDetectorJob.parse(parser);
                     if (!job.isEnabled()) {
-                        adTaskManager.stopLatestRealtimeTask(detectorId, ADTaskState.STOPPED, null, transportService, listener);
+                        adTaskManager.stopLatestRealtimeTask(detectorId, TaskState.STOPPED, null, transportService, listener);
                     } else {
                         AnomalyDetectorJob newJob = new AnomalyDetectorJob(
                             job.getName(),
@@ -399,14 +400,14 @@ public class IndexAnomalyDetectorJobActionHandler {
                     logger.info("AD model deleted successfully for detector {}", detectorId);
                     // StopDetectorTransportAction will send out DeleteModelAction which will clear all realtime cache.
                     // Pass null transport service to method "stopLatestRealtimeTask" to not re-clear coordinating node cache.
-                    adTaskManager.stopLatestRealtimeTask(detectorId, ADTaskState.STOPPED, null, null, listener);
+                    adTaskManager.stopLatestRealtimeTask(detectorId, TaskState.STOPPED, null, null, listener);
                 } else {
                     logger.error("Failed to delete AD model for detector {}", detectorId);
                     // If failed to clear all realtime cache, will try to re-clear coordinating node cache.
                     adTaskManager
                         .stopLatestRealtimeTask(
                             detectorId,
-                            ADTaskState.FAILED,
+                            TaskState.FAILED,
                             new OpenSearchStatusException("Failed to delete AD model", RestStatus.INTERNAL_SERVER_ERROR),
                             transportService,
                             listener
@@ -421,7 +422,7 @@ public class IndexAnomalyDetectorJobActionHandler {
                 adTaskManager
                     .stopLatestRealtimeTask(
                         detectorId,
-                        ADTaskState.FAILED,
+                        TaskState.FAILED,
                         new OpenSearchStatusException("Failed to execute stop detector action", RestStatus.INTERNAL_SERVER_ERROR),
                         transportService,
                         listener

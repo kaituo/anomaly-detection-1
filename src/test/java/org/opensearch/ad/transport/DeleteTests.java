@@ -61,6 +61,7 @@ import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.TransportService;
 
 import test.org.opensearch.ad.util.ClusterCreation;

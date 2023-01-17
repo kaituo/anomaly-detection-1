@@ -24,7 +24,6 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -47,11 +46,6 @@ import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.AnomalyDetectorRunner;
-import org.opensearch.ad.breaker.ADCircuitBreakerService;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.feature.Features;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
-import org.opensearch.ad.ml.ModelManager;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
@@ -86,9 +80,9 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     private AnomalyDetectorRunner runner;
     private ClusterService clusterService;
     private FeatureManager featureManager;
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private Task task;
-    private ADCircuitBreakerService circuitBreaker;
+    private CircuitBreakerService circuitBreaker;
 
     @Override
     @Before
@@ -104,8 +98,8 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
                         Arrays
                             .asList(
                                 AnomalyDetectorSettings.MAX_ANOMALY_FEATURES,
-                                AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES,
-                                AnomalyDetectorSettings.PAGE_SIZE,
+                                AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES,
+                                AnomalyDetectorSettings.AD_PAGE_SIZE,
                                 AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW
                             )
                     )
@@ -122,15 +116,17 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
             .build();
         final Settings.Builder existingSettings = Settings.builder().put(indexSettings).put(IndexMetadata.SETTING_INDEX_UUID, "test2UUID");
         IndexMetadata indexMetaData = IndexMetadata.builder(CommonName.CONFIG_INDEX).settings(existingSettings).build();
-        final Map<String, IndexMetadata> indices = new HashMap<>();
-        indices.put(CommonName.CONFIG_INDEX, indexMetaData);
+        final ImmutableOpenMap<String, IndexMetadata> indices = ImmutableOpenMap
+            .<String, IndexMetadata>builder()
+            .fPut(CommonName.CONFIG_INDEX, indexMetaData)
+            .build();
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().indices(indices).build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
         featureManager = mock(FeatureManager.class);
-        modelManager = mock(ModelManager.class);
+        modelManager = mock(ADModelManager.class);
         runner = new AnomalyDetectorRunner(modelManager, featureManager, AnomalyDetectorSettings.MAX_PREVIEW_RESULTS);
-        circuitBreaker = mock(ADCircuitBreakerService.class);
+        circuitBreaker = mock(CircuitBreakerService.class);
         when(circuitBreaker.isOpen()).thenReturn(false);
         action = new PreviewAnomalyDetectorTransportAction(
             Settings.EMPTY,
@@ -278,7 +274,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     @Test
     public void testPreviewTransportActionNoContext() throws IOException, InterruptedException {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        Settings settings = Settings.builder().put(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES.getKey(), true).build();
+        Settings settings = Settings.builder().put(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES.getKey(), true).build();
         Client client = mock(Client.class);
         ThreadContext threadContext = new ThreadContext(settings);
         threadContext.putTransient(ConfigConstants.OPENSEARCH_SECURITY_USER_INFO_THREAD_CONTEXT, "alice|odfe,aes|engineering,operations");
@@ -335,7 +331,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportActionWithDetector() throws IOException, InterruptedException {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         CreateIndexResponse createResponse = TestHelpers
-            .createIndex(client().admin(), CommonName.CONFIG_INDEX, AnomalyDetectionIndices.getAnomalyDetectorMappings());
+            .createIndex(client().admin(), CommonName.CONFIG_INDEX, ADIndexManagement.getConfigMappings());
         Assert.assertNotNull(createResponse);
 
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());

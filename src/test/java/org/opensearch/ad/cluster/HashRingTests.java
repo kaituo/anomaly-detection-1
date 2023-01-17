@@ -19,7 +19,7 @@ import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.COOLDOWN_MINUTES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_COOLDOWN_MINUTES;
 
 import java.net.UnknownHostException;
 import java.time.Clock;
@@ -38,7 +38,6 @@ import org.opensearch.action.admin.cluster.node.info.NodesInfoResponse;
 import org.opensearch.action.admin.cluster.node.info.PluginsAndModules;
 import org.opensearch.ad.ADUnitTestCase;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.ModelManager;
 import org.opensearch.ad.util.DiscoveryNodeFilterer;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
@@ -51,6 +50,9 @@ import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.plugins.PluginInfo;
+import org.opensearch.timeseries.cluster.ADDataMigrator;
+import org.opensearch.timeseries.cluster.HashRing;
+import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -73,7 +75,7 @@ public class HashRingTests extends ADUnitTestCase {
     private DiscoveryNode localNode;
     private DiscoveryNode newNode;
     private DiscoveryNode warmNode;
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
 
     @Override
     @Before
@@ -87,8 +89,8 @@ public class HashRingTests extends ADUnitTestCase {
         warmNodeId = "warmNode";
         warmNode = createNode(warmNodeId, "127.0.0.3", 9202, ImmutableMap.of(ADCommonName.BOX_TYPE_KEY, ADCommonName.WARM_BOX_TYPE));
 
-        settings = Settings.builder().put(COOLDOWN_MINUTES.getKey(), TimeValue.timeValueSeconds(5)).build();
-        ClusterSettings clusterSettings = clusterSetting(settings, COOLDOWN_MINUTES);
+        settings = Settings.builder().put(AD_COOLDOWN_MINUTES.getKey(), TimeValue.timeValueSeconds(5)).build();
+        ClusterSettings clusterSettings = clusterSetting(settings, AD_COOLDOWN_MINUTES);
         clusterService = spy(new ClusterService(settings, clusterSettings, null));
 
         nodeFilter = spy(new DiscoveryNodeFilterer(clusterService));
@@ -106,7 +108,7 @@ public class HashRingTests extends ADUnitTestCase {
         when(adminClient.cluster()).thenReturn(clusterAdminClient);
 
         String modelId = "123_model_threshold";
-        modelManager = mock(ModelManager.class);
+        modelManager = mock(ADModelManager.class);
         doAnswer(invocation -> {
             Set<String> res = new HashSet<>();
             res.add(modelId);

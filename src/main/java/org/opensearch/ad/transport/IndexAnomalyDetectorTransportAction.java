@@ -13,10 +13,9 @@ package org.opensearch.ad.transport;
 
 import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_CREATE_DETECTOR;
 import static org.opensearch.ad.constant.ADCommonMessages.FAIL_TO_UPDATE_DETECTOR;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES;
 import static org.opensearch.timeseries.util.ParseUtils.checkFilterByBackendRoles;
-import static org.opensearch.timeseries.util.ParseUtils.getDetector;
-import static org.opensearch.timeseries.util.ParseUtils.getUserContext;
+import static org.opensearch.timeseries.util.ParseUtils.getConfig;
 import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
 import java.util.List;
@@ -29,14 +28,11 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.feature.SearchFeatureDao;
-import org.opensearch.ad.indices.AnomalyDetectionIndices;
+import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.rest.handler.AnomalyDetectorFunction;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorActionHandler;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -49,6 +45,10 @@ import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.function.ExecutorFunction;
+import org.opensearch.timeseries.util.ParseUtils;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
 public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<IndexAnomalyDetectorRequest, IndexAnomalyDetectorResponse> {
@@ -56,7 +56,7 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
     private final Client client;
     private final SecurityClientUtil clientUtil;
     private final TransportService transportService;
-    private final AnomalyDetectionIndices anomalyDetectionIndices;
+    private final ADIndexManagement anomalyDetectionIndices;
     private final ClusterService clusterService;
     private final NamedXContentRegistry xContentRegistry;
     private final ADTaskManager adTaskManager;
@@ -72,7 +72,7 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
         SecurityClientUtil clientUtil,
         ClusterService clusterService,
         Settings settings,
-        AnomalyDetectionIndices anomalyDetectionIndices,
+        ADIndexManagement anomalyDetectionIndices,
         NamedXContentRegistry xContentRegistry,
         ADTaskManager adTaskManager,
         SearchFeatureDao searchFeatureDao
@@ -86,14 +86,14 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
         this.xContentRegistry = xContentRegistry;
         this.adTaskManager = adTaskManager;
         this.searchFeatureDao = searchFeatureDao;
-        filterByEnabled = AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES.get(settings);
-        clusterService.getClusterSettings().addSettingsUpdateConsumer(FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
+        filterByEnabled = AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES.get(settings);
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
         this.settings = settings;
     }
 
     @Override
     protected void doExecute(Task task, IndexAnomalyDetectorRequest request, ActionListener<IndexAnomalyDetectorResponse> actionListener) {
-        User user = getUserContext(client);
+        User user = ParseUtils.getUserContext(client);
         String detectorId = request.getDetectorID();
         RestRequest.Method method = request.getMethod();
         String errorMessage = method == RestRequest.Method.PUT ? FAIL_TO_UPDATE_DETECTOR : FAIL_TO_CREATE_DETECTOR;
@@ -126,7 +126,18 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
                 boolean filterByBackendRole = requestedUser == null ? false : filterByEnabled;
                 // Update detector request, check if user has permissions to update the detector
                 // Get detector and verify backend roles
-                getDetector(requestedUser, detectorId, listener, function, client, clusterService, xContentRegistry, filterByBackendRole);
+                getConfig(
+                    requestedUser,
+                    detectorId,
+                    listener,
+                    function,
+                    client,
+                    clusterService,
+                    xContentRegistry,
+                    filterByBackendRole,
+                    IndexAnomalyDetectorResponse.class,
+                    AnomalyDetector.class
+                );
             } else {
                 // Create Detector. No need to get current detector.
                 function.accept(null);
@@ -154,6 +165,7 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
         Integer maxSingleEntityAnomalyDetectors = request.getMaxSingleEntityAnomalyDetectors();
         Integer maxMultiEntityAnomalyDetectors = request.getMaxMultiEntityAnomalyDetectors();
         Integer maxAnomalyFeatures = request.getMaxAnomalyFeatures();
+        Integer maxCategoricalFields = request.getMaxCategoricalFields();
 
         storedContext.restore();
         checkIndicesAndExecute(detector.getIndices(), () -> {
@@ -165,7 +177,6 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
                 client,
                 clientUtil,
                 transportService,
-                listener,
                 anomalyDetectionIndices,
                 detectorId,
                 seqNo,
@@ -176,6 +187,7 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
                 maxSingleEntityAnomalyDetectors,
                 maxMultiEntityAnomalyDetectors,
                 maxAnomalyFeatures,
+                maxCategoricalFields,
                 method,
                 xContentRegistry,
                 detectorUser,
@@ -183,13 +195,13 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
                 searchFeatureDao,
                 settings
             );
-            indexAnomalyDetectorActionHandler.start();
+            indexAnomalyDetectorActionHandler.start(listener);
         }, listener);
     }
 
     private void checkIndicesAndExecute(
         List<String> indices,
-        AnomalyDetectorFunction function,
+        ExecutorFunction function,
         ActionListener<IndexAnomalyDetectorResponse> listener
     ) {
         SearchRequest searchRequest = new SearchRequest()

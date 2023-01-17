@@ -15,23 +15,22 @@ import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import org.apache.commons.lang.builder.ToStringBuilder;
-import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.timeseries.ml.IntermediateResult;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.FeatureData;
+import org.opensearch.timeseries.model.IndexableResult;
 
 /**
  * Data object containing thresholding results.
  */
-public class ThresholdingResult {
+public class ThresholdingResult extends IntermediateResult {
 
     private final double grade;
-    private final double confidence;
-    private final double rcfScore;
-    private long totalUpdates;
-
     /**
      * position of the anomaly vis a vis the current time (can be -ve) if anomaly is
      * detected late, which can and should happen sometime; for shingle size 1; this
@@ -163,10 +162,9 @@ public class ThresholdingResult {
         double threshold,
         int forestSize
     ) {
+        super(confidence, totalUpdates, rcfScore);
         this.grade = grade;
-        this.confidence = confidence;
-        this.rcfScore = rcfScore;
-        this.totalUpdates = totalUpdates;
+
         this.relativeIndex = relativeIndex;
         this.relevantAttribution = relevantAttribution;
         this.pastValues = pastValues;
@@ -183,23 +181,6 @@ public class ThresholdingResult {
      */
     public double getGrade() {
         return grade;
-    }
-
-    /**
-     * Returns the confidence for the grade.
-     *
-     * @return confidence for the grade
-     */
-    public double getConfidence() {
-        return confidence;
-    }
-
-    public double getRcfScore() {
-        return rcfScore;
-    }
-
-    public long getTotalUpdates() {
-        return totalUpdates;
     }
 
     public int getRelativeIndex() {
@@ -237,10 +218,8 @@ public class ThresholdingResult {
         if (o == null || getClass() != o.getClass())
             return false;
         ThresholdingResult that = (ThresholdingResult) o;
-        return this.grade == that.grade
-            && this.confidence == that.confidence
-            && this.rcfScore == that.rcfScore
-            && this.totalUpdates == that.totalUpdates
+        return super.equals(o)
+            && this.grade == that.grade
             && this.relativeIndex == that.relativeIndex
             && Arrays.equals(relevantAttribution, that.relevantAttribution)
             && Arrays.equals(pastValues, that.pastValues)
@@ -254,10 +233,8 @@ public class ThresholdingResult {
     public int hashCode() {
         return Objects
             .hash(
+                super.hashCode(),
                 grade,
-                confidence,
-                rcfScore,
-                totalUpdates,
                 relativeIndex,
                 Arrays.hashCode(relevantAttribution),
                 Arrays.hashCode(pastValues),
@@ -271,10 +248,8 @@ public class ThresholdingResult {
     @Override
     public String toString() {
         return new ToStringBuilder(this)
+            .append(super.toString())
             .append("grade", grade)
-            .append("confidence", confidence)
-            .append("rcfScore", rcfScore)
-            .append("totalUpdates", totalUpdates)
             .append("relativeIndex", relativeIndex)
             .append("relevantAttribution", Arrays.toString(relevantAttribution))
             .append("pastValues", Arrays.toString(pastValues))
@@ -302,14 +277,15 @@ public class ThresholdingResult {
     * @param error Error
     * @return converted AnomalyResult
     */
-    public AnomalyResult toAnomalyResult(
-        AnomalyDetector detector,
+    @Override
+    public IndexableResult toIndexableResult(
+        Config detector,
         Instant dataStartInstant,
         Instant dataEndInstant,
         Instant executionStartInstant,
         Instant executionEndInstant,
         List<FeatureData> featureData,
-        Entity entity,
+        Optional<Entity> entity,
         Integer schemaVersion,
         String modelId,
         String taskId,

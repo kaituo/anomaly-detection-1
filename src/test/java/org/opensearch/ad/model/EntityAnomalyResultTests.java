@@ -18,7 +18,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import org.junit.Test;
-import org.opensearch.ad.stats.ADStatsResponse;
+import org.opensearch.ad.transport.ADStatsResponse;
 import org.opensearch.test.OpenSearchTestCase;
 
 public class EntityAnomalyResultTests extends OpenSearchTestCase {

@@ -24,7 +24,6 @@ import java.util.Map;
 import org.opensearch.Version;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.DiscoveryNodeFilterer;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -34,11 +33,10 @@ import org.opensearch.cluster.metadata.Metadata;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.constant.CommonName;
 
-public class CustomIndexTests extends AbstractTimeSeriesTest {
-    AnomalyDetectionIndices adIndices;
+public class CustomIndexTests extends AbstractADTest {
+    ADIndexManagement adIndices;
     Client client;
     ClusterService clusterService;
     DiscoveryNodeFilterer nodeFilter;
@@ -71,7 +69,7 @@ public class CustomIndexTests extends AbstractTimeSeriesTest {
                                 AnomalyDetectorSettings.AD_RESULT_HISTORY_MAX_DOCS_PER_SHARD,
                                 AnomalyDetectorSettings.AD_RESULT_HISTORY_ROLLOVER_PERIOD,
                                 AnomalyDetectorSettings.AD_RESULT_HISTORY_RETENTION_PERIOD,
-                                AnomalyDetectorSettings.MAX_PRIMARY_SHARDS
+                                AnomalyDetectorSettings.AD_MAX_PRIMARY_SHARDS
                             )
                     )
                 )
@@ -81,7 +79,7 @@ public class CustomIndexTests extends AbstractTimeSeriesTest {
 
         nodeFilter = mock(DiscoveryNodeFilterer.class);
 
-        adIndices = new AnomalyDetectionIndices(
+        adIndices = new ADIndexManagement(
             client,
             clusterService,
             threadPool,
@@ -187,7 +185,7 @@ public class CustomIndexTests extends AbstractTimeSeriesTest {
         attribution_nested_mapping.put("feature_id", Collections.singletonMap("type", "keyword"));
         mappings.put(AnomalyResult.RELEVANT_ATTRIBUTION_FIELD, attribution_mapping);
 
-        mappings.put(CommonName.SCHEMA_VERSION_FIELD, Collections.singletonMap("type", "integer"));
+        mappings.put(org.opensearch.timeseries.constant.CommonName.SCHEMA_VERSION_FIELD, Collections.singletonMap("type", "integer"));
 
         mappings.put(AnomalyResult.TASK_ID_FIELD, Collections.singletonMap("type", "keyword"));
 

@@ -11,11 +11,6 @@
 
 package org.opensearch.ad.task;
 
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.NUM_MIN_SAMPLES;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.NUM_TREES;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.TIME_DECAY;
-
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.Map;
@@ -26,8 +21,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import com.amazon.randomcutforest.config.Precision;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
@@ -61,7 +56,7 @@ public class ADBatchTaskCache {
         this.entity = adTask.getEntity();
 
         AnomalyDetector detector = adTask.getDetector();
-        int numberOfTrees = NUM_TREES;
+        int numberOfTrees = TimeSeriesSettings.NUM_TREES;
         int shingleSize = detector.getShingleSize();
         this.shingle = new ArrayDeque<>(shingleSize);
         int dimensions = detector.getShingleSize() * detector.getEnabledFeatureIds().size();
@@ -70,16 +65,16 @@ public class ADBatchTaskCache {
             .builder()
             .dimensions(dimensions)
             .numberOfTrees(numberOfTrees)
-            .timeDecay(TIME_DECAY)
-            .sampleSize(NUM_SAMPLES_PER_TREE)
-            .outputAfter(NUM_MIN_SAMPLES)
-            .initialAcceptFraction(NUM_MIN_SAMPLES * 1.0d / NUM_SAMPLES_PER_TREE)
+            .timeDecay(TimeSeriesSettings.TIME_DECAY)
+            .sampleSize(TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
+            .outputAfter(TimeSeriesSettings.NUM_MIN_SAMPLES)
+            .initialAcceptFraction(TimeSeriesSettings.NUM_MIN_SAMPLES * 1.0d / TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
             .parallelExecutionEnabled(false)
             .compact(true)
             .precision(Precision.FLOAT_32)
-            .boundingBoxCacheFraction(AnomalyDetectorSettings.BATCH_BOUNDING_BOX_CACHE_RATIO)
+            .boundingBoxCacheFraction(TimeSeriesSettings.BATCH_BOUNDING_BOX_CACHE_RATIO)
             .shingleSize(shingleSize)
-            .anomalyRate(1 - AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE)
+            .anomalyRate(1 - TimeSeriesSettings.THRESHOLD_MIN_PVALUE)
             .build();
 
         this.thresholdModelTrained = false;

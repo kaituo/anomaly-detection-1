@@ -28,13 +28,14 @@ import org.opensearch.ad.HistoricalAnalysisIntegTestCase;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.util.ExceptionUtil;
 import org.opensearch.common.io.stream.NotSerializableExceptionWrapper;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.util.ExceptionUtil;
 
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -102,7 +103,7 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
         client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(5000);
         Thread.sleep(20000);
         GetResponse doc = getDoc(ADCommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
-        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(ADTask.STATE_FIELD)));
+        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(TimeSeriesTask.STATE_FIELD)));
     }
 
     public void testHistoricalAnalysisWithNonExistingIndex() throws IOException {
@@ -140,7 +141,7 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
                 ImmutableList.of(NotSerializableExceptionWrapper.class, EndRunException.class),
                 () -> client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(10000)
             );
-            assertTrue(exception.getMessage(), exception.getMessage().contains("AD functionality is disabled"));
+            assertTrue(exception.getMessage(), exception.getMessage().contains("AD plugin is disabled"));
             updateTransientSettings(ImmutableMap.of(AD_ENABLED, false));
         } finally {
             // guarantee reset back to default
@@ -162,7 +163,7 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
         client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(5000);
         Thread.sleep(25000);
         GetResponse doc = getDoc(ADCommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
-        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(ADTask.STATE_FIELD)));
+        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(doc.getSourceAsMap().get(TimeSeriesTask.STATE_FIELD)));
         updateTransientSettings(ImmutableMap.of(MAX_BATCH_TASK_PER_NODE.getKey(), 1));
     }
 
@@ -187,6 +188,6 @@ public class ADBatchAnomalyResultTransportActionTests extends HistoricalAnalysis
         client().execute(ADBatchAnomalyResultAction.INSTANCE, request).actionGet(5000);
         Thread.sleep(5000);
         GetResponse doc = getDoc(ADCommonName.DETECTION_STATE_INDEX, request.getAdTask().getTaskId());
-        assertEquals(error, doc.getSourceAsMap().get(ADTask.ERROR_FIELD));
+        assertEquals(error, doc.getSourceAsMap().get(TimeSeriesTask.ERROR_FIELD));
     }
 }

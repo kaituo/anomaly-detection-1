@@ -20,25 +20,28 @@ import org.opensearch.action.ActionListener;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
-import org.opensearch.ad.NodeStateManager;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.ml.ADEntityColdStart;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.io.stream.StreamInput;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.caching.CacheProvider;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.transport.TransportService;
+
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class CronTransportAction extends TransportNodesAction<CronRequest, CronResponse, CronNodeRequest, CronNodeResponse> {
     private final Logger LOG = LogManager.getLogger(CronTransportAction.class);
     private NodeStateManager transportStateManager;
-    private ModelManager modelManager;
+    private ADModelManager modelManager;
     private FeatureManager featureManager;
-    private CacheProvider cacheProvider;
-    private EntityColdStarter entityColdStarter;
+    private CacheProvider<ThresholdedRandomCutForest, ADPriorityCache> cacheProvider;
+    private ADEntityColdStart entityColdStarter;
     private ADTaskManager adTaskManager;
 
     @Inject
@@ -48,10 +51,10 @@ public class CronTransportAction extends TransportNodesAction<CronRequest, CronR
         TransportService transportService,
         ActionFilters actionFilters,
         NodeStateManager tarnsportStatemanager,
-        ModelManager modelManager,
+        ADModelManager modelManager,
         FeatureManager featureManager,
-        CacheProvider cacheProvider,
-        EntityColdStarter entityColdStarter,
+        CacheProvider<ThresholdedRandomCutForest, ADPriorityCache> cacheProvider,
+        ADEntityColdStart entityColdStarter,
         ADTaskManager adTaskManager
     ) {
         super(

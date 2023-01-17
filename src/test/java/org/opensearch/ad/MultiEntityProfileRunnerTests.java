@@ -51,7 +51,6 @@ import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.DetectorInternalState;
 import org.opensearch.ad.model.DetectorProfile;
 import org.opensearch.ad.model.DetectorProfileName;
-import org.opensearch.ad.model.DetectorState;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyResultTests;
 import org.opensearch.ad.transport.ProfileAction;
@@ -117,7 +116,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
         super.setUp();
         client = mock(Client.class);
         Clock clock = mock(Clock.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         nodeFilter = mock(DiscoveryNodeFilterer.class);
         requiredSamples = 128;
@@ -282,7 +281,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.INIT).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.INIT).build();
         runner.profile(detectorId, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
@@ -299,7 +298,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.RUNNING).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.RUNNING).build();
         runner.profile(detectorId, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
@@ -320,7 +319,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(DetectorState.RUNNING).build();
+        DetectorProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.RUNNING).build();
         runner.profile(detectorId, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();

@@ -14,40 +14,33 @@ package org.opensearch.ad.indices;
 import java.util.function.Supplier;
 
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.util.ThrowingSupplierWrapper;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.indices.TimeSeriesIndex;
+import org.opensearch.timeseries.util.ThrowingSupplierWrapper;
 
 /**
  * Represent an AD index
  *
  */
-public enum ADIndex {
+public enum ADIndex implements TimeSeriesIndex {
 
     // throw RuntimeException since we don't know how to handle the case when the mapping reading throws IOException
     RESULT(
         ADCommonName.ANOMALY_RESULT_INDEX_ALIAS,
         true,
-        ThrowingSupplierWrapper.throwingSupplierWrapper(AnomalyDetectionIndices::getAnomalyResultMappings)
+        ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getAnomalyResultMappings)
     ),
-    CONFIG(
-        CommonName.CONFIG_INDEX,
-        false,
-        ThrowingSupplierWrapper.throwingSupplierWrapper(AnomalyDetectionIndices::getAnomalyDetectorMappings)
-    ),
-    JOB(
-        CommonName.JOB_INDEX,
-        false,
-        ThrowingSupplierWrapper.throwingSupplierWrapper(AnomalyDetectionIndices::getAnomalyDetectorJobMappings)
-    ),
+    CONFIG(CommonName.CONFIG_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getConfigMappings)),
+    JOB(CommonName.JOB_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getJobMappings)),
     CHECKPOINT(
         ADCommonName.CHECKPOINT_INDEX_NAME,
         false,
-        ThrowingSupplierWrapper.throwingSupplierWrapper(AnomalyDetectionIndices::getCheckpointMappings)
+        ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getCheckpointMappings)
     ),
     STATE(
         ADCommonName.DETECTION_STATE_INDEX,
         false,
-        ThrowingSupplierWrapper.throwingSupplierWrapper(AnomalyDetectionIndices::getDetectionStateMappings)
+        ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getDetectionStateMappings)
     );
 
     private final String indexName;
@@ -61,16 +54,24 @@ public enum ADIndex {
         this.mapping = mappingSupplier.get();
     }
 
+    @Override
     public String getIndexName() {
         return indexName;
     }
 
+    @Override
     public boolean isAlias() {
         return alias;
     }
 
+    @Override
     public String getMapping() {
         return mapping;
+    }
+
+    @Override
+    public boolean isJobIndex() {
+        return CommonName.JOB_INDEX.equals(indexName);
     }
 
 }

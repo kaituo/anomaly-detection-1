@@ -55,10 +55,10 @@ import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.SearchResponse.Clusters;
 import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
-import org.opensearch.ad.NodeStateManager;
+import org.opensearch.ad.ADNodeStateManager;
+import org.opensearch.ad.TestHelpers;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.ad.util.SecurityClientUtil;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -100,6 +100,7 @@ import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import com.carrotsearch.hppc.BitMixer;
 import com.google.common.collect.ImmutableList;
@@ -161,18 +162,18 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             Settings.EMPTY,
             Collections
                 .unmodifiableSet(
-                    new HashSet<>(Arrays.asList(AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW, AnomalyDetectorSettings.PAGE_SIZE))
+                    new HashSet<>(Arrays.asList(AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW, AnomalyDetectorSettings.AD_PAGE_SIZE))
                 )
         );
         clusterService = mock(ClusterService.class);
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         clock = mock(Clock.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getAnomalyDetector(any(String.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
 
         searchFeatureDao = new SearchFeatureDao(
@@ -182,7 +183,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             clientUtil,
             settings,
             clusterService,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
             1,
             1,
@@ -369,7 +370,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             clientUtil,
             settings,
             clusterService,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
             2,
             1,
@@ -415,7 +416,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             clientUtil,
             settings,
             clusterService,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
             2,
             1,

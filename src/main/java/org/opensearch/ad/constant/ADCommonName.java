@@ -35,7 +35,7 @@ public class ADCommonName {
     // ======================================
     public static final String ANOMALY_DETECTOR = "[Anomaly Detector]";
     public static final String AD_PLUGIN_NAME = "opensearch-anomaly-detection";
-    public static final String AD_PLUGIN_NAME_FOR_TEST = "org.opensearch.ad.AnomalyDetectorPlugin";
+    public static final String AD_PLUGIN_NAME_FOR_TEST = "org.opensearch.timeseries.TimeSeriesAnalyticsPlugin";
     public static final String AD_PLUGIN_VERSION_FOR_TEST = "NA";
 
     // ======================================
@@ -90,11 +90,8 @@ public class ADCommonName {
     public static final String CONFIDENCE_JSON_KEY = "confidence";
     public static final String ANOMALY_GRADE_JSON_KEY = "anomalyGrade";
     public static final String QUEUE_JSON_KEY = "queue";
-    // ======================================
-    // Used for backward-compatibility in messaging
-    // ======================================
-    public static final String EMPTY_FIELD = "";
 
+    // ======================================
     // Validation
     // ======================================
     // detector validation aspect

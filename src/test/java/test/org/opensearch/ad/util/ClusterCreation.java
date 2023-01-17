@@ -106,4 +106,36 @@ public class ClusterCreation {
         }
         return state(new ClusterName("test"), clusterManagerNode, clusterManagerNode, allNodes);
     }
+
+    public static void main(String args[]) {
+        long start = System.currentTimeMillis();
+        boolean condition = true;
+        int index = 1;
+        int getCutValue = 2;
+        int getCutDimension = 3;
+        String leftBox = "abcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        String rightBox = "deffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+        try {
+            for (int i = 0; i < 10000; i++) {
+                if (condition) {
+                    throw new IllegalStateException(
+                        " incorrect bounding state at index "
+                            + index
+                            + " cut value "
+                            + getCutValue
+                            + "cut dimension "
+                            + getCutDimension
+                            + " left Box "
+                            + leftBox.toString()
+                            + " right box "
+                            + rightBox.toString()
+                    );
+                }
+            }
+
+        } finally {
+            long finish = System.currentTimeMillis();
+            System.out.println(finish - start);
+        }
+    }
 }
