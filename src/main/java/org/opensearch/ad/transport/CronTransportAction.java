@@ -19,27 +19,33 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
-import org.opensearch.ad.caching.CacheProvider;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.EntityColdStarter;
-import org.opensearch.ad.ml.ModelManager;
+import org.opensearch.ad.caching.ADCacheProvider;
+import org.opensearch.ad.ml.ADEntityColdStart;
+import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
+import org.opensearch.forecast.caching.ForecastCacheProvider;
+import org.opensearch.forecast.ml.ForecastColdStart;
+import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.transport.TransportService;
 
 public class CronTransportAction extends TransportNodesAction<CronRequest, CronResponse, CronNodeRequest, CronNodeResponse> {
     private final Logger LOG = LogManager.getLogger(CronTransportAction.class);
     private NodeStateManager transportStateManager;
-    private ModelManager modelManager;
+    private ADModelManager adModelManager;
     private FeatureManager featureManager;
-    private CacheProvider cacheProvider;
-    private EntityColdStarter entityColdStarter;
+    private ADCacheProvider adCacheProvider;
+    private ForecastCacheProvider forecastCacheProvider;
+    private ADEntityColdStart adEntityColdStarter;
+    private ForecastColdStart forecastColdStarter;
     private ADTaskManager adTaskManager;
+    private ForecastTaskManager forecastTaskManager;
 
     @Inject
     public CronTransportAction(
@@ -48,11 +54,14 @@ public class CronTransportAction extends TransportNodesAction<CronRequest, CronR
         TransportService transportService,
         ActionFilters actionFilters,
         NodeStateManager tarnsportStatemanager,
-        ModelManager modelManager,
+        ADModelManager adModelManager,
         FeatureManager featureManager,
-        CacheProvider cacheProvider,
-        EntityColdStarter entityColdStarter,
-        ADTaskManager adTaskManager
+        ADCacheProvider adCacheProvider,
+        ForecastCacheProvider forecastCacheProvider,
+        ADEntityColdStart adEntityColdStarter,
+        ForecastColdStart forecastColdStarter,
+        ADTaskManager adTaskManager,
+        ForecastTaskManager forecastTaskManager
     ) {
         super(
             CronAction.NAME,
@@ -66,11 +75,14 @@ public class CronTransportAction extends TransportNodesAction<CronRequest, CronR
             CronNodeResponse.class
         );
         this.transportStateManager = tarnsportStatemanager;
-        this.modelManager = modelManager;
+        this.adModelManager = adModelManager;
         this.featureManager = featureManager;
-        this.cacheProvider = cacheProvider;
-        this.entityColdStarter = entityColdStarter;
+        this.adCacheProvider = adCacheProvider;
+        this.forecastCacheProvider = forecastCacheProvider;
+        this.adEntityColdStarter = adEntityColdStarter;
+        this.forecastColdStarter = forecastColdStarter;
         this.adTaskManager = adTaskManager;
+        this.forecastTaskManager = forecastTaskManager;
     }
 
     @Override
@@ -97,33 +109,48 @@ public class CronTransportAction extends TransportNodesAction<CronRequest, CronR
      */
     @Override
     protected CronNodeResponse nodeOperation(CronNodeRequest request) {
-        LOG.info("Start running AD hourly cron.");
+        LOG.info("Start running hourly cron.");
+        // ======================
+        // AD
+        // ======================
         // makes checkpoints for hosted models and stop hosting models not actively
         // used.
         // for single-entity detector
-        modelManager
-            .maintenance(ActionListener.wrap(v -> LOG.debug("model maintenance done"), e -> LOG.error("Error maintaining model", e)));
+        adModelManager
+            .maintenance(ActionListener.wrap(v -> LOG.debug("model maintenance done"), e -> LOG.error("Error maintaining ad model", e)));
         // for multi-entity detector
-        cacheProvider.get().maintenance();
+        adCacheProvider.get().maintenance();
 
         // delete unused buffered shingle data
         featureManager.maintenance();
 
-        // delete unused transport state
-        transportStateManager.maintenance();
-
-        entityColdStarter.maintenance();
+        adEntityColdStarter.maintenance();
         // clean child tasks and AD results of deleted detector level task
         adTaskManager.cleanChildTasksAndADResultsOfDeletedTask();
 
         // clean AD results of deleted detector
-        adTaskManager.cleanADResultOfDeletedDetector();
+        adTaskManager.cleanResultOfDeletedConfig();
 
         // maintain running historical tasks: reset task state as stopped if not running and clean stale running entities
         adTaskManager.maintainRunningHistoricalTasks(transportService, 100);
 
         // maintain running realtime tasks: clean stale running realtime task cache
         adTaskManager.maintainRunningRealtimeTasks();
+
+        // ======================
+        // Forecast
+        // ======================
+        forecastCacheProvider.get().maintenance();
+        forecastColdStarter.maintenance();
+        // clean child tasks and forecast results of deleted forecaster level task
+        forecastTaskManager.cleanChildTasksAndResultsOfDeletedTask();
+        forecastTaskManager.cleanResultOfDeletedConfig();
+
+        // ======================
+        // Common
+        // ======================
+        // delete unused transport state
+        transportStateManager.maintenance();
 
         return new CronNodeResponse(clusterService.localNode());
     }

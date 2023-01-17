@@ -67,6 +67,8 @@ public class CommonMessages {
     // Transport
     // ======================================
     public static final String INVALID_TIMESTAMP_ERR_MSG = "timestamp is invalid";
+    public static String FAIL_TO_DELETE_CONFIG = "Fail to delete config";
+    public static String FAIL_TO_GET_CONFIG_INFO = "Fail to get config info";
 
     // ======================================
     // transport/restful client
@@ -91,4 +93,34 @@ public class CommonMessages {
     public static String NO_PERMISSION_TO_ACCESS_CONFIG = "User does not have permissions to access config: ";
     public static String FAIL_TO_GET_USER_INFO = "Unable to get user information from config ";
 
+    // ======================================
+    // transport
+    // ======================================
+    public static final String CONFIG_ID_MISSING_MSG = "config ID is missing";
+    public static final String MODEL_ID_MISSING_MSG = "model ID is missing";
+
+    // ======================================
+    // task
+    // ======================================
+    public static String CAN_NOT_FIND_LATEST_TASK = "can't find latest task";
+
+    // ======================================
+    // Job
+    // ======================================
+    public static String CONFIG_IS_RUNNING = "Config is already running";
+    public static String FAIL_TO_SEARCH = "Fail to search";
+
+    // ======================================
+    // Profile API
+    // ======================================
+    public static String EMPTY_PROFILES_COLLECT = "profiles to collect are missing or invalid";
+    public static String FAIL_TO_PARSE_CONFIG_MSG = "Fail to parse config with id: ";
+    public static String FAIL_FETCH_ERR_MSG = "Fail to fetch profile for ";
+    public static String FAIL_TO_GET_PROFILE_MSG = "Fail to get profile for config ";
+    public static String FAIL_TO_GET_TOTAL_ENTITIES = "Failed to get total entities for config ";
+
+    // ======================================
+    // Stats API
+    // ======================================
+    public static String FAIL_TO_GET_STATS = "Fail to get stats";
 }

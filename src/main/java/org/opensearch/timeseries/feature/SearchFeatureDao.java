@@ -12,8 +12,8 @@
 package org.opensearch.timeseries.feature;
 
 import static org.apache.commons.math3.linear.MatrixUtils.createRealMatrix;
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_PAGE_SIZE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.PAGE_SIZE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.PREVIEW_TIMEOUT_IN_MILLIS;
 import static org.opensearch.timeseries.util.ParseUtils.batchFeatureQuery;
 
@@ -38,7 +38,6 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
-import org.opensearch.ad.feature.AbstractRetriever;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
@@ -120,7 +119,7 @@ public class SearchFeatureDao extends AbstractRetriever {
 
         if (clusterService != null) {
             clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_ENTITIES_FOR_PREVIEW, it -> this.maxEntitiesForPreview = it);
-            clusterService.getClusterSettings().addSettingsUpdateConsumer(PAGE_SIZE, it -> this.pageSize = it);
+            clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_PAGE_SIZE, it -> this.pageSize = it);
         }
         this.minimumDocCountForPreview = minimumDocCount;
         this.previewTimeoutInMilliseconds = previewTimeoutInMilliseconds;
@@ -158,7 +157,7 @@ public class SearchFeatureDao extends AbstractRetriever {
             minimumDocCount,
             Clock.systemUTC(),
             MAX_ENTITIES_FOR_PREVIEW.get(settings),
-            PAGE_SIZE.get(settings),
+            AD_PAGE_SIZE.get(settings),
             PREVIEW_TIMEOUT_IN_MILLIS
         );
     }
@@ -484,7 +483,7 @@ public class SearchFeatureDao extends AbstractRetriever {
         BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery();
 
         if (entity.isPresent()) {
-            for (TermQueryBuilder term : entity.get().getTermQueryBuilders()) {
+            for (TermQueryBuilder term : entity.get().getTermQueryForCustomerIndex()) {
                 internalFilterQuery.filter(term);
             }
         }

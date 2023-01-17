@@ -12,11 +12,11 @@
 package org.opensearch.ad.transport;
 
 import org.opensearch.action.ActionType;
-import org.opensearch.ad.constant.CommonValue;
+import org.opensearch.ad.constant.ADCommonValue;
 
 public class ValidateAnomalyDetectorAction extends ActionType<ValidateAnomalyDetectorResponse> {
 
-    public static final String NAME = CommonValue.EXTERNAL_ACTION_PREFIX + "detector/validate";
+    public static final String NAME = ADCommonValue.EXTERNAL_ACTION_PREFIX + "detector/validate";
     public static final ValidateAnomalyDetectorAction INSTANCE = new ValidateAnomalyDetectorAction();
 
     private ValidateAnomalyDetectorAction() {

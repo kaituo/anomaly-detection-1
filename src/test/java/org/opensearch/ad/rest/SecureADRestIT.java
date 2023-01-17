@@ -240,7 +240,7 @@ public class SecureADRestIT extends AnomalyDetectorRestTestCase {
         enableFilterBy();
 
         AnomalyDetector newDetector = new AnomalyDetector(
-            aliceDetector.getId(),
+            aliceDetector.getConfigId(),
             aliceDetector.getVersion(),
             aliceDetector.getName(),
             randomAlphaOfLength(10),

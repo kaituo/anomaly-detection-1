@@ -35,6 +35,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
+import org.opensearch.timeseries.transport.DeleteConfigRequest;
 import org.opensearch.transport.TransportService;
 
 public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
@@ -49,7 +50,7 @@ public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
         ClusterService clusterService = mock(ClusterService.class);
         ClusterSettings clusterSettings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         adTaskManager = mock(ADTaskManager.class);
@@ -83,18 +84,18 @@ public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
 
     @Test
     public void testDeleteRequest() throws IOException {
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
         StreamInput input = out.bytes().streamInput();
-        DeleteAnomalyDetectorRequest newRequest = new DeleteAnomalyDetectorRequest(input);
-        Assert.assertEquals(request.getDetectorID(), newRequest.getDetectorID());
+        DeleteConfigRequest newRequest = new DeleteConfigRequest(input);
+        Assert.assertEquals(request.getConfigID(), newRequest.getConfigID());
         Assert.assertNull(newRequest.validate());
     }
 
     @Test
     public void testEmptyDeleteRequest() {
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("");
+        DeleteConfigRequest request = new DeleteConfigRequest("");
         ActionRequestValidationException exception = request.validate();
         Assert.assertNotNull(exception);
     }
@@ -103,14 +104,14 @@ public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
     public void testTransportActionWithAdIndex() {
         // DeleteResponse is not called because detector ID will not exist
         createIndex(".opendistro-anomaly-detector-jobs");
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         action.doExecute(mock(Task.class), request, response);
     }
 
     @Test
     public void testTransportActionWithoutAdIndex() throws IOException {
         // DeleteResponse is not called because detector ID will not exist
-        DeleteAnomalyDetectorRequest request = new DeleteAnomalyDetectorRequest("1234");
+        DeleteConfigRequest request = new DeleteConfigRequest("1234");
         action.doExecute(mock(Task.class), request, response);
     }
 }

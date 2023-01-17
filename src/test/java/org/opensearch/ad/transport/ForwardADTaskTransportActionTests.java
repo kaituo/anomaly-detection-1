@@ -31,15 +31,15 @@ import java.io.IOException;
 
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.ADUnitTestCase;
-import org.opensearch.ad.feature.FeatureManager;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.tasks.Task;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.transport.TransportService;
 
 import com.google.common.collect.ImmutableList;
@@ -50,10 +50,10 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
     private ADTaskManager adTaskManager;
     private ADTaskCacheManager adTaskCacheManager;
     private FeatureManager featureManager;
-    private NodeStateManager stateManager;
+    private ADNodeStateManager stateManager;
     private ForwardADTaskTransportAction forwardADTaskTransportAction;
     private Task task;
-    private ActionListener<AnomalyDetectorJobResponse> listener;
+    private ActionListener<JobResponse> listener;
 
     @SuppressWarnings("unchecked")
     @Override
@@ -64,7 +64,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
         adTaskManager = mock(ADTaskManager.class);
         adTaskCacheManager = mock(ADTaskCacheManager.class);
         featureManager = mock(FeatureManager.class);
-        stateManager = mock(NodeStateManager.class);
+        stateManager = mock(ADNodeStateManager.class);
         forwardADTaskTransportAction = new ForwardADTaskTransportAction(
             actionFilters,
             transportService,
@@ -88,7 +88,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
     public void testNextEntityTaskForSingleEntityDetector() throws IOException {
         when(adTaskCacheManager.hasEntity(anyString())).thenReturn(false);
 
-        ADTask adTask = TestHelpers.randomAdTask(ADTaskType.HISTORICAL_SINGLE_ENTITY);
+        ADTask adTask = TestHelpers.randomAdTask(ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR);
         ForwardADTaskRequest request = new ForwardADTaskRequest(adTask, NEXT_ENTITY);
         forwardADTaskTransportAction.doExecute(task, request, listener);
         verify(listener, times(1)).onFailure(any());
@@ -115,7 +115,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
     }
 
     public void testPushBackEntityForSingleEntityDetector() throws IOException {
-        ADTask adTask = TestHelpers.randomAdTask(ADTaskType.HISTORICAL_SINGLE_ENTITY);
+        ADTask adTask = TestHelpers.randomAdTask(ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR);
         ForwardADTaskRequest request = new ForwardADTaskRequest(adTask, PUSH_BACK_ENTITY);
         forwardADTaskTransportAction.doExecute(task, request, listener);
         verify(listener, times(1)).onFailure(any());
@@ -219,7 +219,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
     }
 
     public void testCancelSingleEntityDetector() throws IOException {
-        ADTask adTask = TestHelpers.randomAdTask(ADTaskType.HISTORICAL_SINGLE_ENTITY);
+        ADTask adTask = TestHelpers.randomAdTask(ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR);
         ForwardADTaskRequest request = new ForwardADTaskRequest(adTask, CANCEL);
         forwardADTaskTransportAction.doExecute(task, request, listener);
         verify(listener, times(1)).onFailure(any());

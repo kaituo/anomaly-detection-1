@@ -385,5 +385,4 @@ public final class ForecastSettings {
     // the setting is used to limit resource usage due to showing models
     public static final Setting<Integer> FORECAST_MAX_MODEL_SIZE_PER_NODE = Setting
         .intSetting("plugins.forecast.max_model_size_per_node", 100, 1, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
-
 }

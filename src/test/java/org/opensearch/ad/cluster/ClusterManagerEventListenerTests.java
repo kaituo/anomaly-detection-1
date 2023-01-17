@@ -28,7 +28,6 @@ import java.util.Locale;
 
 import org.junit.Before;
 import org.opensearch.ad.cluster.diskcleanup.ModelCheckpointIndexRetention;
-import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
@@ -39,6 +38,9 @@ import org.opensearch.common.unit.TimeValue;
 import org.opensearch.threadpool.Scheduler.Cancellable;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.cluster.ClusterManagerEventListener;
+import org.opensearch.timeseries.cluster.HourlyCron;
+import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
@@ -60,7 +62,7 @@ public class ClusterManagerEventListenerTests extends AbstractTimeSeriesTest {
         clusterService = mock(ClusterService.class);
         ClusterSettings settings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.CHECKPOINT_TTL)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_CHECKPOINT_TTL)))
         );
         when(clusterService.getClusterSettings()).thenReturn(settings);
 
@@ -75,7 +77,7 @@ public class ClusterManagerEventListenerTests extends AbstractTimeSeriesTest {
         clock = mock(Clock.class);
         clientUtil = mock(ClientUtil.class);
         HashMap<String, String> ignoredAttributes = new HashMap<String, String>();
-        ignoredAttributes.put(ADCommonName.BOX_TYPE_KEY, ADCommonName.WARM_BOX_TYPE);
+        ignoredAttributes.put(CommonName.BOX_TYPE_KEY, CommonName.WARM_BOX_TYPE);
         nodeFilter = new DiscoveryNodeFilterer(clusterService);
 
         clusterManagerService = new ClusterManagerEventListener(
@@ -85,7 +87,7 @@ public class ClusterManagerEventListenerTests extends AbstractTimeSeriesTest {
             clock,
             clientUtil,
             nodeFilter,
-            AnomalyDetectorSettings.CHECKPOINT_TTL,
+            AnomalyDetectorSettings.AD_CHECKPOINT_TTL,
             Settings.EMPTY
         );
     }

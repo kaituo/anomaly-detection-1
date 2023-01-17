@@ -29,7 +29,6 @@ import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.ModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.common.io.stream.BytesStreamOutput;
 import org.opensearch.common.settings.Settings;
@@ -58,7 +57,7 @@ public class ThresholdResultTests extends OpenSearchTestCase {
             Collections.emptySet()
         );
 
-        ModelManager manager = mock(ModelManager.class);
+        ADModelManager manager = mock(ADModelManager.class);
         ThresholdResultTransportAction action = new ThresholdResultTransportAction(mock(ActionFilters.class), transportService, manager);
         doAnswer(invocation -> {
             ActionListener<ThresholdingResult> listener = invocation.getArgument(3);
@@ -87,7 +86,7 @@ public class ThresholdResultTests extends OpenSearchTestCase {
             Collections.emptySet()
         );
 
-        ModelManager manager = mock(ModelManager.class);
+        ADModelManager manager = mock(ADModelManager.class);
         ThresholdResultTransportAction action = new ThresholdResultTransportAction(mock(ActionFilters.class), transportService, manager);
         doThrow(NullPointerException.class)
             .when(manager)

@@ -15,7 +15,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.CHECKPOINT_SAVING_FREQ;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -30,10 +29,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.opensearch.Version;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
-import org.opensearch.ad.MemoryTracker;
-import org.opensearch.ad.feature.FeatureManager;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.ratelimit.CheckpointWriteWorker;
+import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -47,18 +44,19 @@ import org.opensearch.test.ClusterServiceUtils;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.ml.CheckpointDao;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ClientUtil;
 
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 import com.google.common.collect.ImmutableList;
 
 public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
@@ -66,11 +64,11 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
     String modelId;
     String entityName;
     String detectorId;
-    ModelState<EntityModel> modelState;
+    ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> modelState;
     Clock clock;
     float priority;
-    EntityColdStarter entityColdStarter;
-    NodeStateManager stateManager;
+    ADEntityColdStart entityColdStarter;
+    ADNodeStateManager stateManager;
     SearchFeatureDao searchFeatureDao;
     Imputer imputer;
     CheckpointDao checkpoint;
@@ -81,11 +79,11 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
     Runnable releaseSemaphore;
     ActionListener<Void> listener;
     CountDownLatch inProgressLatch;
-    CheckpointWriteWorker checkpointWriteQueue;
+    ADCheckpointWriteWorker checkpointWriteQueue;
     Entity entity;
     AnomalyDetector detector;
     long rcfSeed;
-    ModelManager modelManager;
+    ADModelManager modelManager;
     ClientUtil clientUtil;
     ClusterService clusterService;
     ClusterSettings clusterSettings;
@@ -96,7 +94,7 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        numMinSamples = AnomalyDetectorSettings.NUM_MIN_SAMPLES;
+        numMinSamples = TimeSeriesSettings.NUM_MIN_SAMPLES;
 
         clock = mock(Clock.class);
         when(clock.instant()).thenReturn(Instant.now());
@@ -139,7 +137,7 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
 
         clusterService = ClusterServiceUtils.createClusterService(threadPool, discoveryNode, clusterSettings);
 
-        stateManager = new NodeStateManager(
+        stateManager = new ADNodeStateManager(
             client,
             xContentRegistry(),
             settings,
@@ -154,47 +152,45 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
         imputer = new LinearUniformImputer(true);
 
         searchFeatureDao = mock(SearchFeatureDao.class);
-        checkpoint = mock(CheckpointDao.class);
+        checkpoint = mock(ADCheckpointDao.class);
 
         featureManager = new FeatureManager(
             searchFeatureDao,
             imputer,
             clock,
-            AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
-            AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
             AnomalyDetectorSettings.TRAIN_SAMPLE_TIME_RANGE_IN_HOURS,
             AnomalyDetectorSettings.MIN_TRAIN_SAMPLES,
             AnomalyDetectorSettings.MAX_SHINGLE_PROPORTION_MISSING,
             AnomalyDetectorSettings.MAX_IMPUTATION_NEIGHBOR_DISTANCE,
             AnomalyDetectorSettings.PREVIEW_SAMPLE_RATE,
             AnomalyDetectorSettings.MAX_PREVIEW_SAMPLES,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
             threadPool,
             TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
         );
 
-        checkpointWriteQueue = mock(CheckpointWriteWorker.class);
+        checkpointWriteQueue = mock(ADCheckpointWriteWorker.class);
 
         rcfSeed = 2051L;
-        entityColdStarter = new EntityColdStarter(
+        entityColdStarter = new ADEntityColdStart(
             clock,
             threadPool,
             stateManager,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
-            AnomalyDetectorSettings.NUM_TREES,
-            AnomalyDetectorSettings.TIME_DECAY,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.NUM_TREES,
+            TimeSeriesSettings.TIME_DECAY,
             numMinSamples,
             AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
             AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
             imputer,
             searchFeatureDao,
-            AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE,
+            TimeSeriesSettings.THRESHOLD_MIN_PVALUE,
             featureManager,
             settings,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
             checkpointWriteQueue,
             rcfSeed,
-            AnomalyDetectorSettings.MAX_COLD_START_ROUNDS
+            TimeSeriesSettings.MAX_COLD_START_ROUNDS
         );
 
         detectorId = "123";
@@ -212,20 +208,20 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
         };
         listener = ActionListener.wrap(releaseSemaphore);
 
-        modelManager = new ModelManager(
-            mock(CheckpointDao.class),
+        modelManager = new ADModelManager(
+            mock(ADCheckpointDao.class),
             mock(Clock.class),
-            AnomalyDetectorSettings.NUM_TREES,
-            AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE,
-            AnomalyDetectorSettings.TIME_DECAY,
-            AnomalyDetectorSettings.NUM_MIN_SAMPLES,
-            AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE,
+            TimeSeriesSettings.NUM_TREES,
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
+            TimeSeriesSettings.TIME_DECAY,
+            TimeSeriesSettings.NUM_MIN_SAMPLES,
+            TimeSeriesSettings.THRESHOLD_MIN_PVALUE,
             AnomalyDetectorSettings.MIN_PREVIEW_SIZE,
-            AnomalyDetectorSettings.HOURLY_MAINTENANCE,
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
             AnomalyDetectorSettings.CHECKPOINT_SAVING_FREQ,
             entityColdStarter,
             mock(FeatureManager.class),
-            mock(MemoryTracker.class),
+            mock(ADMemoryTracker.class),
             settings,
             clusterService
         );

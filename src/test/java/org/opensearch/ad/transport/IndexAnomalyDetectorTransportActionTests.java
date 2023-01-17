@@ -19,10 +19,8 @@ import static org.mockito.Mockito.when;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Locale;
-import java.util.Map;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -36,9 +34,13 @@ import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.WriteRequest;
+import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.model.ADTask;
+import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
+import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.ClusterName;
@@ -58,10 +60,10 @@ import org.opensearch.search.SearchHits;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 
@@ -74,7 +76,7 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
     private ActionListener<IndexAnomalyDetectorResponse> response;
     private ClusterService clusterService;
     private ClusterSettings clusterSettings;
-    private ADTaskManager adTaskManager;
+    private TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement> adTaskManager;
     private Client client = mock(Client.class);
     private SecurityClientUtil clientUtil;
     private SearchFeatureDao searchFeatureDao;
@@ -87,7 +89,7 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
         clusterService = mock(ClusterService.class);
         clusterSettings = new ClusterSettings(
             Settings.EMPTY,
-            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES)))
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
@@ -100,14 +102,16 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
             .build();
         final Settings.Builder existingSettings = Settings.builder().put(indexSettings).put(IndexMetadata.SETTING_INDEX_UUID, "test2UUID");
         IndexMetadata indexMetaData = IndexMetadata.builder(CommonName.CONFIG_INDEX).settings(existingSettings).build();
-        final Map<String, IndexMetadata> indices = new HashMap<>();
-        indices.put(CommonName.CONFIG_INDEX, indexMetaData);
+        final ImmutableOpenMap<String, IndexMetadata> indices = ImmutableOpenMap
+            .<String, IndexMetadata>builder()
+            .fPut(CommonName.CONFIG_INDEX, indexMetaData)
+            .build();
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().indices(indices).build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
         adTaskManager = mock(ADTaskManager.class);
         searchFeatureDao = mock(SearchFeatureDao.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        ADNodeStateManager nodeStateManager = mock(ADNodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
         action = new IndexAnomalyDetectorTransportAction(
             mock(TransportService.class),
@@ -199,7 +203,7 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
 
     @Test
     public void testIndexTransportActionWithUserAndFilterOn() {
-        Settings settings = Settings.builder().put(AnomalyDetectorSettings.FILTER_BY_BACKEND_ROLES.getKey(), true).build();
+        Settings settings = Settings.builder().put(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES.getKey(), true).build();
         ThreadContext threadContext = new ThreadContext(settings);
         threadContext.putTransient(ConfigConstants.OPENSEARCH_SECURITY_USER_INFO_THREAD_CONTEXT, "alice|odfe,aes|engineering,operations");
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);

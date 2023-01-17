@@ -21,12 +21,10 @@ import java.util.Queue;
 import java.util.Random;
 import java.util.stream.IntStream;
 
-import org.opensearch.ad.ml.EntityModel;
-import org.opensearch.ad.ml.ModelManager.ModelType;
-import org.opensearch.ad.ml.ModelState;
-import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.common.collect.Tuple;
+import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.model.Entity;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import com.amazon.randomcutforest.config.TransformMethod;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
@@ -39,7 +37,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  */
 public class MLUtil {
     private static Random random = new Random(42);
-    private static int minSampleSize = AnomalyDetectorSettings.NUM_MIN_SAMPLES;
+    private static int minSampleSize = TimeSeriesSettings.NUM_MIN_SAMPLES;
 
     private static String randomString(int targetStringLength) {
         int leftLimit = 97; // letter 'a'
@@ -59,7 +57,7 @@ public class MLUtil {
         return res;
     }
 
-    public static ModelState<EntityModel> randomModelState(RandomModelStateConfig config) {
+    public static ADModelState<createFromValueOnlySamples<ThresholdedRandomCutForest>> randomModelState(RandomModelStateConfig config) {
         boolean fullModel = config.getFullModel() != null && config.getFullModel().booleanValue() ? true : false;
         float priority = config.getPriority() != null ? config.getPriority() : random.nextFloat();
         String detectorId = config.getId() != null ? config.getId() : randomString(15);
@@ -75,40 +73,44 @@ public class MLUtil {
         } else {
             entity = Entity.createSingleAttributeEntity("", "");
         }
-        EntityModel model = null;
+        createFromValueOnlySamples<ThresholdedRandomCutForest> model = null;
         if (fullModel) {
             model = createNonEmptyModel(detectorId, sampleSize, entity);
         } else {
             model = createEmptyModel(entity, sampleSize);
         }
 
-        return new ModelState<>(model, detectorId, detectorId, ModelType.ENTITY.getName(), clock, priority);
+        return new ADModelState<>(model, detectorId, detectorId, ModelManager.ModelType.ENTITY.getName(), clock, priority);
     }
 
-    public static EntityModel createEmptyModel(Entity entity, int sampleSize) {
+    public static createFromValueOnlySamples<ThresholdedRandomCutForest> createEmptyModel(Entity entity, int sampleSize) {
         Queue<double[]> samples = createQueueSamples(sampleSize);
-        return new EntityModel(entity, samples, null);
+        return new createFromValueOnlySamples<ThresholdedRandomCutForest>(entity, samples, null);
     }
 
-    public static EntityModel createEmptyModel(Entity entity) {
+    public static createFromValueOnlySamples<ThresholdedRandomCutForest> createEmptyModel(Entity entity) {
         return createEmptyModel(entity, random.nextInt(minSampleSize));
     }
 
-    public static EntityModel createNonEmptyModel(String detectorId, int sampleSize, Entity entity) {
+    public static createFromValueOnlySamples<ThresholdedRandomCutForest> createNonEmptyModel(
+        String detectorId,
+        int sampleSize,
+        Entity entity
+    ) {
         Queue<double[]> samples = createQueueSamples(sampleSize);
-        int numDataPoints = random.nextInt(1000) + AnomalyDetectorSettings.NUM_MIN_SAMPLES;
+        int numDataPoints = random.nextInt(1000) + TimeSeriesSettings.NUM_MIN_SAMPLES;
         ThresholdedRandomCutForest trcf = new ThresholdedRandomCutForest(
             ThresholdedRandomCutForest
                 .builder()
                 .dimensions(1)
-                .sampleSize(AnomalyDetectorSettings.NUM_SAMPLES_PER_TREE)
-                .numberOfTrees(AnomalyDetectorSettings.NUM_TREES)
-                .timeDecay(AnomalyDetectorSettings.TIME_DECAY)
-                .outputAfter(AnomalyDetectorSettings.NUM_MIN_SAMPLES)
+                .sampleSize(TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
+                .numberOfTrees(TimeSeriesSettings.NUM_TREES)
+                .timeDecay(TimeSeriesSettings.TIME_DECAY)
+                .outputAfter(TimeSeriesSettings.NUM_MIN_SAMPLES)
                 .initialAcceptFraction(0.125d)
                 .parallelExecutionEnabled(false)
                 .internalShinglingEnabled(true)
-                .anomalyRate(1 - AnomalyDetectorSettings.THRESHOLD_MIN_PVALUE)
+                .anomalyRate(1 - TimeSeriesSettings.THRESHOLD_MIN_PVALUE)
                 .transformMethod(TransformMethod.NORMALIZE)
                 .alertOnce(true)
                 .autoAdjust(true)
@@ -116,11 +118,11 @@ public class MLUtil {
         for (int i = 0; i < numDataPoints; i++) {
             trcf.process(new double[] { random.nextDouble() }, i);
         }
-        EntityModel entityModel = new EntityModel(entity, samples, trcf);
+        createFromValueOnlySamples<ThresholdedRandomCutForest> entityModel = new createFromValueOnlySamples<>(entity, samples, trcf);
         return entityModel;
     }
 
-    public static EntityModel createNonEmptyModel(String detectorId) {
+    public static createFromValueOnlySamples<ThresholdedRandomCutForest> createNonEmptyModel(String detectorId) {
         return createNonEmptyModel(detectorId, random.nextInt(minSampleSize), Entity.createSingleAttributeEntity("", ""));
     }
 

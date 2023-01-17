@@ -60,8 +60,6 @@ import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.constant.CommonValue;
-import org.opensearch.ad.feature.Features;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.mock.model.MockSimpleLog;
@@ -74,8 +72,6 @@ import org.opensearch.ad.model.AnomalyResultBucket;
 import org.opensearch.ad.model.DetectorInternalState;
 import org.opensearch.ad.model.DetectorValidationIssue;
 import org.opensearch.ad.model.ExpectedValueList;
-import org.opensearch.ad.ratelimit.RequestPriority;
-import org.opensearch.ad.ratelimit.ResultWriteRequest;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.client.Request;
@@ -1330,7 +1326,7 @@ public class TestHelpers {
 
     public static ADTask randomAdTask(String taskId, TaskState state, Instant executionEndTime, String stoppedBy, boolean withDetector)
         throws IOException {
-        return randomAdTask(taskId, state, executionEndTime, stoppedBy, withDetector, ADTaskType.HISTORICAL_SINGLE_ENTITY);
+        return randomAdTask(taskId, state, executionEndTime, stoppedBy, withDetector, ADTaskType.HISTORICAL_SINGLE_STREAM_DETECTOR);
     }
 
     public static ADTask randomAdTask(
@@ -1549,10 +1545,9 @@ public class TestHelpers {
     }
 
     public static ClusterState createClusterState() {
-        final Map<String, IndexMetadata> mappings = new HashMap<>();
-
-        mappings
-            .put(
+        ImmutableOpenMap<String, IndexMetadata> immutableOpenMap = ImmutableOpenMap
+            .<String, IndexMetadata>builder()
+            .fPut(
                 CommonName.JOB_INDEX,
                 IndexMetadata
                     .builder("test")
