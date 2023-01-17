@@ -20,6 +20,7 @@ import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -34,8 +35,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.lucene.tests.util.TimeUnits;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
-import org.opensearch.ad.feature.FeatureManager;
-import org.opensearch.ad.ml.ModelManager.ModelType;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
@@ -46,11 +45,18 @@ import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.ml.ModelManager;
+import org.opensearch.timeseries.ml.ModelState;
+import org.opensearch.timeseries.ml.Sample;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.ratelimit.FeatureRequest;
+import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 import com.carrotsearch.randomizedtesting.annotations.TimeoutSuite;
 import com.google.common.collect.ImmutableList;
 
@@ -117,47 +123,39 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
             featureManager = new FeatureManager(
                 searchFeatureDao,
                 imputer,
-                clock,
-                AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
-                AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
-                AnomalyDetectorSettings.TRAIN_SAMPLE_TIME_RANGE_IN_HOURS,
-                AnomalyDetectorSettings.MIN_TRAIN_SAMPLES,
+                TimeSeriesSettings.TRAIN_SAMPLE_TIME_RANGE_IN_HOURS,
+                TimeSeriesSettings.MIN_TRAIN_SAMPLES,
                 AnomalyDetectorSettings.MAX_SHINGLE_PROPORTION_MISSING,
                 AnomalyDetectorSettings.MAX_IMPUTATION_NEIGHBOR_DISTANCE,
                 AnomalyDetectorSettings.PREVIEW_SAMPLE_RATE,
                 AnomalyDetectorSettings.MAX_PREVIEW_SAMPLES,
-                TimeSeriesSettings.HOURLY_MAINTENANCE,
-                threadPool,
-                TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
+                threadPool
             );
 
-            entityColdStarter = new EntityColdStarter(
+            entityColdStarter = new ADColdStart(
                 clock,
                 threadPool,
                 stateManager,
                 TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
                 TimeSeriesSettings.NUM_TREES,
-                TimeSeriesSettings.TIME_DECAY,
                 numMinSamples,
                 AnomalyDetectorSettings.MAX_SAMPLE_STRIDE,
                 AnomalyDetectorSettings.MAX_TRAIN_SAMPLE,
-                imputer,
                 searchFeatureDao,
                 TimeSeriesSettings.THRESHOLD_MIN_PVALUE,
                 featureManager,
-                settings,
                 TimeSeriesSettings.HOURLY_MAINTENANCE,
                 checkpointWriteQueue,
                 seed,
-                TimeSeriesSettings.MAX_COLD_START_ROUNDS
+                TimeSeriesSettings.MAX_COLD_START_ROUNDS,
+                1
             );
 
-            modelManager = new ModelManager(
-                mock(CheckpointDao.class),
+            modelManager = new ADModelManager(
+                mock(ADCheckpointDao.class),
                 mock(Clock.class),
                 TimeSeriesSettings.NUM_TREES,
                 TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
-                TimeSeriesSettings.TIME_DECAY,
                 TimeSeriesSettings.NUM_MIN_SAMPLES,
                 TimeSeriesSettings.THRESHOLD_MIN_PVALUE,
                 AnomalyDetectorSettings.MIN_PREVIEW_SIZE,
@@ -218,14 +216,15 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
             }).when(searchFeatureDao).getColdStartSamplesForPeriods(any(), any(), any(), anyBoolean(), eq(AnalysisType.AD), any());
 
             entity = Entity.createSingleAttributeEntity("field", entityName + z);
-            EntityModel model = new EntityModel(entity, new ArrayDeque<>(), null);
-            ModelState<EntityModel> modelState = new ModelState<>(
-                model,
+            ModelState<ThresholdedRandomCutForest> modelState = new ModelState<>(
+                null,
                 entity.getModelId(detectorId).get(),
                 detector.getId(),
-                ModelType.ENTITY.getName(),
+                ModelManager.ModelType.TRCF.getName(),
                 clock,
-                priority
+                priority,
+                Optional.of(entity),
+                new ArrayDeque<>()
             );
 
             released = new AtomicBoolean();
@@ -236,10 +235,25 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
                 inProgressLatch.countDown();
             });
 
-            entityColdStarter.trainModel(entity, detector.getId(), modelState, listener);
+            long dataStartTimeMs = System.currentTimeMillis();
+            entityColdStarter
+                .trainModel(
+                    new FeatureRequest(
+                        dataStartTimeMs + 60000,
+                        detector.getId(),
+                        RequestPriority.MEDIUM,
+                        new double[] {},
+                        dataStartTimeMs,
+                        entity,
+                        null
+                    ),
+                    detector.getId(),
+                    modelState,
+                    listener
+                );
 
             checkSemaphoreRelease();
-            assertTrue(model.getTrcf().isPresent());
+            assertTrue(modelState.getModel().isPresent());
 
             int tp = 0;
             int fp = 0;
@@ -248,7 +262,7 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
 
             for (int j = trainTestSplit; j < data.length; j++) {
                 ThresholdingResult result = modelManager
-                    .getAnomalyResultForEntity(data[j], modelState, modelId, entity, detector.getShingleSize());
+                    .getResult(new Sample(data[j], Instant.now(), Instant.now()), modelState, modelId, detector, null);
                 if (result.getGrade() > 0) {
                     if (changeTimestamps[j] == 0) {
                         fp++;

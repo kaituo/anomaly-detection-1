@@ -25,6 +25,7 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.ad.ADUnitTestCase;
 import org.opensearch.client.Client;
+import org.opensearch.cluster.ClusterManagerMetrics;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
@@ -52,7 +53,7 @@ public class ADSearchHandlerTests extends ADUnitTestCase {
         super.setUp();
         settings = Settings.builder().put(AD_FILTER_BY_BACKEND_ROLES.getKey(), false).build();
         clusterSettings = clusterSetting(settings, AD_FILTER_BY_BACKEND_ROLES);
-        clusterService = new ClusterService(settings, clusterSettings, null);
+        clusterService = new ClusterService(settings, clusterSettings, mock(ThreadPool.class), null);
         client = mock(Client.class);
         searchHandler = new ADSearchHandler(settings, clusterService, client);
 
@@ -75,7 +76,7 @@ public class ADSearchHandlerTests extends ADUnitTestCase {
 
     public void testFilterEnabledWithWrongSearch() {
         settings = Settings.builder().put(AD_FILTER_BY_BACKEND_ROLES.getKey(), true).build();
-        clusterService = new ClusterService(settings, clusterSettings, null);
+        clusterService = new ClusterService(settings, clusterSettings, mock(ThreadPool.class), null);
 
         searchHandler = new ADSearchHandler(settings, clusterService, client);
         searchHandler.search(request, listener);
@@ -84,7 +85,7 @@ public class ADSearchHandlerTests extends ADUnitTestCase {
 
     public void testFilterEnabled() {
         settings = Settings.builder().put(AD_FILTER_BY_BACKEND_ROLES.getKey(), true).build();
-        clusterService = new ClusterService(settings, clusterSettings, null);
+        clusterService = new ClusterService(settings, clusterSettings, mock(ThreadPool.class), null);
 
         searchHandler = new ADSearchHandler(settings, clusterService, client);
         searchHandler.search(matchAllRequest(), listener);

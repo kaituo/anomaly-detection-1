@@ -183,7 +183,6 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
         searchFeatureDao = new SearchFeatureDao(
             client,
             xContentRegistry(), // Important. Without this, ParseUtils cannot parse anything
-            imputer,
             clientUtil,
             settings,
             clusterService,
@@ -370,7 +369,6 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
         searchFeatureDao = new SearchFeatureDao(
             client,
             xContentRegistry(),
-            imputer,
             clientUtil,
             settings,
             clusterService,
@@ -416,7 +414,6 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
         searchFeatureDao = new SearchFeatureDao(
             client,
             xContentRegistry(),
-            imputer,
             clientUtil,
             settings,
             clusterService,

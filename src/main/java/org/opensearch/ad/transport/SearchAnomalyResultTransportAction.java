@@ -267,6 +267,7 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
             // onlyQueryCustomResultIndex is false in this branch
             // Search only default result index
             request.indices(ALL_AD_RESULTS_INDEX_PATTERN);
+            System.out.println("hello:"+request);
             searchHandler.search(request, listener);
             return;
         }

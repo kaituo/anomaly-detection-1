@@ -252,7 +252,13 @@ public class MemoryTracker {
      * @return estimated TRCF model size
      *
      */
-    public long estimateTRCFModelSize(int dimension, int numberOfTrees, double boundingBoxCacheFraction, int shingleSize, int sampleSize) {
+    public long estimateTRCFModelSize(
+        int dimension,
+        int numberOfTrees,
+        double boundingBoxCacheFraction,
+        int shingleSize,
+        int sampleSize
+    ) {
         double baseDimension = dimension / shingleSize;
         // rounding it up to the next power of two, in terms of selecting the pointStoreSizeConstant. T
         double pointStoreSizeConstant = 1;
@@ -331,18 +337,23 @@ public class MemoryTracker {
      * @return estimated RCFCaster model size
      */
     public long estimateCasterModelSize(
-        int dimension,
-        int numberOfTrees,
-        double boundingBoxCacheFraction,
-        int shingleSize,
-        int sampleSize,
-        int horizon
-    ) {
-        long trcfModelSize = estimateTRCFModelSize(dimension, numberOfTrees, boundingBoxCacheFraction, shingleSize, sampleSize);
-        double baseDimension = dimension / shingleSize;
-        double errorHandlerSize = 176 * baseDimension * horizon + 28 * baseDimension + 12 * horizon * (baseDimension * horizon + 6) + 2556;
-        return (long) (trcfModelSize + errorHandlerSize);
-    }
+            int dimension,
+            int numberOfTrees,
+            double boundingBoxCacheFraction,
+            int shingleSize,
+            int sampleSize,
+            int horizon
+        ) {
+            long trcfModelSize = estimateTRCFModelSize(
+                    dimension,
+                    numberOfTrees,
+                    boundingBoxCacheFraction,
+                    shingleSize,
+                    sampleSize);
+            double baseDimension = dimension / shingleSize;
+            double errorHandlerSize =  176*baseDimension*horizon + 28*baseDimension + 12*horizon*(baseDimension*horizon + 6) + 2556;
+            return (long)(trcfModelSize + errorHandlerSize);
+        }
 
     /**
      * Bytes to remove to keep AD memory usage within the limit

@@ -141,20 +141,15 @@ public class SearchFeatureDaoTests {
     private Clock clock;
 
     private SearchRequest searchRequest;
-    private SearchSourceBuilder searchSourceBuilder;
     private MultiSearchRequest multiSearchRequest;
     private Map<String, Aggregation> aggsMap;
     private IntervalTimeConfiguration detectionInterval;
     private String detectorId;
-    private Imputer imputer;
     private Settings settings;
 
     @Before
     public void setup() throws Exception {
         MockitoAnnotations.initMocks(this);
-        // PowerMockito.mockStatic(ParseUtils.class);
-
-        imputer = new LinearUniformImputer(false);
 
         ExecutorService executorService = mock(ExecutorService.class);
         when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
@@ -175,7 +170,7 @@ public class SearchFeatureDaoTests {
         }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
         searchFeatureDao = spy(
-            new SearchFeatureDao(client, xContent, imputer, clientUtil, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
+            new SearchFeatureDao(client, xContent, clientUtil, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
         );
 
         detectionInterval = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);
@@ -188,8 +183,6 @@ public class SearchFeatureDaoTests {
         when(detector.getFilterQuery()).thenReturn(QueryBuilders.matchAllQuery());
         when(detector.getCategoryFields()).thenReturn(Collections.singletonList("a"));
 
-        searchSourceBuilder = SearchSourceBuilder
-            .fromXContent(XContentType.JSON.xContent().createParser(xContent, LoggingDeprecationHandler.INSTANCE, "{}"));
         searchRequest = new SearchRequest(detector.getIndices().toArray(new String[0]));
         aggsMap = new HashMap<>();
 
@@ -246,6 +239,7 @@ public class SearchFeatureDaoTests {
     @SuppressWarnings("unchecked")
     public void getLatestDataTime_returnExpectedToListener() {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+                .query(QueryBuilders.boolQuery())
             .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(detector.getTimeField()))
             .size(0);
         searchRequest.source(searchSourceBuilder);
@@ -263,27 +257,12 @@ public class SearchFeatureDaoTests {
         when(searchResponse.getAggregations()).thenReturn(internalAggregations);
 
         ActionListener<Optional<Long>> listener = mock(ActionListener.class);
-        searchFeatureDao.getLatestDataTime(detector, listener);
+        searchFeatureDao.getLatestDataTime(detector, Optional.empty(), AnalysisType.AD, listener);
 
         ArgumentCaptor<Optional<Long>> captor = ArgumentCaptor.forClass(Optional.class);
         verify(listener).onResponse(captor.capture());
         Optional<Long> result = captor.getValue();
         assertEquals(epochTime, result.get().longValue());
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    public void getFeaturesForSampledPeriods_throwToListener_whenSamplingFail() {
-        doAnswer(invocation -> {
-            ActionListener<Optional<double[]>> listener = invocation.getArgument(3);
-            listener.onFailure(new RuntimeException());
-            return null;
-        }).when(searchFeatureDao).getFeaturesForPeriod(any(), anyLong(), anyLong(), any(ActionListener.class));
-
-        ActionListener<Optional<Entry<double[][], Integer>>> listener = mock(ActionListener.class);
-        searchFeatureDao.getFeaturesForSampledPeriods(detector, 1, 1, 0, listener);
-
-        verify(listener).onFailure(any(Exception.class));
     }
 
     @Test

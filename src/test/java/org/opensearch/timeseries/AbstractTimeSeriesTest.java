@@ -17,9 +17,11 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.opensearch.cluster.node.DiscoveryNodeRole.BUILT_IN_ROLES;
+import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_SEQ_NO;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -29,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -37,6 +40,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
@@ -49,32 +53,44 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.MockitoAnnotations;
 import org.opensearch.Version;
+import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.DetectorInternalState;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
+import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.AliasMetadata;
 import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.node.DiscoveryNode;
+import org.opensearch.cluster.node.DiscoveryNodeRole;
+import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.logging.Loggers;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.http.HttpRequest;
 import org.opensearch.http.HttpResponse;
+import org.opensearch.index.get.GetResult;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestRequest.Method;
 import org.opensearch.search.SearchModule;
+import org.opensearch.test.ClusterServiceUtils;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.FixedExecutorBuilder;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Job;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
+import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.transport.TransportInterceptor;
 import org.opensearch.transport.TransportService;
 
@@ -121,12 +137,12 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
         protected TestAppender(String name, boolean recordExceptions) {
             super(name, null, PatternLayout.createDefaultLayout(), true, Property.EMPTY_ARRAY);
             this.recordExceptions = recordExceptions;
-            if (recordExceptions) {
-                exceptions = new HashMap<Class<? extends Throwable>, Map<String, Object>>();
-            }
+            this.exceptions = new HashMap<Class<? extends Throwable>, Map<String, Object>>();
         }
 
-        public List<String> messages = new ArrayList<String>();
+        // in case multiple threads writing to the same list.
+        // Check ADClusterEventListenerTests.testInProgress.
+        public List<String> messages = new CopyOnWriteArrayList<String>();
 
         public boolean containsMessage(String msg, boolean formatString) {
             Pattern p = null;
@@ -238,20 +254,32 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
 
     protected Logger logger;
 
-    /**
-     * Set up test with junit that a warning was logged with log4j
-     */
+
     protected void setUpLog4jForJUnit(Class<?> cls, boolean recordExceptions) {
-        String loggerName = toLoggerName(callerClass(cls));
-        logger = (Logger) LogManager.getLogger(loggerName);
-        Loggers.setLevel(logger, Level.DEBUG);
-        testAppender = new TestAppender(loggerName, recordExceptions);
-        testAppender.start();
-        logger.addAppender(testAppender);
+        Pair<TestAppender, Logger> appenderAndLogger = getLog4jAppenderForJUnit(cls, recordExceptions);
+        testAppender = appenderAndLogger.getLeft();
+        logger = appenderAndLogger.getRight();
     }
 
     protected void setUpLog4jForJUnit(Class<?> cls) {
         setUpLog4jForJUnit(cls, false);
+    }
+
+    /**
+     * Set up test with junit that a warning was logged with log4j. We can call this method multiple times
+     * to track log messages from different class.
+     *
+     * @param cls class object
+     * @param recordExceptions whether we should record exceptions
+     */
+    protected Pair<TestAppender, Logger> getLog4jAppenderForJUnit(Class<?> cls, boolean recordExceptions) {
+        String loggerName = toLoggerName(callerClass(cls));
+        Logger logger = (Logger) LogManager.getLogger(loggerName);
+        Loggers.setLevel(logger, Level.DEBUG);
+        TestAppender appender = new TestAppender(loggerName, recordExceptions);
+        appender.start();
+        logger.addAppender(appender);
+        return Pair.of(appender, logger);
     }
 
     private static String toLoggerName(final Class<?> cls) {
@@ -274,8 +302,12 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
      * remove the appender
      */
     protected void tearDownLog4jForJUnit() {
-        logger.removeAppender(testAppender);
-        testAppender.stop();
+        tearDownLog4jForJUnit(testAppender, logger);
+    }
+
+    protected void tearDownLog4jForJUnit(TestAppender appender, Logger logger) {
+        logger.removeAppender(appender);
+        appender.stop();
     }
 
     protected static void setUpThreadPool(String name) {
@@ -292,8 +324,8 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
     }
 
     protected static void tearDownThreadPool() {
-        LOG.info("tear down threadPool");
-        assertTrue(ThreadPool.terminate(threadPool, 30, TimeUnit.SECONDS));
+        LOG.info("tear down threadPool ", threadPool);
+        assertTrue(ThreadPool.terminate(threadPool, 60, TimeUnit.SECONDS));
         threadPool = null;
     }
 
@@ -509,5 +541,58 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
             BUILT_IN_ROLES,
             Version.CURRENT
         );
+    }
+
+    protected void setupGetDetector(AnomalyDetector detector, Client client) {
+        doAnswer(invocation -> {
+            ActionListener<GetResponse> listener = invocation.getArgument(1);
+            listener
+                .onResponse(
+                    new GetResponse(
+                        new GetResult(
+                            CommonName.CONFIG_INDEX,
+                            detector.getId(),
+                            UNASSIGNED_SEQ_NO,
+                            0,
+                            -1,
+                            true,
+                            BytesReference.bytes(detector.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS)),
+                            Collections.emptyMap(),
+                            Collections.emptyMap()
+                        )
+                    )
+                );
+            return null;
+        }).when(client).get(any(), any());
+    }
+
+    protected DiscoveryNode createDiscoverynode(String nodeName) {
+        return new DiscoveryNode(
+                nodeName,
+                OpenSearchTestCase.buildNewFakeTransportAddress(),
+                Collections.emptyMap(),
+                DiscoveryNodeRole.BUILT_IN_ROLES,
+                Version.CURRENT
+            );
+    }
+
+    protected ClusterService createClusterServiceForNode(ThreadPool threadPool, DiscoveryNode discoveryNode, Set<Setting<?>> nodestateSetting) {
+        ClusterSettings clusterSettings = new ClusterSettings(Settings.EMPTY, nodestateSetting);
+
+        return ClusterServiceUtils.createClusterService(threadPool, discoveryNode, clusterSettings);
+    }
+
+    protected NodeStateManager createNodeStateManager(Client client, ClientUtil clientUtil, ThreadPool threadPool, ClusterService clusterService) {
+        return new NodeStateManager(
+                client,
+                xContentRegistry(),
+                Settings.EMPTY,
+                clientUtil,
+                mock(Clock.class),
+                TimeSeriesSettings.HOURLY_MAINTENANCE,
+                clusterService,
+                TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+                TimeSeriesSettings.BACKOFF_MINUTES
+            );
     }
 }
