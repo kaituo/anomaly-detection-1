@@ -46,7 +46,6 @@ import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.ratelimit.ResultWriteRequest;
 import org.opensearch.timeseries.ratelimit.ResultWriteWorker;
 import org.opensearch.timeseries.ratelimit.SaveResultStrategy;
-import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.stats.Stats;
 import org.opensearch.timeseries.transport.handler.IndexMemoryPressureAwareResultHandler;
 import org.opensearch.timeseries.util.ExceptionUtil;

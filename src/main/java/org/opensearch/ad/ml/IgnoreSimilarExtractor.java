@@ -103,7 +103,7 @@ public class IgnoreSimilarExtractor {
         int featureIndex = featureNames.indexOf(featureName);
 
         ThresholdType thresholdType = condition.getThresholdType();
-        System.out.println("hello20:"+thresholdType);
+        System.out.println("hello20:" + thresholdType);
         double value = condition.getValue();
 
         switch (thresholdType) {

@@ -15,7 +15,6 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -34,7 +33,6 @@ import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.Sample;
 import org.opensearch.timeseries.model.Config;
-import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
@@ -181,7 +179,7 @@ public class ADColdStart extends
         int shingleSize = config.getShingleSize();
         int baseDimension = firstPoint.length;
         int dimensions = baseDimension * shingleSize;
-        System.out.println("hello14:"+shingleSize);
+        System.out.println("hello14:" + shingleSize);
         ThresholdedRandomCutForest.Builder rcfBuilder = ThresholdedRandomCutForest
             .builder()
             .dimensions(dimensions)
@@ -224,22 +222,22 @@ public class ADColdStart extends
 
         if (thresholdArrays != null) {
             if (thresholdArrays.ignoreSimilarFromAbove != null && thresholdArrays.ignoreSimilarFromAbove.length > 0) {
-                System.out.println("hello10:"+Arrays.toString(thresholdArrays.ignoreSimilarFromAbove));
+                System.out.println("hello10:" + Arrays.toString(thresholdArrays.ignoreSimilarFromAbove));
                 rcfBuilder.ignoreNearExpectedFromAbove(thresholdArrays.ignoreSimilarFromAbove);
             }
 
             if (thresholdArrays.ignoreSimilarFromBelow != null && thresholdArrays.ignoreSimilarFromBelow.length > 0) {
-                System.out.println("hello11:"+Arrays.toString(thresholdArrays.ignoreSimilarFromBelow));
+                System.out.println("hello11:" + Arrays.toString(thresholdArrays.ignoreSimilarFromBelow));
                 rcfBuilder.ignoreNearExpectedFromBelow(thresholdArrays.ignoreSimilarFromBelow);
             }
 
             if (thresholdArrays.ignoreSimilarFromAboveByRatio != null && thresholdArrays.ignoreSimilarFromAboveByRatio.length > 0) {
-                System.out.println("hello12:"+Arrays.toString(thresholdArrays.ignoreSimilarFromAboveByRatio));
+                System.out.println("hello12:" + Arrays.toString(thresholdArrays.ignoreSimilarFromAboveByRatio));
                 rcfBuilder.ignoreNearExpectedFromAboveByRatio(thresholdArrays.ignoreSimilarFromAboveByRatio);
             }
 
             if (thresholdArrays.ignoreSimilarFromBelowByRatio != null && thresholdArrays.ignoreSimilarFromBelowByRatio.length > 0) {
-                System.out.println("hello13:"+Arrays.toString(thresholdArrays.ignoreSimilarFromBelowByRatio));
+                System.out.println("hello13:" + Arrays.toString(thresholdArrays.ignoreSimilarFromBelowByRatio));
                 rcfBuilder.ignoreNearExpectedFromBelowByRatio(thresholdArrays.ignoreSimilarFromBelowByRatio);
             }
         }

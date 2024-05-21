@@ -128,28 +128,28 @@ public class Condition implements Writeable, ToXContentObject {
         }
         Condition that = (Condition) o;
         return Objects.equal(featureName, that.featureName)
-                && Objects.equal(thresholdType, that.thresholdType)
-                && Objects.equal(operator, that.operator)
-                && Objects.equal(value, that.value);
+            && Objects.equal(thresholdType, that.thresholdType)
+            && Objects.equal(operator, that.operator)
+            && Objects.equal(value, that.value);
     }
 
     @Override
     public int hashCode() {
         final int prime = 31;
         int result = super.hashCode();
-        result = prime * result + Objects
-            .hashCode(
-                    featureName,
-                    thresholdType,
-                    operator,
-                    value
-            );
+        result = prime * result + Objects.hashCode(featureName, thresholdType, operator, value);
         return result;
     }
 
     @Override
     public String toString() {
-        return super.toString() + ", " + new ToStringBuilder(this).append("featureName", featureName)
-                .append("thresholdType", thresholdType).append("operator", operator).append("value", value).toString();
+        return super.toString()
+            + ", "
+            + new ToStringBuilder(this)
+                .append("featureName", featureName)
+                .append("thresholdType", thresholdType)
+                .append("operator", operator)
+                .append("value", value)
+                .toString();
     }
 }

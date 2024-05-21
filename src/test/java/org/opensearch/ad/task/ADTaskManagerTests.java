@@ -88,7 +88,6 @@ import org.opensearch.ad.transport.ADTaskProfileNodeResponse;
 import org.opensearch.ad.transport.ADTaskProfileResponse;
 import org.opensearch.ad.transport.ForwardADTaskRequest;
 import org.opensearch.client.Client;
-import org.opensearch.cluster.ClusterManagerMetrics;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;

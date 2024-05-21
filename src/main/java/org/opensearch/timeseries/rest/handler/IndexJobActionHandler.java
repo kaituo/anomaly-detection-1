@@ -386,7 +386,10 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
     ) {
         if (response == null || (response.getResult() != CREATED && response.getResult() != UPDATED)) {
             String errorMsg = ExceptionUtil.getShardsFailure(response);
-            listener.onFailure(new OpenSearchStatusException(errorMsg, response == null ? RestStatus.INTERNAL_SERVER_ERROR : response.status()));
+            listener
+                .onFailure(
+                    new OpenSearchStatusException(errorMsg, response == null ? RestStatus.INTERNAL_SERVER_ERROR : response.status())
+                );
             return;
         }
         if (function != null) {

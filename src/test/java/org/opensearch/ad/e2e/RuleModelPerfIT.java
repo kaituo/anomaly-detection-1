@@ -12,17 +12,16 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeFormatter;
 import java.time.temporal.ChronoUnit;
+import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
-import java.util.AbstractMap.SimpleEntry;
 import java.util.Map.Entry;
+import java.util.Set;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.commons.lang3.tuple.Triple;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Logger;
@@ -51,48 +50,54 @@ public class RuleModelPerfIT extends AbstractSyntheticDataTest {
     }
 
     private void verifyTestResults(
-            Triple<Map<String, double[]>, Integer, Map<String, Set<Integer>>> testResults,
-            Map<String, List<Entry<Instant, Instant>>> anomalies,
-            Map<String, Double> minPrecision,
-            Map<String, Double> minRecall,
-            int maxError
-        ) {
-            Map<String, double[]> resultMap = testResults.getLeft();
-            Map<String, Set<Integer>> foundWindows = testResults.getRight();
+        Triple<Map<String, double[]>, Integer, Map<String, Set<Integer>>> testResults,
+        Map<String, List<Entry<Instant, Instant>>> anomalies,
+        Map<String, Double> minPrecision,
+        Map<String, Double> minRecall,
+        int maxError
+    ) {
+        Map<String, double[]> resultMap = testResults.getLeft();
+        Map<String, Set<Integer>> foundWindows = testResults.getRight();
 
-            for (Entry<String, double[]> entry : resultMap.entrySet()) {
-                String entity = entry.getKey();
-                double[] testResultsArray = entry.getValue();
-                double positives = testResultsArray[0];
-                double truePositives = testResultsArray[1];
+        for (Entry<String, double[]> entry : resultMap.entrySet()) {
+            String entity = entry.getKey();
+            double[] testResultsArray = entry.getValue();
+            double positives = testResultsArray[0];
+            double truePositives = testResultsArray[1];
 
-                // precision = predicted anomaly points that are true / predicted anomaly points
-                double precision = positives > 0 ? truePositives / positives : 0;
-                double minPrecisionValue = minPrecision.getOrDefault(entity, .4);
-                assertTrue(String.format(Locale.ROOT, "precision expected at least %f but got %f", minPrecisionValue, precision), precision >= minPrecisionValue);
+            // precision = predicted anomaly points that are true / predicted anomaly points
+            double precision = positives > 0 ? truePositives / positives : 0;
+            double minPrecisionValue = minPrecision.getOrDefault(entity, .4);
+            assertTrue(
+                String.format(Locale.ROOT, "precision expected at least %f but got %f", minPrecisionValue, precision),
+                precision >= minPrecisionValue
+            );
 
-                // recall = windows containing predicted anomaly points / total anomaly windows
-                int anomalyWindow = anomalies.getOrDefault(entity, new ArrayList<>()).size();
-                double recall = anomalyWindow > 0 ? foundWindows.getOrDefault(entity, new HashSet<>()).size() / anomalyWindow : 0;
-                double minRecallValue = minRecall.getOrDefault(entity, .7);
-                assertTrue(String.format(Locale.ROOT, "recall should be at least %f but got %f", minRecallValue, recall), recall >= minRecallValue);
+            // recall = windows containing predicted anomaly points / total anomaly windows
+            int anomalyWindow = anomalies.getOrDefault(entity, new ArrayList<>()).size();
+            double recall = anomalyWindow > 0 ? foundWindows.getOrDefault(entity, new HashSet<>()).size() / anomalyWindow : 0;
+            double minRecallValue = minRecall.getOrDefault(entity, .7);
+            assertTrue(
+                String.format(Locale.ROOT, "recall should be at least %f but got %f", minRecallValue, recall),
+                recall >= minRecallValue
+            );
 
-                LOG.info("Precision: {}, Window recall: {}", precision, recall);
-            }
-
-            int errors = testResults.getMiddle();
-            assertTrue(errors <= maxError);
+            LOG.info("Precision: {}, Window recall: {}", precision, recall);
         }
 
+        int errors = testResults.getMiddle();
+        assertTrue(errors <= maxError);
+    }
+
     public void verifyRule(
-            String datasetName,
-            int intervalMinutes,
-            int numberOfEntities,
-            int trainTestSplit,
-            Map<String, Double> minPrecision,
-            Map<String, Double> minRecall,
-            int maxError
-            ) throws Exception {
+        String datasetName,
+        int intervalMinutes,
+        int numberOfEntities,
+        int trainTestSplit,
+        Map<String, Double> minPrecision,
+        Map<String, Double> minRecall,
+        int maxError
+    ) throws Exception {
         String dataFileName = String.format(Locale.ROOT, "data/%s.data", datasetName);
         String labelFileName = String.format(Locale.ROOT, "data/%s.label", datasetName);
 
@@ -102,13 +107,13 @@ public class RuleModelPerfIT extends AbstractSyntheticDataTest {
         RestClient client = client();
         String categoricalField = "componentName";
         String mapping = String
-                .format(
-                    Locale.ROOT,
-                    "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\": \"date\"},"
-                        + " \"transform._doc_count\": { \"type\": \"integer\" },"
-                        + "\"%s\": { \"type\": \"keyword\"} } } }",
-                        categoricalField
-                );
+            .format(
+                Locale.ROOT,
+                "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\": \"date\"},"
+                    + " \"transform._doc_count\": { \"type\": \"integer\" },"
+                    + "\"%s\": { \"type\": \"keyword\"} } } }",
+                categoricalField
+            );
 
         bulkIndexData(data, datasetName, client, mapping);
 
@@ -130,26 +135,26 @@ public class RuleModelPerfIT extends AbstractSyntheticDataTest {
         Duration windowDelay = Duration.ofMinutes(windowDelayMinutes);
 
         String detector = String
-                .format(
-                        Locale.ROOT,
-                        "{ \"name\": \"test\", \"description\": \"test\", \"time_field\": \"timestamp\""
-                            + ", \"indices\": [\"%s\"], \"feature_attributes\": [{ \"feature_name\": \"feature 1\", \"feature_enabled\": "
-                            + "\"true\", \"aggregation_query\": { \"Feature1\": { \"sum\": { \"field\": \"transform._doc_count\" } } } }"
-                            + "], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
-                            + "\"category_field\": [\"%s\"], "
-                            + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
-                            + "\"history\": %d,"
-                            + "\"schema_version\": 0,"
-                            + "\"rules\": [{\"action\": \"ignore_anomaly\", \"conditions\": [{\"feature_name\": \"feature 1\", \"threshold_type\": \"actual_over_expected_ratio\", \"operator\": \"lte\", \"value\": 0.2}, "
-                            + "{\"feature_name\": \"feature 1\", \"threshold_type\": \"expected_over_actual_ratio\", \"operator\": \"lte\", \"value\": 0.2}"
-                            + "]}]"
-                            + "}",
-                        datasetName,
-                        intervalMinutes,
-                        categoricalField,
-                        windowDelayMinutes,
-                        trainTestSplit-1
-                    );
+            .format(
+                Locale.ROOT,
+                "{ \"name\": \"test\", \"description\": \"test\", \"time_field\": \"timestamp\""
+                    + ", \"indices\": [\"%s\"], \"feature_attributes\": [{ \"feature_name\": \"feature 1\", \"feature_enabled\": "
+                    + "\"true\", \"aggregation_query\": { \"Feature1\": { \"sum\": { \"field\": \"transform._doc_count\" } } } }"
+                    + "], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
+                    + "\"category_field\": [\"%s\"], "
+                    + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
+                    + "\"history\": %d,"
+                    + "\"schema_version\": 0,"
+                    + "\"rules\": [{\"action\": \"ignore_anomaly\", \"conditions\": [{\"feature_name\": \"feature 1\", \"threshold_type\": \"actual_over_expected_ratio\", \"operator\": \"lte\", \"value\": 0.2}, "
+                    + "{\"feature_name\": \"feature 1\", \"threshold_type\": \"expected_over_actual_ratio\", \"operator\": \"lte\", \"value\": 0.2}"
+                    + "]}]"
+                    + "}",
+                datasetName,
+                intervalMinutes,
+                categoricalField,
+                windowDelayMinutes,
+                trainTestSplit - 1
+            );
         String detectorId = createDetector(client, detector);
         LOG.info("Created detector {}", detectorId);
 
@@ -157,16 +162,19 @@ public class RuleModelPerfIT extends AbstractSyntheticDataTest {
         Instant executeEnd = executeBegin.plus(intervalMinutes, ChronoUnit.MINUTES);
         Instant dataEnd = trainTime.plus(intervalMinutes, ChronoUnit.MINUTES);
 
-        simulateStartDetector(
-                 detectorId,
-                 executeBegin,
-                 executeEnd,
-                 client,
-                 numberOfEntities
-            );
+        simulateStartDetector(detectorId, executeBegin, executeEnd, client, numberOfEntities);
         simulateWaitForInitDetector(detectorId, client, dataEnd, numberOfEntities);
 
-        Triple<Map<String, double[]>, Integer, Map<String, Set<Integer>>> results = getTestResults(detectorId, data, rawDataTrainTestSplit, intervalMinutes, anomalies, client, numberOfEntities, windowDelay);
+        Triple<Map<String, double[]>, Integer, Map<String, Set<Integer>>> results = getTestResults(
+            detectorId,
+            data,
+            rawDataTrainTestSplit,
+            intervalMinutes,
+            anomalies,
+            client,
+            numberOfEntities,
+            windowDelay
+        );
         verifyTestResults(results, anomalies, minPrecision, minRecall, maxError);
     }
 
@@ -175,68 +183,74 @@ public class RuleModelPerfIT extends AbstractSyntheticDataTest {
     }
 
     private Triple<Map<String, double[]>, Integer, Map<String, Set<Integer>>> getTestResults(
-            String detectorId,
-            List<JsonObject> data,
-            int trainTestSplit,
-            int intervalMinutes,
-            Map<String, List<Entry<Instant, Instant>>> anomalies,
-            RestClient client,
-            int numberOfEntities,
-            Duration windowDelay
-        ) throws Exception {
+        String detectorId,
+        List<JsonObject> data,
+        int trainTestSplit,
+        int intervalMinutes,
+        Map<String, List<Entry<Instant, Instant>>> anomalies,
+        RestClient client,
+        int numberOfEntities,
+        Duration windowDelay
+    ) throws Exception {
 
-            Map<String, double[]> res = new HashMap<>();
-            int errors = 0;
-            // for (int i = trainTestSplit; i < data.size(); i++) {
-            // hello
-            for (int i = trainTestSplit; i < trainTestSplit+10; i++) {
-                Instant begin = dataToExecutionTime(Instant.ofEpochMilli(Long.parseLong((data.get(i).get("timestamp").getAsString()))), windowDelay);
-                Instant end = begin.plus(intervalMinutes, ChronoUnit.MINUTES);
-                try {
-                    runDetectionResult(detectorId, begin, end, client, numberOfEntities);
-                } catch (Exception e) {
-                    errors++;
-                    LOG.error("failed to run detection result", e);
-                }
+        Map<String, double[]> res = new HashMap<>();
+        int errors = 0;
+        // for (int i = trainTestSplit; i < data.size(); i++) {
+        // hello
+        for (int i = trainTestSplit; i < trainTestSplit + 10; i++) {
+            Instant begin = dataToExecutionTime(
+                Instant.ofEpochMilli(Long.parseLong((data.get(i).get("timestamp").getAsString()))),
+                windowDelay
+            );
+            Instant end = begin.plus(intervalMinutes, ChronoUnit.MINUTES);
+            try {
+                runDetectionResult(detectorId, begin, end, client, numberOfEntities);
+            } catch (Exception e) {
+                errors++;
+                LOG.error("failed to run detection result", e);
             }
+        }
 
-            // hash set to dedup
-            Map<String, Set<Integer>> foundWindow = new HashMap<>();
+        // hash set to dedup
+        Map<String, Set<Integer>> foundWindow = new HashMap<>();
 
-            for (int i = trainTestSplit; i < data.size(); i++) {
-                Instant begin = Instant.ofEpochMilli(Long.parseLong((data.get(i).get("timestamp").getAsString())));
-                Instant end = begin.plus(intervalMinutes, ChronoUnit.MINUTES);
-                try {
-                    List<JsonObject> sourceList = getAnomalyResult(detectorId, end, numberOfEntities, client);
-                    assertTrue(String.format(Locale.ROOT, "the number of results per interval is {}, expected {} ",
-                            sourceList.size(), numberOfEntities), sourceList.size() == numberOfEntities);
-                    for (int j=0; j<numberOfEntities; j++) {
-                        JsonObject source = sourceList.get(j);
-                        double anomalyGrade = getAnomalyGrade(source);
-                        assertTrue("anomalyGrade cannot be negative", anomalyGrade >= 0);
-                        if (anomalyGrade > 0) {
-                            String entity = getSingleEntity(source);
-                            double[] entityResult = res.computeIfAbsent(entity, key -> new double[] { 0, 0, 0 });
-                            // positive++
-                            entityResult[0]++;
-                            LOG.info("Found anomaly: entity {}, time {} result {}.", entity, begin, source);
-                            int anomalyWindow = isAnomaly(begin, anomalies.getOrDefault(entity, new ArrayList<>()));
-                            if (anomalyWindow != -1) {
-                                LOG.info("True anomaly: entity {}, time {}.", entity, begin);
-                                // truePositives++;
-                                entityResult[1]++;
-                                Set<Integer> window = foundWindow.computeIfAbsent(entity, key -> new HashSet<>());
-                                window.add(anomalyWindow);
-                            }
+        for (int i = trainTestSplit; i < data.size(); i++) {
+            Instant begin = Instant.ofEpochMilli(Long.parseLong((data.get(i).get("timestamp").getAsString())));
+            Instant end = begin.plus(intervalMinutes, ChronoUnit.MINUTES);
+            try {
+                List<JsonObject> sourceList = getAnomalyResult(detectorId, end, numberOfEntities, client);
+                assertTrue(
+                    String
+                        .format(Locale.ROOT, "the number of results per interval is {}, expected {} ", sourceList.size(), numberOfEntities),
+                    sourceList.size() == numberOfEntities
+                );
+                for (int j = 0; j < numberOfEntities; j++) {
+                    JsonObject source = sourceList.get(j);
+                    double anomalyGrade = getAnomalyGrade(source);
+                    assertTrue("anomalyGrade cannot be negative", anomalyGrade >= 0);
+                    if (anomalyGrade > 0) {
+                        String entity = getSingleEntity(source);
+                        double[] entityResult = res.computeIfAbsent(entity, key -> new double[] { 0, 0, 0 });
+                        // positive++
+                        entityResult[0]++;
+                        LOG.info("Found anomaly: entity {}, time {} result {}.", entity, begin, source);
+                        int anomalyWindow = isAnomaly(begin, anomalies.getOrDefault(entity, new ArrayList<>()));
+                        if (anomalyWindow != -1) {
+                            LOG.info("True anomaly: entity {}, time {}.", entity, begin);
+                            // truePositives++;
+                            entityResult[1]++;
+                            Set<Integer> window = foundWindow.computeIfAbsent(entity, key -> new HashSet<>());
+                            window.add(anomalyWindow);
                         }
                     }
-                } catch (Exception e) {
-                    errors++;
-                    LOG.error("failed to get detection results", e);
                 }
+            } catch (Exception e) {
+                errors++;
+                LOG.error("failed to get detection results", e);
             }
-            return Triple.of(res, errors, foundWindow);
         }
+        return Triple.of(res, errors, foundWindow);
+    }
 
     public Map<String, List<Entry<Instant, Instant>>> getAnomalyWindowsMap(String labelFileName) throws Exception {
         JsonObject jsonObject = JsonParser

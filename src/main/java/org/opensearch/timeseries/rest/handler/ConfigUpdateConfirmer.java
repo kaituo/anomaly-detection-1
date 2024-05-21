@@ -43,14 +43,7 @@ import org.opensearch.transport.TransportService;
 /**
  * Get job to make sure job has been stopped before updating a config.
  */
-public class ConfigUpdateConfirmer<
-    IndexType extends Enum<IndexType> & TimeSeriesIndex,
-    IndexManagementType extends IndexManagement<IndexType>,
-    TaskCacheManagerType extends TaskCacheManager,
-    TaskTypeEnum extends TaskType,
-    TaskClass extends TimeSeriesTask,
-    TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>
-    > {
+public class ConfigUpdateConfirmer<IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>> {
 
     private final Logger logger = LogManager.getLogger(ConfigUpdateConfirmer.class);
 

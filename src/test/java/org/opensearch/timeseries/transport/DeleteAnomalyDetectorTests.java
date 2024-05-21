@@ -14,8 +14,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_SEQ_NO;
-import static org.opensearch.timeseries.TestHelpers.randomDetector;
-import static org.opensearch.timeseries.TestHelpers.randomFeature;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -33,7 +31,6 @@ import org.opensearch.OpenSearchStatusException;
 import org.opensearch.Version;
 import org.opensearch.action.DocWriteResponse;
 import org.opensearch.action.delete.DeleteResponse;
-import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
@@ -67,8 +64,6 @@ import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
-
-import com.google.common.collect.ImmutableList;
 
 public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
     private DeleteAnomalyDetectorTransportAction action;
@@ -287,38 +282,38 @@ public class DeleteAnomalyDetectorTests extends AbstractTimeSeriesTest {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
-                if (getResponseFailure) {
-                    listener.onFailure(new RuntimeException("Fail to get anomaly detector job"));
-                    return null;
-                }
-                getResponse = new GetResponse(
-                    new GetResult(
-                        CommonName.JOB_INDEX,
-                        "id",
-                        UNASSIGNED_SEQ_NO,
-                        0,
-                        -1,
-                        true,
-                        BytesReference
-                            .bytes(
-                                new Job(
-                                    "1234",
-                                    jobParameter.getSchedule(),
-                                    jobParameter.getWindowDelay(),
-                                    true,
-                                    Instant.now().minusSeconds(60),
-                                    Instant.now(),
-                                    Instant.now(),
-                                    60L,
-                                    TestHelpers.randomUser(),
-                                    jobParameter.getCustomResultIndex(),
-                                    AnalysisType.AD
-                                ).toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS)
-                            ),
-                        Collections.emptyMap(),
-                        Collections.emptyMap()
-                    )
-                );
+            if (getResponseFailure) {
+                listener.onFailure(new RuntimeException("Fail to get anomaly detector job"));
+                return null;
+            }
+            getResponse = new GetResponse(
+                new GetResult(
+                    CommonName.JOB_INDEX,
+                    "id",
+                    UNASSIGNED_SEQ_NO,
+                    0,
+                    -1,
+                    true,
+                    BytesReference
+                        .bytes(
+                            new Job(
+                                "1234",
+                                jobParameter.getSchedule(),
+                                jobParameter.getWindowDelay(),
+                                true,
+                                Instant.now().minusSeconds(60),
+                                Instant.now(),
+                                Instant.now(),
+                                60L,
+                                TestHelpers.randomUser(),
+                                jobParameter.getCustomResultIndex(),
+                                AnalysisType.AD
+                            ).toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS)
+                        ),
+                    Collections.emptyMap(),
+                    Collections.emptyMap()
+                )
+            );
 
             listener.onResponse(getResponse);
             return null;

@@ -19,7 +19,6 @@ import java.util.List;
 import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.opensearch.ad.ADUnitTestCase;
 import org.opensearch.client.Client;
-import org.opensearch.cluster.ClusterManagerMetrics;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Setting;

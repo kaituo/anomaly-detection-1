@@ -12,10 +12,8 @@
 package org.opensearch.timeseries.feature;
 
 import static java.util.Arrays.asList;
-import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -31,7 +29,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map.Entry;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 
@@ -163,9 +160,7 @@ public class SearchFeatureDaoParamTests {
             return null;
         }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
-        searchFeatureDao = spy(
-            new SearchFeatureDao(client, xContent, clientUtil, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE)
-        );
+        searchFeatureDao = spy(new SearchFeatureDao(client, xContent, clientUtil, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE));
 
         detectionInterval = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);
         detectorId = "123";

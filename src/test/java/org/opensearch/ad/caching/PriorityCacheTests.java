@@ -640,15 +640,15 @@ public class PriorityCacheTests extends AbstractCacheTest {
             entityCache.get(entity5.getModelId(detectorId2).get(), detector2);
         }
         ModelState<ThresholdedRandomCutForest> modelState5 = new ModelState<ThresholdedRandomCutForest>(
-                MLUtil.createNonEmptyModel(detectorId, 0, entity5).getLeft(),
-                entity5.getModelId(detectorId2).get(),
-                detectorId2,
-                ModelManager.ModelType.TRCF.getName(),
-                clock,
-                0,
-                Optional.of(entity5),
-                new ArrayDeque<>()
-            );
+            MLUtil.createNonEmptyModel(detectorId, 0, entity5).getLeft(),
+            entity5.getModelId(detectorId2).get(),
+            detectorId2,
+            ModelManager.ModelType.TRCF.getName(),
+            clock,
+            0,
+            Optional.of(entity5),
+            new ArrayDeque<>()
+        );
         entityCache.hostIfPossible(detector2, modelState5);
 
         assertTrue(null != entityCache.get(entity1.getModelId(detectorId).get(), detector));

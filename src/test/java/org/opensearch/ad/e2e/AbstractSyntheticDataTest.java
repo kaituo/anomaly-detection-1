@@ -11,8 +11,6 @@
 
 package org.opensearch.ad.e2e;
 
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_BACKOFF_MINUTES;
-import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE;
 import static org.opensearch.timeseries.TestHelpers.toHttpEntity;
 
 import java.io.File;
@@ -21,10 +19,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
 import java.time.Instant;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -41,14 +36,12 @@ import org.opensearch.client.Response;
 import org.opensearch.client.RestClient;
 import org.opensearch.client.WarningsHandler;
 import org.opensearch.common.xcontent.json.JsonXContent;
-import org.opensearch.core.common.Strings;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 import com.google.common.collect.ImmutableList;
 import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
@@ -99,8 +92,8 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
 
     protected JsonArray parseHits(Response response) throws IOException {
         JsonObject json = JsonParser
-                .parseReader(new InputStreamReader(response.getEntity().getContent(), Charset.defaultCharset()))
-                .getAsJsonObject();
+            .parseReader(new InputStreamReader(response.getEntity().getContent(), Charset.defaultCharset()))
+            .getAsJsonObject();
         JsonObject hits = json.getAsJsonObject("hits");
         if (hits == null) {
             return null;
@@ -108,56 +101,53 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
         return hits.getAsJsonArray("hits");
     }
 
-    protected void runDetectionResult(String detectorId, Instant begin, Instant end, RestClient client, int entitySize) throws IOException, InterruptedException {
-            // trigger run in current interval
-            Request request = new Request(
-                "POST",
-                String.format(Locale.ROOT, "/_opendistro/_anomaly_detection/detectors/%s/_run", detectorId)
+    protected void runDetectionResult(String detectorId, Instant begin, Instant end, RestClient client, int entitySize) throws IOException,
+        InterruptedException {
+        // trigger run in current interval
+        Request request = new Request("POST", String.format(Locale.ROOT, "/_opendistro/_anomaly_detection/detectors/%s/_run", detectorId));
+        request
+            .setJsonEntity(
+                String.format(Locale.ROOT, "{ \"period_start\": %d, \"period_end\": %d }", begin.toEpochMilli(), end.toEpochMilli())
             );
-            request
-                .setJsonEntity(
-                    String.format(Locale.ROOT, "{ \"period_start\": %d, \"period_end\": %d }", begin.toEpochMilli(), end.toEpochMilli())
-                );
-            int statusCode = client.performRequest(request).getStatusLine().getStatusCode();
-            assert(statusCode >= 200 && statusCode < 300);
+        int statusCode = client.performRequest(request).getStatusLine().getStatusCode();
+        assert (statusCode >= 200 && statusCode < 300);
 
-            // wait for 50 milliseconds per entity before next query
-            Thread.sleep(50 * entitySize);
+        // wait for 50 milliseconds per entity before next query
+        Thread.sleep(50 * entitySize);
     }
 
-    protected List<JsonObject> getAnomalyResult(String detectorId, Instant end, int entitySize,
-            RestClient client) {
+    protected List<JsonObject> getAnomalyResult(String detectorId, Instant end, int entitySize, RestClient client) {
         try {
             Request request = new Request("POST", "/_plugins/_anomaly_detection/detectors/results/_search");
 
-            String jsonTemplate = "{\n" +
-                    "    \"query\": {\n" +
-                    "        \"bool\": {\n" +
-                    "            \"filter\": [\n" +
-                    "                {\n" +
-                    "                    \"term\": {\n" +
-                    "                        \"detector_id\": \"%s\"\n" +
-                    "                    }\n" +
-                    "                },\n" +
-                    "                {\n" +
-                    "                    \"range\": {\n" +
-                    "                        \"anomaly_grade\": {\n" +
-                    "                            \"gte\": 0\n" +
-                    "                        }\n" +
-                    "                    }\n" +
-                    "                },\n" +
-                    "                {\n" +
-                    "                    \"range\": {\n" +
-                    "                        \"data_end_time\": {\n" +
-                    "                            \"gte\": %d,\n" +
-                    "                            \"lte\": %d\n" +
-                    "                        }\n" +
-                    "                    }\n" +
-                    "                }\n" +
-                    "            ]\n" +
-                    "        }\n" +
-                    "    }\n" +
-                    "}";
+            String jsonTemplate = "{\n"
+                + "    \"query\": {\n"
+                + "        \"bool\": {\n"
+                + "            \"filter\": [\n"
+                + "                {\n"
+                + "                    \"term\": {\n"
+                + "                        \"detector_id\": \"%s\"\n"
+                + "                    }\n"
+                + "                },\n"
+                + "                {\n"
+                + "                    \"range\": {\n"
+                + "                        \"anomaly_grade\": {\n"
+                + "                            \"gte\": 0\n"
+                + "                        }\n"
+                + "                    }\n"
+                + "                },\n"
+                + "                {\n"
+                + "                    \"range\": {\n"
+                + "                        \"data_end_time\": {\n"
+                + "                            \"gte\": %d,\n"
+                + "                            \"lte\": %d\n"
+                + "                        }\n"
+                + "                    }\n"
+                + "                }\n"
+                + "            ]\n"
+                + "        }\n"
+                + "    }\n"
+                + "}";
 
             long dateEndTime = end.toEpochMilli();
             String formattedJson = String.format(Locale.ROOT, jsonTemplate, detectorId, dateEndTime, dateEndTime);
@@ -172,7 +162,7 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
                     assertTrue("empty response", hits != null);
                     assertTrue("returned more than " + hits.size() + " results.", hits.size() == entitySize);
                     List<JsonObject> res = new ArrayList<>();
-                    for (int i=0; i<entitySize; i++) {
+                    for (int i = 0; i < entitySize; i++) {
                         JsonObject source = hits.get(i).getAsJsonObject().get("_source").getAsJsonObject();
                         res.add(source);
                     }
@@ -180,8 +170,7 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
                     return res;
                 } else {
                     LOG.info("wait for result, previous result: {}", hits);
-                    client.performRequest(new Request("POST",
-                            String.format(Locale.ROOT, "/%s/_refresh", ".opendistro-anomaly-results*")));
+                    client.performRequest(new Request("POST", String.format(Locale.ROOT, "/%s/_refresh", ".opendistro-anomaly-results*")));
                 }
                 Thread.sleep(2_000 * entitySize);
             } while (maxWaitCycles-- >= 0);
@@ -200,8 +189,7 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
         return source.get("entity").getAsJsonArray().get(0).getAsJsonObject().get("value").getAsString();
     }
 
-    protected void createIndex(String datasetName,
-            RestClient client, String mapping) throws IOException, InterruptedException {
+    protected void createIndex(String datasetName, RestClient client, String mapping) throws IOException, InterruptedException {
         Request request = new Request("PUT", datasetName);
         request.setJsonEntity(mapping);
         setWarningHandler(request, false);
@@ -209,13 +197,8 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
         Thread.sleep(1_000);
     }
 
-    protected void bulkIndexTrainData(
-        String datasetName,
-        List<JsonObject> data,
-        int trainTestSplit,
-        RestClient client,
-        String mapping
-    ) throws Exception {
+    protected void bulkIndexTrainData(String datasetName, List<JsonObject> data, int trainTestSplit, RestClient client, String mapping)
+        throws Exception {
         createIndex(datasetName, client, mapping);
 
         StringBuilder bulkRequestBuilder = new StringBuilder();
@@ -236,10 +219,7 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
         waitAllSyncheticDataIngested(trainTestSplit, datasetName, client);
     }
 
-    protected String createDetector(
-        RestClient client,
-        String detectorJson
-    ) throws Exception {
+    protected String createDetector(RestClient client, String detectorJson) throws Exception {
         Request request = new Request("POST", "/_plugins/_anomaly_detection/detectors/");
 
         request.setJsonEntity(detectorJson);
@@ -274,7 +254,7 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
                 );
             // Make sure all of the test data has been ingested
             JsonArray hits = getHits(client, request);
-            LOG.info("Latest synthetic data:"+hits);
+            LOG.info("Latest synthetic data:" + hits);
             if (hits != null
                 && hits.size() == 1
                 && expectedSize - 1 == hits.get(0).getAsJsonObject().getAsJsonPrimitive("_id").getAsLong()) {
@@ -315,13 +295,13 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
             return "0%";
         }
 
-        Object percent = ((Map<String, Object>) initProgress ).get("percentage");
+        Object percent = ((Map<String, Object>) initProgress).get("percentage");
 
         if (percent == null) {
-            return "0%" ;
+            return "0%";
         }
 
-        return (String)percent;
+        return (String) percent;
     }
 
     /**
@@ -330,10 +310,7 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
      * @param client OpenSearch Client
      * @throws Exception when failing to query/indexing from/to OpenSearch
      */
-    protected void waitForInitDetector(
-        String detectorId,
-        RestClient client
-    ) throws Exception {
+    protected void waitForInitDetector(String detectorId, RestClient client) throws Exception {
 
         long startTime = System.currentTimeMillis();
         long duration = 0;
@@ -369,12 +346,7 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
      * @param entitySize the number of entities
      * @throws Exception when failing to query/indexing from/to OpenSearch
      */
-    protected void simulateWaitForInitDetector(
-        String detectorId,
-        RestClient client,
-        Instant end,
-        int entitySize
-    ) throws Exception {
+    protected void simulateWaitForInitDetector(String detectorId, RestClient client, Instant end, int entitySize) throws Exception {
 
         long startTime = System.currentTimeMillis();
         long duration = 0;
@@ -402,17 +374,17 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
             bulkRequestBuilder.append("{ \"index\" : { \"_index\" : \"" + datasetName + "\", \"_id\" : \"" + i + "\" } }\n");
             bulkRequestBuilder.append(data.get(i).toString()).append("\n");
             count++;
-            if (count >= batchSize || i == data.size()-1) {
+            if (count >= batchSize || i == data.size() - 1) {
                 count = 0;
                 TestHelpers
-                .makeRequest(
-                    client,
-                    "POST",
-                    "_bulk?refresh=true",
-                    null,
-                    toHttpEntity(bulkRequestBuilder.toString()),
-                    ImmutableList.of(new BasicHeader(HttpHeaders.USER_AGENT, "Kibana"))
-                );
+                    .makeRequest(
+                        client,
+                        "POST",
+                        "_bulk?refresh=true",
+                        null,
+                        toHttpEntity(bulkRequestBuilder.toString()),
+                        ImmutableList.of(new BasicHeader(HttpHeaders.USER_AGENT, "Kibana"))
+                    );
                 Thread.sleep(1_000);
             }
         }
@@ -431,13 +403,8 @@ public class AbstractSyntheticDataTest extends ODFERestTestCase {
      * @param entitySize number of entities
      * @throws Exception when failing to query/indexing from/to OpenSearch
      */
-    protected void simulateStartDetector(
-        String detectorId,
-        Instant begin,
-        Instant end,
-        RestClient client,
-        int entitySize
-    ) throws Exception {
+    protected void simulateStartDetector(String detectorId, Instant begin, Instant end, RestClient client, int entitySize)
+        throws Exception {
         runDetectionResult(detectorId, begin, end, client, entitySize);
     }
 

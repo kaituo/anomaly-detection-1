@@ -31,7 +31,11 @@ public class ForecastIndexMemoryPressureAwareResultHandler extends
     private static final Logger LOG = LogManager.getLogger(ForecastIndexMemoryPressureAwareResultHandler.class);
 
     @Inject
-    public ForecastIndexMemoryPressureAwareResultHandler(Client client, ForecastIndexManagement anomalyDetectionIndices, ClusterService clusterService) {
+    public ForecastIndexMemoryPressureAwareResultHandler(
+        Client client,
+        ForecastIndexManagement anomalyDetectionIndices,
+        ClusterService clusterService
+    ) {
         super(client, anomalyDetectionIndices, clusterService);
     }
 

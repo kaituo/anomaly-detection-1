@@ -46,14 +46,7 @@ public abstract class TaskProfile<TaskType extends TimeSeriesTask> implements To
         this.nodeId = nodeId;
     }
 
-    public TaskProfile(
-        TaskType adTask,
-        Long rcfTotalUpdates,
-        Long modelSizeInBytes,
-        String nodeId,
-        String taskId,
-        String adTaskType
-    ) {
+    public TaskProfile(TaskType adTask, Long rcfTotalUpdates, Long modelSizeInBytes, String nodeId, String taskId, String adTaskType) {
         this.task = adTask;
         this.rcfTotalUpdates = rcfTotalUpdates;
         this.modelSizeInBytes = modelSizeInBytes;

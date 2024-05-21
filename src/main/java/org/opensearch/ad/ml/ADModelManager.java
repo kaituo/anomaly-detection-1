@@ -524,11 +524,13 @@ public class ADModelManager extends
         }
         List<Entry<Long, Long>> timeRanges = features.getTimeRanges();
         if (timeRanges.size() != dataPoints.length) {
-            throw new IllegalArgumentException(String.format(Locale.ROOT, "time range size %d does not match data points size %d", timeRanges.size(), dataPoints.length));
+            throw new IllegalArgumentException(
+                String.format(Locale.ROOT, "time range size %d does not match data points size %d", timeRanges.size(), dataPoints.length)
+            );
         }
         // Train RCF models and collect non-zero scores
         int baseDimension = dataPoints[0].length;
-        System.out.println("hello31:"+baseDimension);
+        System.out.println("hello31:" + baseDimension);
         // speed is important in preview. We don't want cx to wait too long.
         // thus use the default value of boundingBoxCacheFraction = 1
         ThresholdedRandomCutForest trcf = ThresholdedRandomCutForest
@@ -552,8 +554,7 @@ public class ADModelManager extends
             .internalShinglingEnabled(true)
             .build();
 
-        return IntStream.range(0, dataPoints.length)
-        .mapToObj(i -> {
+        return IntStream.range(0, dataPoints.length).mapToObj(i -> {
             double[] point = dataPoints[i];
             // Get the data end epoch milliseconds corresponding to this index and convert it to seconds
             long timestampSecs = timeRanges.get(i).getValue() / 1000;
@@ -571,8 +572,7 @@ public class ADModelManager extends
                 descriptor.getThreshold(),
                 rcfNumTrees
             );
-        })
-        .collect(Collectors.toList());
+        }).collect(Collectors.toList());
     }
 
     /**

@@ -22,7 +22,6 @@ import static org.opensearch.index.seqno.SequenceNumbers.UNASSIGNED_SEQ_NO;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.time.Clock;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -58,7 +57,6 @@ import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.DetectorInternalState;
-import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.metadata.AliasMetadata;
 import org.opensearch.cluster.metadata.IndexMetadata;
@@ -253,7 +251,6 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
     protected TestAppender testAppender;
 
     protected Logger logger;
-
 
     protected void setUpLog4jForJUnit(Class<?> cls, boolean recordExceptions) {
         Pair<TestAppender, Logger> appenderAndLogger = getLog4jAppenderForJUnit(cls, recordExceptions);
@@ -568,31 +565,40 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
 
     protected DiscoveryNode createDiscoverynode(String nodeName) {
         return new DiscoveryNode(
-                nodeName,
-                OpenSearchTestCase.buildNewFakeTransportAddress(),
-                Collections.emptyMap(),
-                DiscoveryNodeRole.BUILT_IN_ROLES,
-                Version.CURRENT
-            );
+            nodeName,
+            OpenSearchTestCase.buildNewFakeTransportAddress(),
+            Collections.emptyMap(),
+            DiscoveryNodeRole.BUILT_IN_ROLES,
+            Version.CURRENT
+        );
     }
 
-    protected ClusterService createClusterServiceForNode(ThreadPool threadPool, DiscoveryNode discoveryNode, Set<Setting<?>> nodestateSetting) {
+    protected ClusterService createClusterServiceForNode(
+        ThreadPool threadPool,
+        DiscoveryNode discoveryNode,
+        Set<Setting<?>> nodestateSetting
+    ) {
         ClusterSettings clusterSettings = new ClusterSettings(Settings.EMPTY, nodestateSetting);
 
         return ClusterServiceUtils.createClusterService(threadPool, discoveryNode, clusterSettings);
     }
 
-    protected NodeStateManager createNodeStateManager(Client client, ClientUtil clientUtil, ThreadPool threadPool, ClusterService clusterService) {
+    protected NodeStateManager createNodeStateManager(
+        Client client,
+        ClientUtil clientUtil,
+        ThreadPool threadPool,
+        ClusterService clusterService
+    ) {
         return new NodeStateManager(
-                client,
-                xContentRegistry(),
-                Settings.EMPTY,
-                clientUtil,
-                mock(Clock.class),
-                TimeSeriesSettings.HOURLY_MAINTENANCE,
-                clusterService,
-                TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-                TimeSeriesSettings.BACKOFF_MINUTES
-            );
+            client,
+            xContentRegistry(),
+            Settings.EMPTY,
+            clientUtil,
+            mock(Clock.class),
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
+            clusterService,
+            TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+            TimeSeriesSettings.BACKOFF_MINUTES
+        );
     }
 }

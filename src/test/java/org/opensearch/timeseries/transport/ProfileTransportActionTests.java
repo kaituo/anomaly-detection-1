@@ -11,7 +11,6 @@
 
 package org.opensearch.timeseries.transport;
 
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -31,7 +30,6 @@ import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
-import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.transport.DelegateADProfileTransportAction;
@@ -65,7 +63,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
     public void setUp() throws Exception {
         super.setUp();
 
-        //modelManager = mock(ADModelManager.class);
+        // modelManager = mock(ADModelManager.class);
         taskCacheManager = mock(ADTaskCacheManager.class);
 
         ADPriorityCache cache = mock(ADPriorityCache.class);
@@ -90,9 +88,9 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         modelProfiles.add(new ModelProfile(modelId1, entity2, multiEntityModelSize));
         when(cache.getAllModelProfile(anyString())).thenReturn(modelProfiles);
 
-//        Map<String, Long> modelSizes = new HashMap<>();
-//        modelSizes.put(modelId, modelSize);
-//        when(modelManager.getModelSize(any(String.class))).thenReturn(modelSizes);
+        // Map<String, Long> modelSizes = new HashMap<>();
+        // modelSizes.put(modelId, modelSize);
+        // when(modelManager.getModelSize(any(String.class))).thenReturn(modelSizes);
 
         Settings settings = Settings.builder().put("plugins.anomaly_detection.max_model_size_per_node", 100).build();
 

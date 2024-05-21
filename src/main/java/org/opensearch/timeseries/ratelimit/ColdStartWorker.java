@@ -151,7 +151,7 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
                                     entry,
                                     coldStartRequest.getEntity()
                                 );
-                                System.out.println("hello6:"+trainingResult);
+                                System.out.println("hello6:" + trainingResult);
                                 resultSaver.saveResult(trainingResult, config);
                             }
                         }
@@ -162,9 +162,8 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
                             Instant.ofEpochMilli(dataStartTime),
                             Instant.ofEpochMilli(dataStartTime + config.getIntervalInMilliseconds())
                         );
-                        IntermediateResultType result = modelManager
-                            .getResult(currentSample, modelState, modelId, config, taskId);
-                        System.out.println("hello7:"+result);
+                        IntermediateResultType result = modelManager.getResult(currentSample, modelState, modelId, config, taskId);
+                        System.out.println("hello7:" + result);
                         resultSaver.saveResult(result, config, coldStartRequest, modelId);
                     }
 
@@ -172,7 +171,12 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
                     if (null == coldStartRequest.getTaskId()) {
                         boolean hosted = cacheProvider.hostIfPossible(configOptional.get(), modelState);
                         // hello
-                        LOG.info(hosted ? new ParameterizedMessage("Loaded model {}.", modelState.getModelId()) : new ParameterizedMessage("Failed to load model {}.", modelState.getModelId()));
+                        LOG
+                            .info(
+                                hosted
+                                    ? new ParameterizedMessage("Loaded model {}.", modelState.getModelId())
+                                    : new ParameterizedMessage("Failed to load model {}.", modelState.getModelId())
+                            );
                     }
 
                 } finally {

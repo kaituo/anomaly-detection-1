@@ -31,7 +31,6 @@ import org.opensearch.ad.ratelimit.ADCheckpointReadWorker;
 import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
 import org.opensearch.ad.ratelimit.ADColdEntityWorker;
 import org.opensearch.ad.ratelimit.ADColdStartWorker;
-import org.opensearch.ad.ratelimit.ADResultWriteWorker;
 import org.opensearch.ad.ratelimit.ADSaveResultStrategy;
 import org.opensearch.ad.stats.ADStats;
 import org.opensearch.common.inject.Inject;

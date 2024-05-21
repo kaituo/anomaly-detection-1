@@ -34,7 +34,6 @@ import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
 import org.opensearch.cluster.block.ClusterBlocks;
 import org.opensearch.cluster.coordination.NoClusterManagerBlockService;
-import org.opensearch.cluster.coordination.NoMasterBlockService;
 import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
@@ -111,10 +110,7 @@ public abstract class AbstractIndexHandlerTest extends AbstractTimeSeriesTest {
 
     protected void setGlobalWriteBlocked() {
         ClusterBlocks.Builder builder = ClusterBlocks.builder().addGlobalBlock(NoClusterManagerBlockService.NO_CLUSTER_MANAGER_BLOCK_ALL);
-        ClusterState blockedClusterState = ClusterState
-                .builder(new ClusterName("test cluster"))
-                .blocks(builder)
-                .build();
+        ClusterState blockedClusterState = ClusterState.builder(new ClusterName("test cluster")).blocks(builder).build();
         when(clusterService.state()).thenReturn(blockedClusterState);
     }
 

@@ -24,7 +24,6 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
 
@@ -69,23 +68,23 @@ public class SingleStreamModelPerfIT extends AbstractSyntheticDataTest {
         List<Entry<Instant, Instant>> anomalies = getAnomalyWindows(labelFileName);
 
         String mapping = "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\": \"date\"},"
-                + " \"Feature1\": { \"type\": \"double\" }, \"Feature2\": { \"type\": \"double\" } } } }";
+            + " \"Feature1\": { \"type\": \"double\" }, \"Feature2\": { \"type\": \"double\" } } } }";
         bulkIndexTrainData(datasetName, data, trainTestSplit, client, mapping);
         // single-stream detector can use window delay 0 here because we give the run api the actual data time
         String detector = String
-                .format(
-                    Locale.ROOT,
-                    "{ \"name\": \"test\", \"description\": \"test\", \"time_field\": \"timestamp\""
-                        + ", \"indices\": [\"%s\"], \"feature_attributes\": [{ \"feature_name\": \"feature 1\", \"feature_enabled\": "
-                        + "\"true\", \"aggregation_query\": { \"Feature1\": { \"sum\": { \"field\": \"Feature1\" } } } }, { \"feature_name\""
-                        + ": \"feature 2\", \"feature_enabled\": \"true\", \"aggregation_query\": { \"Feature2\": { \"sum\": { \"field\": "
-                        + "\"Feature2\" } } } }], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
-                        + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
-                        + "\"schema_version\": 0 }",
-                    datasetName,
-                    intervalMinutes,
-                    0
-                );
+            .format(
+                Locale.ROOT,
+                "{ \"name\": \"test\", \"description\": \"test\", \"time_field\": \"timestamp\""
+                    + ", \"indices\": [\"%s\"], \"feature_attributes\": [{ \"feature_name\": \"feature 1\", \"feature_enabled\": "
+                    + "\"true\", \"aggregation_query\": { \"Feature1\": { \"sum\": { \"field\": \"Feature1\" } } } }, { \"feature_name\""
+                    + ": \"feature 2\", \"feature_enabled\": \"true\", \"aggregation_query\": { \"Feature2\": { \"sum\": { \"field\": "
+                    + "\"Feature2\" } } } }], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
+                    + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
+                    + "\"schema_version\": 0 }",
+                datasetName,
+                intervalMinutes,
+                0
+            );
         String detectorId = createDetector(client, detector);
 
         Instant trainTime = Instant.from(DateTimeFormatter.ISO_INSTANT.parse(data.get(trainTestSplit - 1).get("timestamp").getAsString()));
@@ -114,7 +113,10 @@ public class SingleStreamModelPerfIT extends AbstractSyntheticDataTest {
 
         // precision = predicted anomaly points that are true / predicted anomaly points
         double precision = positives > 0 ? truePositives / positives : 0;
-        assertTrue(String.format(Locale.ROOT, "precision expected at least %f but got %f", minPrecision, precision), precision >= minPrecision);
+        assertTrue(
+            String.format(Locale.ROOT, "precision expected at least %f but got %f", minPrecision, precision),
+            precision >= minPrecision
+        );
 
         // recall = windows containing predicted anomaly points / total anomaly windows
         double recall = anomalies.size() > 0 ? positiveAnomalies / anomalies.size() : 0;

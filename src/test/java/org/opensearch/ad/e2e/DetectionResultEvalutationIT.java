@@ -217,31 +217,31 @@ public class DetectionResultEvalutationIT extends AbstractSyntheticDataTest {
         }
 
         String mapping = String
-                .format(
-                    Locale.ROOT,
-                    "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\": \"date\"},"
-                        + " \"Feature1\": { \"type\": \"double\" }, \"Feature2\": { \"type\": \"double\" },"
-                        + "\"%s\": { \"type\": \"keyword\"} } } }",
-                        categoricalField
-                );
+            .format(
+                Locale.ROOT,
+                "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\": \"date\"},"
+                    + " \"Feature1\": { \"type\": \"double\" }, \"Feature2\": { \"type\": \"double\" },"
+                    + "\"%s\": { \"type\": \"keyword\"} } } }",
+                categoricalField
+            );
         bulkIndexTrainData(datasetName, data, trainTestSplit, client, mapping);
 
         String detector = String
-                .format(
-                        Locale.ROOT,
-                        "{ \"name\": \"test\", \"description\": \"test\", \"time_field\": \"timestamp\""
-                            + ", \"indices\": [\"%s\"], \"feature_attributes\": [{ \"feature_name\": \"feature 1\", \"feature_enabled\": "
-                            + "\"true\", \"aggregation_query\": { \"Feature1\": { \"sum\": { \"field\": \"Feature1\" } } } }, { \"feature_name\""
-                            + ": \"feature 2\", \"feature_enabled\": \"true\", \"aggregation_query\": { \"Feature2\": { \"sum\": { \"field\": "
-                            + "\"Feature2\" } } } }], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
-                            + "\"category_field\": [\"%s\"], "
-                            + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
-                            + "\"schema_version\": 0  }",
-                        datasetName,
-                        intervalMinutes,
-                        categoricalField,
-                        0
-                    );
+            .format(
+                Locale.ROOT,
+                "{ \"name\": \"test\", \"description\": \"test\", \"time_field\": \"timestamp\""
+                    + ", \"indices\": [\"%s\"], \"feature_attributes\": [{ \"feature_name\": \"feature 1\", \"feature_enabled\": "
+                    + "\"true\", \"aggregation_query\": { \"Feature1\": { \"sum\": { \"field\": \"Feature1\" } } } }, { \"feature_name\""
+                    + ": \"feature 2\", \"feature_enabled\": \"true\", \"aggregation_query\": { \"Feature2\": { \"sum\": { \"field\": "
+                    + "\"Feature2\" } } } }], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
+                    + "\"category_field\": [\"%s\"], "
+                    + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
+                    + "\"schema_version\": 0  }",
+                datasetName,
+                intervalMinutes,
+                categoricalField,
+                0
+            );
         String detectorId = createDetector(client, detector);
         // cannot stop without actually starting detector because ad complains no ad job index
         startDetector(detectorId, client);

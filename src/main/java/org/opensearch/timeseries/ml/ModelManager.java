@@ -26,7 +26,6 @@ import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
-import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.ratelimit.CheckpointWriteWorker;
 
@@ -34,16 +33,7 @@ import com.amazon.randomcutforest.RandomCutForest;
 import com.amazon.randomcutforest.parkservices.AnomalyDescriptor;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class ModelManager<
-    RCFModelType extends ThresholdedRandomCutForest,
-    IndexableResultType extends IndexableResult,
-    IntermediateResultType extends IntermediateResult<IndexableResultType>,
-    IndexType extends Enum<IndexType> & TimeSeriesIndex,
-    IndexManagementType extends IndexManagement<IndexType>,
-    CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>,
-    CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>,
-    ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType>
-    > {
+public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType>> {
 
     private static final Logger LOG = LogManager.getLogger(ModelManager.class);
 

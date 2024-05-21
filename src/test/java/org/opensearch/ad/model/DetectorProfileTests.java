@@ -51,14 +51,7 @@ public class DetectorProfileTests extends OpenSearchTestCase {
             .totalEntities(randomLong())
             .activeEntities(randomLong())
             .taskProfile(
-                new ADTaskProfile(
-                    randomAlphaOfLength(5),
-                    randomLong(),
-                    randomBoolean(),
-                    randomInt(),
-                    randomLong(),
-                    randomAlphaOfLength(5)
-                )
+                new ADTaskProfile(randomAlphaOfLength(5), randomLong(), randomBoolean(), randomInt(), randomLong(), randomAlphaOfLength(5))
             )
             .build();
     }

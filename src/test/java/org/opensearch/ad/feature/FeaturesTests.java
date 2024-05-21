@@ -46,8 +46,7 @@ public class FeaturesTests {
             new Object[] { features, null, false },
             new Object[] { features, "testString", false },
             new Object[] { features, new Features(null, unprocessed), false },
-            new Object[] { features, new Features(ranges, null), false },
-        };
+            new Object[] { features, new Features(ranges, null), false }, };
     }
 
     @Test
@@ -61,8 +60,7 @@ public class FeaturesTests {
         return new Object[] {
             new Object[] { features, new Features(ranges, unprocessed), true },
             new Object[] { features, new Features(null, unprocessed), false },
-            new Object[] { features, new Features(ranges, null), false },
-        };
+            new Object[] { features, new Features(ranges, null), false }, };
     }
 
     @Test

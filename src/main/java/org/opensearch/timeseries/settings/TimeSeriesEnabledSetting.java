@@ -52,8 +52,7 @@ public class TimeSeriesEnabledSetting extends DynamicNumericSetting {
      * @return whether circuit breaker is enabled or not.
      */
     public static boolean isBreakerEnabled() {
-        return TimeSeriesEnabledSetting.getInstance()
-                                       .getSettingValue(TimeSeriesEnabledSetting.BREAKER_ENABLED);
+        return TimeSeriesEnabledSetting.getInstance().getSettingValue(TimeSeriesEnabledSetting.BREAKER_ENABLED);
     }
 
 }

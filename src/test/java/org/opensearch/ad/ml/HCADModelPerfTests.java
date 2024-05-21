@@ -43,7 +43,6 @@ import org.opensearch.test.ClusterServiceUtils;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.TestHelpers;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;

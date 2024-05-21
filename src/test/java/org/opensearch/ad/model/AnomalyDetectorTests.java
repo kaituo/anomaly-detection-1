@@ -687,34 +687,34 @@ public class AnomalyDetectorTests extends AbstractTimeSeriesTest {
             null
         );
         // seasonalityIntervals is not null and custom shingle size is null, use seasonalityIntervals to deterine shingle size
-        assertEquals(seasonalityIntervals / TimeSeriesSettings.SEASONALITY_TO_SHINGLE_RATIO, (int)anomalyDetector.getShingleSize());
+        assertEquals(seasonalityIntervals / TimeSeriesSettings.SEASONALITY_TO_SHINGLE_RATIO, (int) anomalyDetector.getShingleSize());
 
         anomalyDetector = new AnomalyDetector(
-                randomAlphaOfLength(5),
-                randomLong(),
-                randomAlphaOfLength(5),
-                randomAlphaOfLength(5),
-                randomAlphaOfLength(5),
-                ImmutableList.of(randomAlphaOfLength(5)),
-                ImmutableList.of(feature),
-                TestHelpers.randomQuery(),
-                TestHelpers.randomIntervalTimeConfiguration(),
-                TestHelpers.randomIntervalTimeConfiguration(),
-                null,
-                null,
-                1,
-                Instant.now(),
-                null,
-                TestHelpers.randomUser(),
-                null,
-                TestHelpers.randomImputationOption(feature.getEnabled() ? 1 : 0),
-                null,
-                null,
-                randomIntBetween(1, 1000),
-                null
-            );
+            randomAlphaOfLength(5),
+            randomLong(),
+            randomAlphaOfLength(5),
+            randomAlphaOfLength(5),
+            randomAlphaOfLength(5),
+            ImmutableList.of(randomAlphaOfLength(5)),
+            ImmutableList.of(feature),
+            TestHelpers.randomQuery(),
+            TestHelpers.randomIntervalTimeConfiguration(),
+            TestHelpers.randomIntervalTimeConfiguration(),
+            null,
+            null,
+            1,
+            Instant.now(),
+            null,
+            TestHelpers.randomUser(),
+            null,
+            TestHelpers.randomImputationOption(feature.getEnabled() ? 1 : 0),
+            null,
+            null,
+            randomIntBetween(1, 1000),
+            null
+        );
         // seasonalityIntervals is null and custom shingle size is null, use default shingle size
-        assertEquals(TimeSeriesSettings.DEFAULT_SHINGLE_SIZE, (int)anomalyDetector.getShingleSize());
+        assertEquals(TimeSeriesSettings.DEFAULT_SHINGLE_SIZE, (int) anomalyDetector.getShingleSize());
     }
 
     public void testNullFeatureAttributes() throws IOException {

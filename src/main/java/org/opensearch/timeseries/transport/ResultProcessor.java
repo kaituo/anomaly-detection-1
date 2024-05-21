@@ -360,7 +360,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                 .ofNullable((IntervalTimeConfiguration) config.getWindowDelay())
                 .map(t -> t.toDuration().toMillis())
                 .orElse(0L);
-            System.out.println("hello4:"+delayMillis+" "+request.getStart());
+            System.out.println("hello4:" + delayMillis + " " + request.getStart());
             long dataStartTime = request.getStart() - delayMillis;
             long dataEndTime = request.getEnd() - delayMillis;
 
@@ -488,7 +488,13 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
             );
             System.out.println("hello");
             if (pageIterator.hasNext()) {
-                LOG.info("Sending an HC request to process data from timestamp {} to {} for config {}", dataStartTime, dataEndTime, configID);
+                LOG
+                    .info(
+                        "Sending an HC request to process data from timestamp {} to {} for config {}",
+                        dataStartTime,
+                        dataEndTime,
+                        configID
+                    );
                 pageIterator.next(getEntityFeatureslistener);
             } else {
                 finishRunnable.run();
@@ -839,20 +845,20 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
 
             final AtomicReference<Exception> failure = new AtomicReference<Exception>();
 
-            LOG.info("Sending a single stream request to node {} to process data from timestamp {} to {} for config {}", rcfNode.getId(), dataStartTime, dataEndTime, configId);
+            LOG
+                .info(
+                    "Sending a single stream request to node {} to process data from timestamp {} to {} for config {}",
+                    rcfNode.getId(),
+                    dataStartTime,
+                    dataEndTime,
+                    configId
+                );
 
             transportService
                 .sendRequest(
                     rcfNode,
                     singleStreamActionName,
-                    new SingleStreamResultRequest(
-                        configId,
-                        rcfModelId,
-                        dataStartTime,
-                        dataEndTime,
-                        featureOptional.get(),
-                        taskId
-                    ),
+                    new SingleStreamResultRequest(configId, rcfModelId, dataStartTime, dataEndTime, featureOptional.get(), taskId),
                     option,
                     new ActionListenerResponseHandler<>(
                         new ErrorResponseListener(rcfNode.getId(), configId, failure),

@@ -376,7 +376,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
         DiscoveryNode[] dataNodes = nodeFilter.getEligibleDataNodes();
         ProfileRequest profileRequest = new ProfileRequest(config.getId(), profiles, dataNodes);
         client.execute(profileAction, profileRequest, onModelResponse(config, profiles, job, listener));// get init
-                                                                                                                              // progress
+                                                                                                        // progress
     }
 
     private ActionListener<ProfileResponse> onModelResponse(
