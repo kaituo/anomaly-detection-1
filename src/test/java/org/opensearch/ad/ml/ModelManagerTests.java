@@ -77,7 +77,6 @@ import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.Sample;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
-import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
@@ -132,7 +131,7 @@ public class ModelManagerTests {
     private double thresholdMinPvalue;
     private int minPreviewSize;
     private Duration modelTtl;
-    //private ThresholdedRandomCutForest rcf;
+    // private ThresholdedRandomCutForest rcf;
 
     @Mock
     private HybridThresholdingModel hybridThresholdingModel;
@@ -185,7 +184,7 @@ public class ModelManagerTests {
         }
         point = new double[] { 2 };
 
-        //rcf = mock(ThresholdedRandomCutForest.class);
+        // rcf = mock(ThresholdedRandomCutForest.class);
         double score = 11.;
 
         double confidence = 0.091353632;
@@ -393,7 +392,12 @@ public class ModelManagerTests {
 
     @Test
     public void getRcfResult_throwToListener_whenHeapLimitExceed() {
-        ThresholdedRandomCutForest rcf = ThresholdedRandomCutForest.builder().dimensions(numFeatures).sampleSize(numSamples).numberOfTrees(numTrees).build();
+        ThresholdedRandomCutForest rcf = ThresholdedRandomCutForest
+            .builder()
+            .dimensions(numFeatures)
+            .sampleSize(numSamples)
+            .numberOfTrees(numTrees)
+            .build();
 
         doAnswer(invocation -> {
             ActionListener<Optional<ThresholdedRandomCutForest>> listener = invocation.getArgument(1);
@@ -801,9 +805,10 @@ public class ModelManagerTests {
     public void getPreviewResults_returnNoAnomalies_forNoAnomalies() {
         int numPoints = 1000;
         double[][] points = Stream.generate(() -> new double[] { 0 }).limit(numPoints).toArray(double[][]::new);
-        List<Entry<Long, Long>> timeRanges = IntStream.rangeClosed(1, points.length) // Start at 1, go up to points.length (inclusive)
-        .mapToObj(i -> new SimpleEntry<Long, Long>((long) i, (long) i + 1))
-        .collect(Collectors.toList());
+        List<Entry<Long, Long>> timeRanges = IntStream
+            .rangeClosed(1, points.length) // Start at 1, go up to points.length (inclusive)
+            .mapToObj(i -> new SimpleEntry<Long, Long>((long) i, (long) i + 1))
+            .collect(Collectors.toList());
         Features features = new Features(timeRanges, points);
 
         List<ThresholdingResult> results = modelManager.getPreviewResults(features, shingleSize, 0.0001);
@@ -817,9 +822,10 @@ public class ModelManagerTests {
         int numPoints = 1000;
         double[][] points = Stream.generate(() -> new double[] { 0 }).limit(numPoints).toArray(double[][]::new);
         points[points.length - 1] = new double[] { 1. };
-        List<Entry<Long, Long>> timeRanges = IntStream.rangeClosed(1, points.length) // Start at 1, go up to points.length (inclusive)
-                .mapToObj(i -> new SimpleEntry<Long, Long>((long) i, (long) i + 1))
-                .collect(Collectors.toList());
+        List<Entry<Long, Long>> timeRanges = IntStream
+            .rangeClosed(1, points.length) // Start at 1, go up to points.length (inclusive)
+            .mapToObj(i -> new SimpleEntry<Long, Long>((long) i, (long) i + 1))
+            .collect(Collectors.toList());
         Features features = new Features(timeRanges, points);
 
         List<ThresholdingResult> results = modelManager.getPreviewResults(features, shingleSize, 0.0001);
@@ -923,13 +929,7 @@ public class ModelManagerTests {
             clock
         );
         ThresholdingResult result = modelManager
-            .getResult(
-                new Sample(new double[] { -1 }, Instant.now(), Instant.now()),
-                modelState,
-                modelId,
-                anomalyDetector,
-                ""
-            );
+            .getResult(new Sample(new double[] { -1 }, Instant.now(), Instant.now()), modelState, modelId, anomalyDetector, "");
         // model outputs scores
         assertEquals(new ThresholdingResult(0, 0, 0), result);
         // added the sample to score since our model is empty

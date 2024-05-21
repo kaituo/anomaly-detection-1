@@ -116,7 +116,7 @@ public final class AnomalyDetectorRunner {
         } else {
             featureManager.getPreviewFeatures(detector, startTime.toEpochMilli(), endTime.toEpochMilli(), ActionListener.wrap(features -> {
                 try {
-                    System.out.println("hello30:"+detector.getShingleSize());
+                    System.out.println("hello30:" + detector.getShingleSize());
                     List<ThresholdingResult> results = modelManager
                         .getPreviewResults(features, detector.getShingleSize(), detector.getTimeDecay());
                     listener.onResponse(sample(parsePreviewResult(detector, features, results, null), maxPreviewResults));

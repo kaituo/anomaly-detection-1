@@ -14,12 +14,10 @@ package org.opensearch.timeseries.feature;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map.Entry;
+import java.util.Objects;
 
 import org.apache.commons.lang.builder.ToStringBuilder;
-import org.apache.commons.lang3.StringUtils;
 import org.opensearch.timeseries.annotation.Generated;
-
-import java.util.Objects;
 
 /**
  * Data object for features internally used with ML.
@@ -67,8 +65,7 @@ public class Features {
             return false;
         }
         Features that = (Features) o;
-        return Objects.equals(this.timeRanges, that.timeRanges)
-            && Arrays.deepEquals(this.unprocessedFeatures, that.unprocessedFeatures);
+        return Objects.equals(this.timeRanges, that.timeRanges) && Arrays.deepEquals(this.unprocessedFeatures, that.unprocessedFeatures);
     }
 
     @Override
@@ -79,9 +76,6 @@ public class Features {
     @Generated
     @Override
     public String toString() {
-        return new ToStringBuilder(this)
-                .append("timeRanges", timeRanges)
-                .append("unprocessedFeatures", unprocessedFeatures)
-                .toString();
+        return new ToStringBuilder(this).append("timeRanges", timeRanges).append("unprocessedFeatures", unprocessedFeatures).toString();
     }
 }

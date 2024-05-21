@@ -27,7 +27,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.Before;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
@@ -236,7 +235,11 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         }, e -> {
             assertTrue(e instanceof ValidationException);
             String errorMsg = String
-                .format(Locale.ROOT, IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG, maxMultiEntityAnomalyDetectors);
+                .format(
+                    Locale.ROOT,
+                    IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG,
+                    maxMultiEntityAnomalyDetectors
+                );
             assertTrue(e.getMessage().contains(errorMsg));
             inProgressLatch.countDown();
         }));

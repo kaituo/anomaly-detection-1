@@ -225,7 +225,10 @@ public final class RestHandlerUtils {
      * @return wrapped action listener
      */
     public static <T> ActionListener wrapRestActionListener(ActionListener<T> actionListener, String generalErrorMessage) {
-        return ActionListener.<T>wrap(r -> { System.out.println("hello2:"+r); actionListener.onResponse(r); }, e -> {
+        return ActionListener.<T>wrap(r -> {
+            System.out.println("hello2:" + r);
+            actionListener.onResponse(r);
+        }, e -> {
             logger.error("Wrap exception before sending back to user", e);
             Throwable cause = Throwables.getRootCause(e);
             if (isProperExceptionToReturn(e)) {

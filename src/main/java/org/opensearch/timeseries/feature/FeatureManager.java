@@ -19,7 +19,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.AbstractMap.SimpleImmutableEntry;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
@@ -108,7 +107,13 @@ public class FeatureManager {
      * @param context Whether the config is AnomalyDetector or Forecaster
      * @param listener return back the data point
      */
-    public void getCurrentFeatures(Config config, long startTime, long endTime, AnalysisType context, ActionListener<Optional<double[]>> listener) {
+    public void getCurrentFeatures(
+        Config config,
+        long startTime,
+        long endTime,
+        AnalysisType context,
+        ActionListener<Optional<double[]>> listener
+    ) {
         List<Entry<Long, Long>> missingRanges = Collections.singletonList(new SimpleImmutableEntry<>(startTime, endTime));
         try {
             searchFeatureDao.getFeatureSamplesForPeriods(config, missingRanges, context, ActionListener.wrap(points -> {
@@ -164,7 +169,13 @@ public class FeatureManager {
                         config,
                         sampleRanges,
                         context,
-                        new ThreadedActionListener<>(logger, threadPool, TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME, getFeaturesListener, false)
+                        new ThreadedActionListener<>(
+                            logger,
+                            threadPool,
+                            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+                            getFeaturesListener,
+                            false
+                        )
                     );
             } catch (IOException e) {
                 listener.onFailure(new EndRunException(config.getId(), CommonMessages.INVALID_SEARCH_QUERY_MSG, e, true));

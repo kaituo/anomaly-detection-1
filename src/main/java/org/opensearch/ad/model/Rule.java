@@ -101,25 +101,19 @@ public class Rule implements Writeable, ToXContentObject {
             return false;
         }
         Rule that = (Rule) o;
-        return Objects.equal(action, that.action)
-                && Objects.equal(conditions, that.conditions);
+        return Objects.equal(action, that.action) && Objects.equal(conditions, that.conditions);
     }
 
     @Override
     public int hashCode() {
         final int prime = 31;
         int result = super.hashCode();
-        result = prime * result + Objects
-            .hashCode(
-                    action,
-                    conditions
-            );
+        result = prime * result + Objects.hashCode(action, conditions);
         return result;
     }
 
     @Override
     public String toString() {
-        return super.toString() + ", " + new ToStringBuilder(this).append("action", action)
-                .append("conditions", conditions).toString();
+        return super.toString() + ", " + new ToStringBuilder(this).append("action", action).append("conditions", conditions).toString();
     }
 }

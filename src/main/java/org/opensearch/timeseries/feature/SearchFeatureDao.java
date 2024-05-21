@@ -11,7 +11,6 @@
 
 package org.opensearch.timeseries.feature;
 
-import static org.apache.commons.math3.linear.MatrixUtils.createRealMatrix;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_PAGE_SIZE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.PREVIEW_TIMEOUT_IN_MILLIS;
@@ -20,15 +19,12 @@ import static org.opensearch.timeseries.util.ParseUtils.batchFeatureQuery;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.ZonedDateTime;
-import java.util.AbstractMap.SimpleEntry;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
@@ -67,10 +63,8 @@ import org.opensearch.search.sort.SortOrder;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
-import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
-import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 

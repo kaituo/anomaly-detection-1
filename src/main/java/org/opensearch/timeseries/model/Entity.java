@@ -89,7 +89,7 @@ public class Entity implements ToXContentObject, Writeable {
      */
     public static Entity createSingleAttributeEntity(String attributeName, String attributeVal) {
         SortedMap<String, String> sortedMap = new TreeMap<>();
-        System.out.println("hello33:"+attributeVal);
+        System.out.println("hello33:" + attributeVal);
         sortedMap.put(attributeName, attributeVal);
         return new Entity(sortedMap);
     }

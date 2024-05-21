@@ -381,7 +381,7 @@ public class CompositeRetriever extends AbstractRetriever {
                         )
                     );
             }
-            System.out.println("hello2:"+iterations+" "+expirationEpochMs + " " + now + " " + totalResults + " " + maxEntities);
+            System.out.println("hello2:" + iterations + " " + expirationEpochMs + " " + now + " " + totalResults + " " + maxEntities);
             if ((iterations > 0 && afterKey == null) || totalResults > maxEntities) {
                 LOG.debug(new ParameterizedMessage("Finished in [{}] msecs. ", (now - startMs)));
             }

@@ -258,8 +258,7 @@ public class EntityTaskProfile implements ToXContentObject, Writeable {
             return false;
         }
         EntityTaskProfile that = (EntityTaskProfile) o;
-        return
-            Objects.equals(rcfTotalUpdates, that.rcfTotalUpdates)
+        return Objects.equals(rcfTotalUpdates, that.rcfTotalUpdates)
             && Objects.equals(thresholdModelTrained, that.thresholdModelTrained)
             && Objects.equals(thresholdModelTrainingDataSize, that.thresholdModelTrainingDataSize)
             && Objects.equals(modelSizeInBytes, that.modelSizeInBytes)

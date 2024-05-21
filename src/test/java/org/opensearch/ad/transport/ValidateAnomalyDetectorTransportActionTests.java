@@ -23,11 +23,11 @@ import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.ValidationAspect;
@@ -171,7 +171,10 @@ public class ValidateAnomalyDetectorTransportActionTests extends ADIntegTestCase
         );
         ValidateConfigResponse response = client().execute(ValidateAnomalyDetectorAction.INSTANCE, request).actionGet(5_000);
         assertNotNull(response.getIssue());
-        assertTrue("Unexpected message: " + response.getIssue().getMessage(), response.getIssue().getMessage().contains("Config has duplicate feature aggregation query names:"));
+        assertTrue(
+            "Unexpected message: " + response.getIssue().getMessage(),
+            response.getIssue().getMessage().contains("Config has duplicate feature aggregation query names:")
+        );
         assertEquals(ValidationIssueType.FEATURE_ATTRIBUTES, response.getIssue().getType());
         assertEquals(ValidationAspect.DETECTOR, response.getIssue().getAspect());
     }
@@ -180,8 +183,10 @@ public class ValidateAnomalyDetectorTransportActionTests extends ADIntegTestCase
     public void testValidateAnomalyDetectorWithDuplicateFeatureNames() throws IOException {
         Feature maxFeature = maxValueFeature(nameField, categoryField, nameField);
         Feature maxFeatureTwo = maxValueFeature("test_1", categoryField, nameField);
-        ValidationException exception = assertThrows(ValidationException.class, () -> TestHelpers
-            .randomAnomalyDetector(timeField, "test-index", ImmutableList.of(maxFeature, maxFeatureTwo)));
+        ValidationException exception = assertThrows(
+            ValidationException.class,
+            () -> TestHelpers.randomAnomalyDetector(timeField, "test-index", ImmutableList.of(maxFeature, maxFeatureTwo))
+        );
 
         assertNotNull(exception.getType());
         assertTrue(

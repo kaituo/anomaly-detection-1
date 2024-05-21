@@ -66,7 +66,6 @@ import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyResultAction;
 import org.opensearch.ad.transport.AnomalyResultResponse;
 import org.opensearch.client.Client;
-import org.opensearch.client.Request;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
@@ -191,17 +190,11 @@ public class AnomalyDetectorJobRunnerTests extends AbstractTimeSeriesTest {
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            String configId = (String)args[0];
-            ActionListener<JobResponse> listener = (ActionListener<JobResponse>)args[4];
+            String configId = (String) args[0];
+            ActionListener<JobResponse> listener = (ActionListener<JobResponse>) args[4];
             listener.onResponse(new JobResponse(configId));
             return null;
-        }).when(adTaskManager).stopLatestRealtimeTask(
-                anyString(),
-                any(),
-                any(),
-                any(),
-                any()
-            );
+        }).when(adTaskManager).stopLatestRealtimeTask(anyString(), any(), any(), any(), any());
 
         adJobProcessor.setTaskManager(adTaskManager);
 
@@ -281,14 +274,14 @@ public class AnomalyDetectorJobRunnerTests extends AbstractTimeSeriesTest {
         adJobProcessor.setExecuteResultResponseRecorder(recorder);
 
         ADIndexJobActionHandler adIndexJobActionHandler = new ADIndexJobActionHandler(
-                client,
-                anomalyDetectionIndices,
-                NamedXContentRegistry.EMPTY,
-                adTaskManager,
-                recorder,
-                nodeStateManager,
-                settings
-            );
+            client,
+            anomalyDetectionIndices,
+            NamedXContentRegistry.EMPTY,
+            adTaskManager,
+            recorder,
+            nodeStateManager,
+            settings
+        );
         adJobProcessor.setIndexJobActionHandler(adIndexJobActionHandler);
     }
 

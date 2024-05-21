@@ -82,7 +82,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
     private NodeClient clientMock;
     private SecurityClientUtil clientUtil;
     private TransportService transportService;
-    //private ActionListener<IndexAnomalyDetectorResponse> channel;
+    // private ActionListener<IndexAnomalyDetectorResponse> channel;
     private ADIndexManagement anomalyDetectionIndices;
     private String detectorId;
     private Long seqNo;
@@ -122,7 +122,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
         transportService = mock(TransportService.class);
 
-        //channel = mock(ActionListener.class);
+        // channel = mock(ActionListener.class);
 
         anomalyDetectionIndices = mock(ADIndexManagement.class);
         when(anomalyDetectionIndices.doesConfigIndexExist()).thenReturn(true);
@@ -313,7 +313,9 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             assertTrue("should throw eror", false);
             inProgressLatch.countDown();
         }, e -> {
-        assertTrue(e.getMessage().contains(CommonMessages.CATEGORICAL_FIELD_TYPE_ERR_MSG));inProgressLatch.countDown();}));
+            assertTrue(e.getMessage().contains(CommonMessages.CATEGORICAL_FIELD_TYPE_ERR_MSG));
+            inProgressLatch.countDown();
+        }));
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
     }
 
@@ -400,9 +402,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             inProgressLatch.countDown();
         }, e -> {
             assertTrue(e instanceof IllegalArgumentException);
-            String errorMsg = String.format(Locale.ROOT, IndexAnomalyDetectorActionHandler.NO_DOCS_IN_USER_INDEX_MSG, "[" + detector.getIndices().get(0) + "]");
+            String errorMsg = String
+                .format(Locale.ROOT, IndexAnomalyDetectorActionHandler.NO_DOCS_IN_USER_INDEX_MSG, "[" + detector.getIndices().get(0) + "]");
             assertTrue("actual: " + e.getMessage(), e.getMessage().contains(errorMsg));
-            inProgressLatch.countDown();}));
+            inProgressLatch.countDown();
+        }));
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
 
         verify(clientSpy, times(2)).execute(eq(GetFieldMappingsAction.INSTANCE), any(), any());
@@ -610,9 +614,14 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         }, e -> {
             assertTrue(e instanceof IllegalArgumentException);
             String errorMsg = String
-                .format(Locale.ROOT, IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG, maxMultiEntityAnomalyDetectors);
+                .format(
+                    Locale.ROOT,
+                    IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG,
+                    maxMultiEntityAnomalyDetectors
+                );
             assertTrue(e.getMessage().contains(errorMsg));
-            inProgressLatch.countDown();}));
+            inProgressLatch.countDown();
+        }));
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
         verify(clientSpy, times(1)).search(any(SearchRequest.class), any());
     }
@@ -697,7 +706,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         }, e -> {
             assertTrue(e instanceof IllegalArgumentException);
             assertTrue(e.getMessage().contains(IndexAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG));
-            inProgressLatch.countDown();}));
+            inProgressLatch.countDown();
+        }));
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
 
         verify(clientMock, times(1)).search(any(SearchRequest.class), any());
@@ -784,7 +794,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             // make sure execution passes all necessary checks
             assertTrue(e instanceof IllegalStateException);
             assertTrue(e.getMessage().contains("NodeClient has not been initialized"));
-            inProgressLatch.countDown();}));
+            inProgressLatch.countDown();
+        }));
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
 
         verify(clientMock, times(0)).search(any(SearchRequest.class), any());

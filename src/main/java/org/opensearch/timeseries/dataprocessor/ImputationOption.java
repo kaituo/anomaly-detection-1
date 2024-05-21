@@ -139,10 +139,10 @@ public class ImputationOption implements Writeable, ToXContent {
     @Override
     public String toString() {
         return new ToStringBuilder(this)
-        .append("method", method)
-        .append("defaultFill", (defaultFill.isEmpty() ? null : Arrays.toString(defaultFill.get())))
-        .append("integerSentive", integerSentive)
-        .toString();
+            .append("method", method)
+            .append("defaultFill", (defaultFill.isEmpty() ? null : Arrays.toString(defaultFill.get())))
+            .append("integerSentive", integerSentive)
+            .toString();
     }
 
     public ImputationMethod getMethod() {

@@ -32,9 +32,10 @@ public class ADIndexMemoryPressureAwareResultHandler extends
 
     @Inject
     public ADIndexMemoryPressureAwareResultHandler(
-            Client client,
-            ADIndexManagement anomalyDetectionIndices,
-            ClusterService clusterService) {
+        Client client,
+        ADIndexManagement anomalyDetectionIndices,
+        ClusterService clusterService
+    ) {
         super(client, anomalyDetectionIndices, clusterService);
     }
 

@@ -52,7 +52,6 @@ import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
@@ -129,11 +128,11 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
         detectionDateRange = new DateRange(startTime, endTime);
 
         Settings settings = Settings
-                .builder()
-                .put(MAX_OLD_AD_TASK_DOCS_PER_DETECTOR.getKey(), 2)
-                .put(BATCH_TASK_PIECE_INTERVAL_SECONDS.getKey(), 1)
-                .put(AD_REQUEST_TIMEOUT.getKey(), TimeValue.timeValueSeconds(10))
-                .build();
+            .builder()
+            .put(MAX_OLD_AD_TASK_DOCS_PER_DETECTOR.getKey(), 2)
+            .put(BATCH_TASK_PIECE_INTERVAL_SECONDS.getKey(), 1)
+            .put(AD_REQUEST_TIMEOUT.getKey(), TimeValue.timeValueSeconds(10))
+            .build();
         ThreadContext threadContext = new ThreadContext(settings);
         context = threadContext.stashContext();
         transportService = mock(TransportService.class);
@@ -143,20 +142,20 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
 
         hashRing = mock(HashRing.class);
         adTaskManager = spy(
-                new ADTaskManager(
-                    settings,
-                    clusterService,
-                    client,
-                    TestHelpers.xContentRegistry(),
-                    anomalyDetectionIndices,
-                    nodeFilter,
-                    hashRing,
-                    adTaskCacheManager,
-                    threadPool,
-                    nodeStateManager,
-                    taskProfileRunner
-                )
-            );
+            new ADTaskManager(
+                settings,
+                clusterService,
+                client,
+                TestHelpers.xContentRegistry(),
+                anomalyDetectionIndices,
+                nodeFilter,
+                hashRing,
+                adTaskCacheManager,
+                threadPool,
+                nodeStateManager,
+                taskProfileRunner
+            )
+        );
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
@@ -172,26 +171,26 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
         adTaskCacheManager = mock(ADTaskCacheManager.class);
 
         ExecuteADResultResponseRecorder recorder = new ExecuteADResultResponseRecorder(
-                anomalyDetectionIndices,
-                anomalyResultHandler,
-                adTaskManager,
-                nodeFilter,
-                threadPool,
-                client,
-                nodeStateManager,
-                adTaskCacheManager,
-                32
-            );
+            anomalyDetectionIndices,
+            anomalyResultHandler,
+            adTaskManager,
+            nodeFilter,
+            threadPool,
+            client,
+            nodeStateManager,
+            adTaskCacheManager,
+            32
+        );
 
         handler = new ADIndexJobActionHandler(
-                client,
-                anomalyDetectionIndices,
-                xContentRegistry,
-                adTaskManager,
-                recorder,
-                nodeStateManager,
-                Settings.EMPTY
-            );
+            client,
+            anomalyDetectionIndices,
+            xContentRegistry,
+            adTaskManager,
+            recorder,
+            nodeStateManager,
+            Settings.EMPTY
+        );
 
         listener = spy(new ActionListener<JobResponse>() {
             @Override

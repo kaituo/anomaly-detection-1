@@ -166,7 +166,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         if (buffer != null) {
             modelState = buffer.get(modelId);
         }
-        System.out.println("hello31:"+modelState);
+        System.out.println("hello31:" + modelState);
 
         // during maintenance period, stop putting new entries
         if (!maintenanceLock.isLocked() && modelState == null) {

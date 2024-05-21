@@ -122,7 +122,6 @@ import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.stats.StatNames;
-import org.opensearch.timeseries.stats.Stats;
 import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
 import org.opensearch.timeseries.transport.ResultProcessor;
@@ -222,7 +221,9 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
             ActionListener<Optional<double[]>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(new double[] { 0.0d }));
             return null;
-        }).when(featureQuery).getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
+        })
+            .when(featureQuery)
+            .getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
 
         double rcfScore = 0.2;
         confidence = 0.91;
@@ -262,7 +263,8 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
             return null;
         }).when(normalModelManager).getThresholdingResult(any(String.class), any(String.class), anyDouble(), any(ActionListener.class));
 
-        when(normalModelManager.getResult(any(), any(), any(), any(), any())).thenReturn(new ThresholdingResult(anomalyGrade, confidence, rcfScore));
+        when(normalModelManager.getResult(any(), any(), any(), any(), any()))
+            .thenReturn(new ThresholdingResult(anomalyGrade, confidence, rcfScore));
 
         thresholdModelID = SingleStreamModelIdMapper.getThresholdModelId(adID); // "123-threshold";
         // when(normalModelPartitioner.getThresholdModelId(any(String.class))).thenReturn(thresholdModelID);
@@ -377,18 +379,18 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
 
         // These constructors register handler in transport service
         new ADSingleStreamResultTransportAction(
-                transportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                cacheProvider,
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                resultWriteWorker,
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            transportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            cacheProvider,
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            resultWriteWorker,
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
         new ThresholdResultTransportAction(new ActionFilters(Collections.emptySet()), transportService, normalModelManager);
 
         AnomalyResultTransportAction action = new AnomalyResultTransportAction(
@@ -502,27 +504,27 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
         when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class))).thenReturn(discoveryNode);
         when(hashRing.getNodeByAddress(any(TransportAddress.class))).thenReturn(discoveryNode);
         // register handler on testNodes[1]
-//        new RCFResultTransportAction(
-//            new ActionFilters(Collections.emptySet()),
-//            testNodes[1].transportService,
-//            normalModelManager,
-//            adCircuitBreakerService,
-//            hashRing,
-//            adStats
-//        );
+        // new RCFResultTransportAction(
+        // new ActionFilters(Collections.emptySet()),
+        // testNodes[1].transportService,
+        // normalModelManager,
+        // adCircuitBreakerService,
+        // hashRing,
+        // adStats
+        // );
         new ADSingleStreamResultTransportAction(
-                testNodes[1].transportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                mock(ADCacheProvider.class),
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            testNodes[1].transportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            mock(ADCacheProvider.class),
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
 
         TransportService realTransportService = testNodes[0].transportService;
         ClusterService realClusterService = testNodes[0].clusterService;
@@ -569,27 +571,27 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
             .thenReturn(Optional.of(new LimitExceededException(adID, CommonMessages.MEMORY_LIMIT_EXCEEDED_ERR_MSG)));
 
         // These constructors register handler in transport service
-//        new RCFResultTransportAction(
-//            new ActionFilters(Collections.emptySet()),
-//            transportService,
-//            rcfManager,
-//            adCircuitBreakerService,
-//            hashRing,
-//            adStats
-//        );
+        // new RCFResultTransportAction(
+        // new ActionFilters(Collections.emptySet()),
+        // transportService,
+        // rcfManager,
+        // adCircuitBreakerService,
+        // hashRing,
+        // adStats
+        // );
         new ADSingleStreamResultTransportAction(
-                transportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                mock(ADCacheProvider.class),
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                rcfManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            transportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            mock(ADCacheProvider.class),
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            rcfManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
         new ThresholdResultTransportAction(new ActionFilters(Collections.emptySet()), transportService, normalModelManager);
 
         AnomalyResultTransportAction action = new AnomalyResultTransportAction(
@@ -632,18 +634,18 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
 
         // These constructors register handler in transport service
         new ADSingleStreamResultTransportAction(
-                transportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                cacheProvider,
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                rcfManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            transportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            cacheProvider,
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            rcfManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
         new ThresholdResultTransportAction(new ActionFilters(Collections.emptySet()), transportService, normalModelManager);
 
         AnomalyResultTransportAction action = new AnomalyResultTransportAction(
@@ -759,27 +761,27 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
         when(hashRing.getNodeByAddress(any(TransportAddress.class))).thenReturn(discoveryNode);
         // register handlers on testNodes[1]
         ActionFilters actionFilters = new ActionFilters(Collections.emptySet());
-//        new RCFResultTransportAction(
-//            actionFilters,
-//            testNodes[1].transportService,
-//            normalModelManager,
-//            adCircuitBreakerService,
-//            hashRing,
-//            adStats
-//        );
+        // new RCFResultTransportAction(
+        // actionFilters,
+        // testNodes[1].transportService,
+        // normalModelManager,
+        // adCircuitBreakerService,
+        // hashRing,
+        // adStats
+        // );
         new ADSingleStreamResultTransportAction(
-                testNodes[1].transportService,
-                actionFilters,
-                adCircuitBreakerService,
-                mock(ADCacheProvider.class),
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            testNodes[1].transportService,
+            actionFilters,
+            adCircuitBreakerService,
+            mock(ADCacheProvider.class),
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
         new ThresholdResultTransportAction(actionFilters, testNodes[1].transportService, normalModelManager);
 
         TransportService realTransportService = testNodes[0].transportService;
@@ -817,27 +819,27 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
         when(breakerService.isOpen()).thenReturn(true);
 
         // These constructors register handler in transport service
-//        new RCFResultTransportAction(
-//            new ActionFilters(Collections.emptySet()),
-//            transportService,
-//            normalModelManager,
-//            breakerService,
-//            hashRing,
-//            adStats
-//        );
+        // new RCFResultTransportAction(
+        // new ActionFilters(Collections.emptySet()),
+        // transportService,
+        // normalModelManager,
+        // breakerService,
+        // hashRing,
+        // adStats
+        // );
         new ADSingleStreamResultTransportAction(
-                transportService,
-                new ActionFilters(Collections.emptySet()),
-                breakerService,
-                mock(ADCacheProvider.class),
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            transportService,
+            new ActionFilters(Collections.emptySet()),
+            breakerService,
+            mock(ADCacheProvider.class),
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
         new ThresholdResultTransportAction(new ActionFilters(Collections.emptySet()), transportService, normalModelManager);
 
         AnomalyResultTransportAction action = new AnomalyResultTransportAction(
@@ -886,7 +888,7 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
 
         CountDownLatch inProgress = new CountDownLatch(1);
         if (isRCF) {
-            //when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(eq(rcfModelID))).thenReturn(Optional.of(rcfNode));
+            // when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(eq(rcfModelID))).thenReturn(Optional.of(rcfNode));
             doThrow(new NodeNotConnectedException(rcfNode, "rcf node not connected"))
                 .when(exceptionTransportService)
                 .getConnection(same(rcfNode));
@@ -908,18 +910,18 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
 
         // These constructors register handler in transport service
         new ADSingleStreamResultTransportAction(
-                exceptionTransportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                mock(ADCacheProvider.class),
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            exceptionTransportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            mock(ADCacheProvider.class),
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
 
         AnomalyResultTransportAction action = new AnomalyResultTransportAction(
             new ActionFilters(Collections.emptySet()),
@@ -1001,27 +1003,27 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
 
     public void alertingRequestTemplate(boolean anomalyResultIndexExists) throws IOException {
         // These constructors register handler in transport service
-//        new RCFResultTransportAction(
-//            new ActionFilters(Collections.emptySet()),
-//            transportService,
-//            normalModelManager,
-//            adCircuitBreakerService,
-//            hashRing,
-//            adStats
-//        );
+        // new RCFResultTransportAction(
+        // new ActionFilters(Collections.emptySet()),
+        // transportService,
+        // normalModelManager,
+        // adCircuitBreakerService,
+        // hashRing,
+        // adStats
+        // );
         new ADSingleStreamResultTransportAction(
-                transportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                mock(ADCacheProvider.class),
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            transportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            mock(ADCacheProvider.class),
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
         Optional<DiscoveryNode> localNode = Optional.of(clusterService.state().nodes().getLocalNode());
 
         when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(any(String.class))).thenReturn(localNode);
@@ -1241,7 +1243,9 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
             ActionListener<Optional<double[]>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(featureQuery).getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
+        })
+            .when(featureQuery)
+            .getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
 
         doAnswer(invocation -> {
             ActionListener<Boolean> listener = invocation.getArgument(1);
@@ -1262,25 +1266,27 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
             ActionListener<Optional<double[]>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(new double[] { 0.0d }));
             return null;
-        }).when(featureQuery).getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
+        })
+            .when(featureQuery)
+            .getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
 
         ADCacheProvider cacheProvider = mock(ADCacheProvider.class);
         when(cacheProvider.get()).thenReturn(mock(ADPriorityCache.class));
 
         // register action handler
         new ADSingleStreamResultTransportAction(
-                transportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                cacheProvider,
-                stateManager,
-                checkpointReadQueue,
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            transportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            cacheProvider,
+            stateManager,
+            checkpointReadQueue,
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
     }
 
     @SuppressWarnings("unchecked")
@@ -1333,7 +1339,9 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
                 ActionListener<Optional<double[]>> listener = invocation.getArgument(4);
                 listener.onResponse(Optional.empty());
                 return null;
-            }).when(featureQuery).getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
+            })
+                .when(featureQuery)
+                .getCurrentFeatures(any(AnomalyDetector.class), anyLong(), anyLong(), eq(AnalysisType.AD), any(ActionListener.class));
         } else if (mode == FeatureTestMode.ILLEGAL_STATE) {
             doThrow(IllegalArgumentException.class)
                 .when(featureQuery)
@@ -1422,27 +1430,27 @@ public class AnomalyResultTests extends AbstractTimeSeriesTest {
         when(hackedClusterService.state()).thenReturn(blockedClusterState);
 
         // These constructors register handler in transport service
-//        new RCFResultTransportAction(
-//            new ActionFilters(Collections.emptySet()),
-//            transportService,
-//            normalModelManager,
-//            adCircuitBreakerService,
-//            hashRing,
-//            adStats
-//        );
+        // new RCFResultTransportAction(
+        // new ActionFilters(Collections.emptySet()),
+        // transportService,
+        // normalModelManager,
+        // adCircuitBreakerService,
+        // hashRing,
+        // adStats
+        // );
         new ADSingleStreamResultTransportAction(
-                transportService,
-                new ActionFilters(Collections.emptySet()),
-                adCircuitBreakerService,
-                mock(ADCacheProvider.class),
-                stateManager,
-                mock(ADCheckpointReadWorker.class),
-                normalModelManager,
-                mock(ADIndexManagement.class),
-                mock(ADResultWriteWorker.class),
-                adStats,
-                mock(ADColdStartWorker.class)
-            );
+            transportService,
+            new ActionFilters(Collections.emptySet()),
+            adCircuitBreakerService,
+            mock(ADCacheProvider.class),
+            stateManager,
+            mock(ADCheckpointReadWorker.class),
+            normalModelManager,
+            mock(ADIndexManagement.class),
+            mock(ADResultWriteWorker.class),
+            adStats,
+            mock(ADColdStartWorker.class)
+        );
         new ThresholdResultTransportAction(new ActionFilters(Collections.emptySet()), transportService, normalModelManager);
 
         AnomalyResultTransportAction action = new AnomalyResultTransportAction(

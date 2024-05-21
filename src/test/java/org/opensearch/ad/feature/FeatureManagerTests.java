@@ -336,7 +336,7 @@ public class FeatureManagerTests {
         if (previewSuccess) {
             Features expected = new Features(
                 asList(new SimpleEntry<>(0L, 60_000L), new SimpleEntry<>(60_000L, 120_000L), new SimpleEntry<>(120_000L, 180_000L)),
-                new double[][] { { 1 }, { 2 }, { 3 }}
+                new double[][] { { 1 }, { 2 }, { 3 } }
             );
             verify(listener).onResponse(expected);
         } else {
@@ -453,11 +453,7 @@ public class FeatureManagerTests {
 
     private Object[] getCurrentFeaturesTestData_whenAfterQueryResultsFormFullShingle() {
         return new Object[] {
-            new Object[] {
-                asList(Optional.empty()),
-                3,
-                Optional.of(asList(Optional.of(new double[] { 3 }))),
-                new double[] { 3 } },
+            new Object[] { asList(Optional.empty()), 3, Optional.of(asList(Optional.of(new double[] { 3 }))), new double[] { 3 } },
             new Object[] {
                 asList(Optional.of(new double[] { 5 })),
                 1,
@@ -502,12 +498,8 @@ public class FeatureManagerTests {
 
     private Object[] getCurrentFeaturesTestData_IOException() {
         return new Object[] {
-            new Object[] {
-                asList(Optional.of(new double[] { 3 })),
-                new double[] { 3 } },
-            new Object[] {
-                asList(Optional.of(new double[] { 5, 6 })),
-                new double[] { 5, 6 } } };
+            new Object[] { asList(Optional.of(new double[] { 3 })), new double[] { 3 } },
+            new Object[] { asList(Optional.of(new double[] { 5, 6 })), new double[] { 5, 6 } } };
     }
 
     @Test
@@ -533,21 +525,13 @@ public class FeatureManagerTests {
 
     private Object[] getCurrentFeaturesTestData_whenAfterQueryResultsAllowImputedShingle() {
         return new Object[] {
-            new Object[] {
-                asList(Optional.empty()),
-                3,
-                Optional.of(asList(Optional.of(new double[] { 1 }))),
-                new double[] { 1 } },
+            new Object[] { asList(Optional.empty()), 3, Optional.of(asList(Optional.of(new double[] { 1 }))), new double[] { 1 } },
             new Object[] {
                 asList(Optional.of(new double[] { 1 })),
                 1,
                 Optional.of(asList(Optional.of(new double[] { 3 }))),
                 new double[] { 3 } },
-            new Object[] {
-                asList(Optional.empty()),
-                1,
-                Optional.of(asList(Optional.of(new double[] { 2 }))),
-                new double[] { 2 } },
+            new Object[] { asList(Optional.empty()), 1, Optional.of(asList(Optional.of(new double[] { 2 }))), new double[] { 2 } },
             new Object[] {
                 asList(Optional.of(new double[] { 1 })),
                 2,
@@ -557,7 +541,7 @@ public class FeatureManagerTests {
                 asList(Optional.of(Optional.empty())),
                 2,
                 Optional.of(asList(Optional.of(new double[] { 1, 2 }))),
-                new double[] { 1, 2} }};
+                new double[] { 1, 2 } } };
     }
 
     @Test
@@ -627,14 +611,8 @@ public class FeatureManagerTests {
 
     private Object[] getCurrentFeaturesTestData_whenAfterQueryResultsCannotBeShingled() {
         return new Object[] {
-            new Object[] {
-                asList(Optional.of(Optional.of(new double[] { 3 }))),
-                3,
-                Optional.of(asList(Optional.of(new double[] { 4 }))), },
-            new Object[] {
-                asList(Optional.of(Optional.empty())),
-                1,
-                Optional.of(asList(Optional.of(new double[] { 3, 4 }))), } };
+            new Object[] { asList(Optional.of(Optional.of(new double[] { 3 }))), 3, Optional.of(asList(Optional.of(new double[] { 4 }))), },
+            new Object[] { asList(Optional.of(Optional.empty())), 1, Optional.of(asList(Optional.of(new double[] { 3, 4 }))), } };
     }
 
     @Test
@@ -693,14 +671,10 @@ public class FeatureManagerTests {
 
     private Object[] getCurrentFeaturesTestData_cacheMissingData() {
         return new Object[] {
-            new Object[] {
-                asList(Optional.empty()),
-                Optional.of(asList(Optional.of(new double[] { 1 }))),
-                },
+            new Object[] { asList(Optional.empty()), Optional.of(asList(Optional.of(new double[] { 1 }))), },
             new Object[] {
                 asList(Optional.of(new double[] { 1, 2 }), Optional.empty(), Optional.of(new double[] { 3, 4 })),
-                Optional.of(asList(Optional.of(new double[] { 5, 6 }))),
-                } };
+                Optional.of(asList(Optional.of(new double[] { 5, 6 }))), } };
     }
 
     @Test
@@ -719,12 +693,7 @@ public class FeatureManagerTests {
         // first call to cache missing points
         featureManager.getCurrentFeatures(detector, firstStartTime, firstEndTime, AnalysisType.AD, mock(ActionListener.class));
         verify(searchFeatureDao, times(1))
-            .getFeatureSamplesForPeriods(
-                eq(detector),
-                argThat(list -> list.size() == 1),
-                eq(AnalysisType.AD),
-                any(ActionListener.class)
-            );
+            .getFeatureSamplesForPeriods(eq(detector), argThat(list -> list.size() == 1), eq(AnalysisType.AD), any(ActionListener.class));
 
         // second call should only fetch current point even if previous points missing
         Optional<double[]> listenerResponse = getCurrentFeatures(detector, secondStartTime, secondEndTime);
@@ -764,12 +733,7 @@ public class FeatureManagerTests {
             new Object[] {
                 asList(Optional.of(Optional.of(new double[] { 5, 6 }))),
                 2.5,
-                Optional
-                    .of(
-                        asList(
-                            Optional.of(new double[] { 11, 12 })
-                        )
-                    ),
+                Optional.of(asList(Optional.of(new double[] { 11, 12 }))),
                 new double[] { 11, 12 } }, };
     }
 

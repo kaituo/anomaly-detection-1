@@ -43,7 +43,6 @@ import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
@@ -129,7 +128,12 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
         nodestateSetting.add(TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE);
         nodestateSetting.add(TimeSeriesSettings.BACKOFF_MINUTES);
         nodestateSetting.add(AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ);
-        stateManager = createNodeStateManager(client, clientUtil, threadPool, createClusterServiceForNode(threadPool, createDiscoverynode("node1"), nodestateSetting));
+        stateManager = createNodeStateManager(
+            client,
+            clientUtil,
+            threadPool,
+            createClusterServiceForNode(threadPool, createDiscoverynode("node1"), nodestateSetting)
+        );
 
         imputer = new LinearUniformImputer(true);
 

@@ -38,11 +38,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 /**
  *  This class contains the logic to extract the stats from the nodes
  */
-public class BaseProfileTransportAction<
-    RCFModelType extends ThresholdedRandomCutForest,
-    CacheType extends TimeSeriesCache<RCFModelType>,
-    CacheProviderType extends CacheProvider<RCFModelType, CacheType>
-    >
+public class BaseProfileTransportAction<RCFModelType extends ThresholdedRandomCutForest, CacheType extends TimeSeriesCache<RCFModelType>, CacheProviderType extends CacheProvider<RCFModelType, CacheType>>
     extends TransportNodesAction<ProfileRequest, ProfileResponse, ProfileNodeRequest, ProfileNodeResponse> {
     private static final Logger LOG = LogManager.getLogger(BaseProfileTransportAction.class);
     private CacheProviderType cacheProvider;

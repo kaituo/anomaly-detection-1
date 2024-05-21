@@ -83,14 +83,14 @@ public class StartDetectorTests extends AbstractTimeSeriesTest {
         nodeStateManager = mock(NodeStateManager.class);
 
         handler = new ADIndexJobActionHandler(
-                client,
-                anomalyDetectionIndices,
-                xContentRegistry,
-                adTaskManager,
-                recorder,
-                nodeStateManager,
-                Settings.EMPTY
-            );
+            client,
+            anomalyDetectionIndices,
+            xContentRegistry,
+            adTaskManager,
+            recorder,
+            nodeStateManager,
+            Settings.EMPTY
+        );
 
         listener = spy(new ActionListener<JobResponse>() {
             @Override

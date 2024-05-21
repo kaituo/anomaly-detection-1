@@ -38,8 +38,14 @@ public class IntegerSensitiveLinearUniformImputerTests {
                     { singleComponent, 4, new double[][] { { -1.0, 2.0 }, { 0, 2 }, { 0, 1 }, { 1.0, 1.0 } } },
                     { multiComponent, 3, new double[][] { { 0.0, 1.0, -1.0 }, { 0, 1.0, 0 }, { 1.0, 1.0, 1.0 } } },
                     { multiComponent, 4, new double[][] { { 0, 1.0, -1.0 }, { 0, 1.0, 0 }, { 1.0, 1.0, 0 }, { 1.0, 1.0, 1.0 } } },
-                    { multiComponent, 5, new double[][] { { 0.0, 1.0, -1.0 }, { 0, 1.0, 0 }, { .0, 1.0, 0 }, { 1.0, 1.0, 0 }, { 1.0, 1.0, 1.0 } } },
-                    { multiComponent, 6, new double[][] { { 0.0, 1.0, -1.0 }, { 0, 1, -1 }, { 0, 1, 0 }, { 1, 1, 0 }, { 1, 1, 1 }, {1, 1, 1} } }, }
+                    {
+                        multiComponent,
+                        5,
+                        new double[][] { { 0.0, 1.0, -1.0 }, { 0, 1.0, 0 }, { .0, 1.0, 0 }, { 1.0, 1.0, 0 }, { 1.0, 1.0, 1.0 } } },
+                    {
+                        multiComponent,
+                        6,
+                        new double[][] { { 0.0, 1.0, -1.0 }, { 0, 1, -1 }, { 0, 1, 0 }, { 1, 1, 0 }, { 1, 1, 1 }, { 1, 1, 1 } } }, }
             );
     }
 

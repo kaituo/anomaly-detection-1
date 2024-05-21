@@ -633,10 +633,6 @@ public class AnomalyDetector extends Config {
     @Generated
     @Override
     public String toString() {
-        return super.toString()
-            + ", "
-            + new ToStringBuilder(this)
-                .append("rules", rules)
-                .toString();
+        return super.toString() + ", " + new ToStringBuilder(this).append("rules", rules).toString();
     }
 }

@@ -53,15 +53,7 @@ import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
-public abstract class BaseDeleteConfigTransportAction<
-    TaskCacheManagerType extends TaskCacheManager,
-    TaskTypeEnum extends TaskType,
-    TaskClass extends TimeSeriesTask,
-    IndexType extends Enum<IndexType> & TimeSeriesIndex,
-    IndexManagementType extends IndexManagement<IndexType>,
-    TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>,
-    ConfigType extends Config
-    >
+public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ConfigType extends Config>
     extends HandledTransportAction<DeleteConfigRequest, DeleteResponse> {
 
     private static final Logger LOG = LogManager.getLogger(BaseDeleteConfigTransportAction.class);
@@ -138,8 +130,7 @@ public abstract class BaseDeleteConfigTransportAction<
                         taskManager.getAndExecuteOnLatestConfigLevelTask(configId, batchTaskTypes, configTask -> {
                             if (configTask.isPresent() && !configTask.get().isDone()) {
                                 String batchTaskName = configTask.get() instanceof ADTask ? "Historical" : "Run once";
-                                listener
-                                    .onFailure(new OpenSearchStatusException(batchTaskName + " is running", RestStatus.BAD_REQUEST));
+                                listener.onFailure(new OpenSearchStatusException(batchTaskName + " is running", RestStatus.BAD_REQUEST));
                             } else {
                                 taskManager.deleteTasks(configId, () -> deleteJobDoc(configId, listener), listener);
                             }
