@@ -12,6 +12,7 @@
 package org.opensearch.timeseries.indices;
 
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
+import static org.opensearch.forecast.constant.ForecastCommonName.CUSTOM_RESULT_INDEX_PREFIX;
 import static org.opensearch.timeseries.util.RestHandlerUtils.createXContentParserFromRegistry;
 
 import java.io.IOException;
@@ -51,6 +52,7 @@ import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.GroupedActionListener;
 import org.opensearch.action.support.IndicesOptions;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.LocalNodeClusterManagerListener;
@@ -66,6 +68,8 @@ import org.opensearch.commons.InjectSecurity;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.bytes.BytesArray;
+import org.opensearch.core.common.unit.ByteSizeUnit;
+import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.core.xcontent.XContentParser.Token;
@@ -283,7 +287,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
             );
     }
 
-    protected void deleteOldHistoryIndices(String indexPattern, TimeValue historyRetentionPeriod) {
+    protected void deleteOldHistoryIndices(String indexPattern, TimeValue historyRetentionPeriod, Integer customResultIndexTtl) {
         Set<String> candidates = new HashSet<String>();
 
         ClusterStateRequest clusterStateRequest = new ClusterStateRequest()
@@ -296,9 +300,11 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         adminClient.cluster().state(clusterStateRequest, ActionListener.wrap(clusterStateResponse -> {
             String latestToDelete = null;
             long latest = Long.MIN_VALUE;
+            long customTtlMillis = (customResultIndexTtl != null) ? customResultIndexTtl * 24 * 60 * 60 * 1000L : Long.MAX_VALUE;
             for (IndexMetadata indexMetaData : clusterStateResponse.getState().metadata().indices().values()) {
                 long creationTime = indexMetaData.getCreationDate();
-                if ((Instant.now().toEpochMilli() - creationTime) > historyRetentionPeriod.millis()) {
+                long indexAgeMillis = Instant.now().toEpochMilli() - creationTime;
+                if (indexAgeMillis > historyRetentionPeriod.millis() || indexAgeMillis > customTtlMillis) {
                     String indexName = indexMetaData.getIndex().getName();
                     candidates.add(indexName);
                     if (latest < creationTime) {
@@ -1248,14 +1254,47 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         choosePrimaryShards(createRequest, true);
 
         rollOverRequest.addMaxIndexDocsCondition(historyMaxDocs * getNumberOfPrimaryShards());
+
+        getConfigsWithCustomResultIndexAlias(ActionListener.wrap(candidateResultAliases -> {
+            Integer customResultIndexTtl = null;
+            if (candidateResultAliases != null && !candidateResultAliases.isEmpty()) {
+                for (Config config : candidateResultAliases) {
+                    String customResultIndexOrAlias = config.getCustomResultIndexOrAlias();
+                    if (customResultIndexOrAlias != null) {
+                        if (config.getCustomResultIndexMinAge() != null) {
+                            rollOverRequest.addMaxIndexAgeCondition(TimeValue.timeValueDays(config.getCustomResultIndexMinAge()));
+                        }
+                        if (config.getCustomResultIndexMinSize() != null) {
+                            rollOverRequest.addMaxIndexSizeCondition(new ByteSizeValue(config.getCustomResultIndexMinSize(), ByteSizeUnit.MB));
+                        }
+                        if (config.getCustomResultIndexTTL() != null) {
+                            customResultIndexTtl = config.getCustomResultIndexTTL();
+                        }
+                    }
+                }
+            } else {
+                logger.info("Candidate custom result indices are empty.");
+            }
+            final Integer finalCustomResultIndexTtl = customResultIndexTtl;
+            // Proceed with the rollover after processing configs
+            proceedWithRollover(resultIndexAlias, rollOverRequest, allResultIndicesPattern, resultIndex, finalCustomResultIndexTtl);
+        }, e -> {
+            logger.error("Failed to get configs with custom result index alias.", e);
+            // Proceed with the rollover even if there is an error on getting custom result index
+            proceedWithRollover(resultIndexAlias, rollOverRequest, allResultIndicesPattern, resultIndex, null);
+        }));
+    }
+
+    private void proceedWithRollover(String resultIndexAlias, RolloverRequest rollOverRequest, String allResultIndicesPattern,
+                                     IndexType resultIndex, Integer customResultIndexTtl) {
         adminClient.indices().rolloverIndex(rollOverRequest, ActionListener.wrap(response -> {
             if (!response.isRolledOver()) {
                 logger.warn("{} not rolled over. Conditions were: {}", resultIndexAlias, response.getConditionStatus());
             } else {
-                IndexState indexStatetate = indexStates.computeIfAbsent(resultIndex, k -> new IndexState(k.getMapping()));
-                indexStatetate.mappingUpToDate = true;
+                IndexState indexState = indexStates.computeIfAbsent(resultIndex, k -> new IndexState(k.getMapping()));
+                indexState.mappingUpToDate = true;
                 logger.info("{} rolled over. Conditions were: {}", resultIndexAlias, response.getConditionStatus());
-                deleteOldHistoryIndices(allResultIndicesPattern, historyRetentionPeriod);
+                deleteOldHistoryIndices(allResultIndicesPattern, historyRetentionPeriod, customResultIndexTtl);
             }
         }, exception -> {
             // e.g., we may roll over too often. Since the index pattern is opensearch-ad-plugin-result-d-history-{now/d}-000001,
