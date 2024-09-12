@@ -93,7 +93,7 @@ public class AnomalyResult extends IndexableResult {
     pastValues is related to relativeIndex, startOfAnomaly and anomaly grade.
     So if we detect anomaly late, we get the baseDimension values from the past (current is 0).
     That is, we look back relativeIndex * baseDimensions.
-    
+
     For example, current shingle is
     "currentValues": [
     6819.0,
@@ -145,10 +145,10 @@ public class AnomalyResult extends IndexableResult {
     86376.0,
     64878.0
     ],
-    
+
     So pastValues is null when relativeIndex is 0 or startOfAnomaly is true
     or the current shingle is not an anomaly.
-    
+
     In the UX, if pastValues value is null, we can just show attribution/expected
     value and it is implicit this is due to current input; if pastValues is not
     null, it means the the attribution/expected values are from an old value
@@ -446,7 +446,7 @@ public class AnomalyResult extends IndexableResult {
             taskId,
             rcfScore,
             Math.max(0, grade),
-            confidence,
+            Math.min(1, confidence),
             featureData,
             dataStartTime,
             dataEndTime,
