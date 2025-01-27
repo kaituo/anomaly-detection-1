@@ -187,6 +187,8 @@ public class SearchTopForecastResultTransportAction extends
             if (!Strings.isNullOrEmpty(forecaster.getCustomResultIndexPattern())) {
                 searchRequest.indices(forecaster.getCustomResultIndexPattern());
             }
+
+            System.out.println("hello90:"+searchRequest);
             // Utilizing the existing search() from SearchHandler to handle security
             // permissions. Both user role
             // and backend role filtering is handled in there, and any error will be

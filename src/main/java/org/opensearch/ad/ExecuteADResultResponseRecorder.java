@@ -11,6 +11,7 @@
 
 package org.opensearch.ad;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Optional;
@@ -50,7 +51,7 @@ public class ExecuteADResultResponseRecorder extends
         ThreadPool threadPool,
         Client client,
         NodeStateManager nodeStateManager,
-        ADTaskCacheManager taskCacheManager,
+        Clock clock,
         int rcfMinSamples
     ) {
         super(
@@ -62,7 +63,7 @@ public class ExecuteADResultResponseRecorder extends
             TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
             client,
             nodeStateManager,
-            taskCacheManager,
+            clock,
             rcfMinSamples,
             ADIndex.RESULT,
             AnalysisType.AD,
@@ -104,14 +105,15 @@ public class ExecuteADResultResponseRecorder extends
      * Instead, we issue a profile request to poll each model node and get the maximum total updates among all models.
      * @param response response returned from executing AnomalyResultAction
      * @param configId config Id
+     * @param clock Clock to get current time
      */
     @Override
-    protected void updateRealtimeTask(ResultResponse<AnomalyResult> response, String configId) {
+    protected void updateRealtimeTask(ResultResponse<AnomalyResult> response, String configId, Clock clock) {
         if (response.isHC() != null && response.isHC()) {
             if (taskManager.skipUpdateRealtimeTask(configId, response.getError())) {
                 return;
             }
-            delayedUpdate(response, configId);
+            delayedUpdate(response, configId, clock);
         } else {
             log
                 .debug(
@@ -124,7 +126,8 @@ public class ExecuteADResultResponseRecorder extends
                 null,
                 response.getRcfTotalUpdates(),
                 response.getConfigIntervalInMinutes(),
-                response.getError()
+                response.getError(),
+                clock
             );
         }
     }

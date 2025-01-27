@@ -28,14 +28,17 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.function.BiConsumer;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
+import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -57,16 +60,21 @@ import org.opensearch.search.aggregations.bucket.composite.TermsValuesSourceBuil
 import org.opensearch.search.aggregations.bucket.range.InternalDateRange;
 import org.opensearch.search.aggregations.bucket.range.InternalDateRange.Bucket;
 import org.opensearch.search.aggregations.bucket.terms.Terms;
+import org.opensearch.search.aggregations.metrics.InternalMax;
+import org.opensearch.search.aggregations.metrics.InternalMin;
 import org.opensearch.search.aggregations.metrics.Min;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.FieldSortBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.client.Client;
@@ -160,10 +168,10 @@ public class SearchFeatureDao extends AbstractRetriever {
     }
 
     /**
-     * Returns to listener the epoch time of the latest data under the detector.
+     * Returns to listener the epoch time of the latest data under the config.
      *
      * @param config info about the data
-     * @param listener onResponse is called with the epoch time of the latest data under the detector
+     * @param listener onResponse is called with the epoch time of the latest data under the config
      */
     public void getLatestDataTime(
         User user,
@@ -208,6 +216,47 @@ public class SearchFeatureDao extends AbstractRetriever {
                     searchResponseListener
                 );
         }
+    }
+
+    public void getDateRangeOfSourceData(Config config, User user, Map<String, Object> topEntity, ActionListener<Pair<Long, Long>> internalListener) {
+        SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+            .aggregation(AggregationBuilders.min(CommonName.AGG_NAME_MIN_TIME).field(config.getTimeField()))
+            .aggregation(AggregationBuilders.max(CommonName.AGG_NAME_MAX_TIME).field(config.getTimeField()))
+            .size(0);
+        BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery().must(config.getFilterQuery());
+        topEntity
+        .entrySet()
+        .forEach(entity -> internalFilterQuery.must(new TermQueryBuilder(entity.getKey(), entity.getValue())));
+
+        searchSourceBuilder.query(internalFilterQuery);
+
+        SearchRequest request = new SearchRequest()
+            .indices(config.getIndices().toArray(new String[0]))
+            .source(searchSourceBuilder);
+        final ActionListener<SearchResponse> searchResponseListener = ActionListener.wrap(r -> {
+            InternalMin minAgg = r.getAggregations().get(CommonName.AGG_NAME_MIN_TIME);
+            InternalMax maxAgg = r.getAggregations().get(CommonName.AGG_NAME_MAX_TIME);
+            double minValue = minAgg.getValue();
+            double maxValue = maxAgg.getValue();
+            // If time field not exist or there is no value, will return infinity value
+            if (minValue == Double.POSITIVE_INFINITY) {
+                internalListener.onFailure(new ResourceNotFoundException(config.getId(), "There is no data in the time field"));
+                return;
+            }
+            internalListener.onResponse(Pair.of((long)minValue, (long)maxValue));
+        }, e -> { internalListener.onFailure(e); });
+
+        // inject user role while searching.
+        clientUtil
+            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
+                request,
+                client::search,
+                // user is the one who triggered the caller of this function
+                user,
+                client,
+                AnalysisType.AD,
+                searchResponseListener
+            );
     }
 
     /**

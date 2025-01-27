@@ -171,8 +171,8 @@ public class ModelValidationActionHandler {
                 );
             return;
         }
-        long timeRangeEnd = Math.min(Instant.now().toEpochMilli(), latestTime.get());
-        new IntervalCalculation(config, requestTimeout, client, clientUtil, user, context, clock, searchFeatureDao, timeRangeEnd, topEntity)
+
+        new IntervalCalculation(config, requestTimeout, client, clientUtil, user, context, clock, searchFeatureDao, latestTime.get(), topEntity)
             .findInterval(
                 ActionListener.wrap(interval -> processIntervalRecommendation(interval, latestTime.get(), topEntity), listener::onFailure)
             );
@@ -190,6 +190,7 @@ public class ModelValidationActionHandler {
                 logger.info("Using the current interval as there is enough dense data ");
                 // Check if there is a window delay recommendation if everything else is successful and send exception
                 if (Instant.now().toEpochMilli() - latestTime > timeConfigToMilliSec(config.getWindowDelay())) {
+                    System.out.println("hello8:"+latestTime + " "+Instant.now().toEpochMilli());
                     sendWindowDelayRec(latestTime);
                     return;
                 }
@@ -201,7 +202,7 @@ public class ModelValidationActionHandler {
             listener
                 .onFailure(
                     new ValidationException(
-                        CommonMessages.INTERVAL_REC + interval.getInterval(),
+                        CommonMessages.INTERVAL_REC + interval,
                         intervalIssueType,
                         ValidationAspect.MODEL,
                         interval
@@ -224,6 +225,7 @@ public class ModelValidationActionHandler {
         AggregationBuilder aggregation = getBucketAggregation(latestTime);
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().aggregation(aggregation).size(0).timeout(requestTimeout);
         SearchRequest searchRequest = new SearchRequest(config.getIndices().toArray(new String[0])).source(searchSourceBuilder);
+        System.out.println("hello6:"+searchRequest);
         final ActionListener<SearchResponse> searchResponseListener = ActionListener
             .wrap(response -> processRawDataResults(response, latestTime), listener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
@@ -240,7 +242,9 @@ public class ModelValidationActionHandler {
     }
 
     private void processRawDataResults(SearchResponse response, long latestTime) {
-        if (aggregationPrep.getHistorgramBucketHitRate(response) < TimeSeriesSettings.INTERVAL_BUCKET_MINIMUM_SUCCESS_RATE) {
+        // if (aggregationPrep.getHistorgramBucketHitRate(response) < TimeSeriesSettings.INTERVAL_BUCKET_MINIMUM_SUCCESS_RATE) {
+        if (aggregationPrep.getHistorgramBucketCount(response) < TimeSeriesSettings.NUM_MIN_SAMPLES) {
+            System.out.println("hello4:"+response);
             listener
                 .onFailure(
                     new ValidationException(CommonMessages.RAW_DATA_TOO_SPARSE, ValidationIssueType.INDICES, ValidationAspect.MODEL)
@@ -271,7 +275,8 @@ public class ModelValidationActionHandler {
     }
 
     private void processDataFilterResults(SearchResponse response, long latestTime) {
-        if (aggregationPrep.getHistorgramBucketHitRate(response) < CONFIG_BUCKET_MINIMUM_SUCCESS_RATE) {
+        // if (aggregationPrep.getHistorgramBucketHitRate(response) < CONFIG_BUCKET_MINIMUM_SUCCESS_RATE) {
+        if (aggregationPrep.getHistorgramBucketCount(response) < TimeSeriesSettings.NUM_MIN_SAMPLES) {
             listener
                 .onFailure(
                     new ValidationException(
@@ -313,6 +318,7 @@ public class ModelValidationActionHandler {
         AggregationBuilder aggregation = getBucketAggregation(latestTime);
         SearchSourceBuilder searchSourceBuilder = aggregationPrep.getSearchSourceBuilder(query, aggregation);
         SearchRequest searchRequest = new SearchRequest(config.getIndices().toArray(new String[0])).source(searchSourceBuilder);
+        System.out.println("hello10:"+searchRequest);
         final ActionListener<SearchResponse> searchResponseListener = ActionListener
             .wrap(response -> processTopEntityResults(response, latestTime, topEntity), listener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
@@ -329,7 +335,9 @@ public class ModelValidationActionHandler {
     }
 
     private void processTopEntityResults(SearchResponse response, long latestTime, Map<String, Object> topEntity) {
-        if (aggregationPrep.getHistorgramBucketHitRate(response) < CONFIG_BUCKET_MINIMUM_SUCCESS_RATE) {
+        // if (aggregationPrep.getHistorgramBucketHitRate(response) < CONFIG_BUCKET_MINIMUM_SUCCESS_RATE) {
+        if (aggregationPrep.getHistorgramBucketCount(response) < TimeSeriesSettings.NUM_MIN_SAMPLES) {
+            System.out.println("hello3:"+response);
             listener
                 .onFailure(
                     new ValidationException(CommonMessages.CATEGORY_FIELD_TOO_SPARSE, ValidationIssueType.CATEGORY, ValidationAspect.MODEL)
@@ -347,6 +355,7 @@ public class ModelValidationActionHandler {
     private void checkFeatureQueryDelegate(long latestTime, Map<String, Object> topEntity) throws IOException {
         if (config.isHighCardinality()) {
             if (topEntity.isEmpty()) {
+                System.out.println("hello");
                 listener
                     .onFailure(
                         new ValidationException(
@@ -358,6 +367,7 @@ public class ModelValidationActionHandler {
                 return;
             }
         }
+        System.out.println("hello7:"+latestTime);
         ActionListener<MergeableList<double[]>> validateFeatureQueriesListener = ActionListener.wrap(response -> {
             windowDelayRecommendation(latestTime);
         }, exception -> {
@@ -378,8 +388,10 @@ public class ModelValidationActionHandler {
                 .createSearchRequestForFeature(interval, aggregationPrep.getTimeRangeBounds(interval, latestTime), topEntity, i);
             final ActionListener<SearchResponse> searchResponseListener = ActionListener.wrap(response -> {
                 try {
-                    double fullBucketRate = aggregationPrep.getBucketHitRate(response, interval, latestTime);
-                    if (fullBucketRate < CONFIG_BUCKET_MINIMUM_SUCCESS_RATE) {
+                    // double bucketHitRate = aggregationPrep.getBucketHitRate(response);
+                    // if (bucketHitRate < TimeSeriesSettings.INTERVAL_BUCKET_MINIMUM_SUCCESS_RATE) {
+                    long bucketHitCount = aggregationPrep.getBucketCount(response);
+                    if (bucketHitCount < TimeSeriesSettings.NUM_MIN_SAMPLES) {
                         multiFeatureQueriesResponseListener
                             .onFailure(
                                 new ValidationException(
@@ -395,7 +407,7 @@ public class ModelValidationActionHandler {
                             );
                     } else {
                         multiFeatureQueriesResponseListener
-                            .onResponse(new MergeableList<>(new ArrayList<>(Collections.singletonList(new double[] { fullBucketRate }))));
+                            .onResponse(new MergeableList<>(new ArrayList<>(Collections.singletonList(new double[] { 0 }))));
                     }
                 } catch (ValidationException e) {
                     listener.onFailure(e);
@@ -437,9 +449,11 @@ public class ModelValidationActionHandler {
         // Check if there is a better window-delay to recommend and if one was recommended
         // then send exception and return, otherwise continue to let user know data is too sparse as explained below
         if (Instant.now().toEpochMilli() - latestTime > timeConfigToMilliSec(config.getWindowDelay())) {
+            System.out.println("hello9:"+latestTime+" "+Instant.now().toEpochMilli());
             sendWindowDelayRec(latestTime);
             return;
         }
+        System.out.println("hello5");
         // This case has been reached if following conditions are met:
         // 1. no interval recommendation was found that leads to a bucket success rate of >= 0.75
         // 2. bucket success rate with the given interval and just raw data is also below 0.75.

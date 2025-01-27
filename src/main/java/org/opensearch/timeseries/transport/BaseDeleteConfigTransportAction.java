@@ -24,6 +24,7 @@ import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.action.support.WriteRequest;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
@@ -69,6 +70,7 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
     private final String stateIndex;
     private final Class<ConfigType> configTypeClass;
     private final List<TaskTypeEnum> batchTaskTypes;
+    protected final String configIndexName;
 
     public BaseDeleteConfigTransportAction(
         TransportService transportService,
@@ -84,7 +86,8 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
         AnalysisType analysisType,
         String stateIndex,
         Class<ConfigType> configTypeClass,
-        List<TaskTypeEnum> historicalTaskTypes
+        List<TaskTypeEnum> historicalTaskTypes,
+        String configIndexName
     ) {
         super(deleteConfigAction, transportService, actionFilters, DeleteConfigRequest::new);
         this.transportService = transportService;
@@ -100,6 +103,7 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
         this.stateIndex = stateIndex;
         this.configTypeClass = configTypeClass;
         this.batchTaskTypes = historicalTaskTypes;
+        this.configIndexName = configIndexName;
     }
 
     @Override
@@ -191,7 +195,7 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
 
     private void deleteConfigDoc(String configId, ActionListener<DeleteResponse> listener) {
         LOG.info("Delete config {}", configId);
-        DeleteRequest deleteRequest = new DeleteRequest(CommonName.CONFIG_INDEX, configId)
+        DeleteRequest deleteRequest = new DeleteRequest(configIndexName, configId)
             .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
         client.delete(deleteRequest, new ActionListener<DeleteResponse>() {
             @Override

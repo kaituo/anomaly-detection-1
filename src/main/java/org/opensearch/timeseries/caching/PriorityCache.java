@@ -710,15 +710,62 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         return false;
     }
 
+//    @Override
+//    public long getTotalUpdates(String configId) {
+//        return Optional
+//            .of(activeEnities)
+//            .map(entities -> entities.get(configId))
+//            .map(buffer -> buffer.getPriorityTracker().getHighestPriorityEntityId())
+//            .map(entityModelIdOptional -> entityModelIdOptional.get())
+//            .map(entityModelId -> getTotalUpdates(configId, entityModelId))
+//            .orElse(0L);
+//    }
     @Override
     public long getTotalUpdates(String configId) {
-        return Optional
-            .of(activeEnities)
-            .map(entities -> entities.get(configId))
-            .map(buffer -> buffer.getPriorityTracker().getHighestPriorityEntityId())
-            .map(entityModelIdOptional -> entityModelIdOptional.get())
-            .map(entityModelId -> getTotalUpdates(configId, entityModelId))
-            .orElse(0L);
+        System.out.println("getTotalUpdates called with configId = " + configId);
+
+        // 1) Check if activeEnities is null
+        if (activeEnities == null) {
+            System.out.println("activeEnities is null! Returning 0.");
+            return 0L;
+        }
+
+        // 2) Fetch the entity from the map
+        System.out.println("Trying to get entity from activeEnities map for configId: " + configId);
+        CacheBufferType buffer = activeEnities.get(configId);
+        if (buffer == null) {
+            System.out.println("No buffer found in activeEnities for configId: " + configId + ". Returning 0.");
+            return 0L;
+        } else {
+            System.out.println("Got a buffer for configId: " + configId);
+        }
+
+        // 3) Get the priority tracker
+        PriorityTracker tracker = buffer.getPriorityTracker();
+        if (tracker == null) {
+            System.out.println("buffer.getPriorityTracker() returned null for configId: " + configId + ". Returning 0.");
+            return 0L;
+        } else {
+            System.out.println("Got PriorityTracker for configId: " + configId);
+        }
+
+        // 4) Now get highest priority entity ID
+        Optional<String> maybeEntityId = tracker.getHighestPriorityEntityId();
+        if (!maybeEntityId.isPresent()) {
+            System.out.println("Highest priority entity ID is empty for configId: " + configId + ". Returning 0.");
+            return 0L;
+        } else {
+            System.out.println("Highest priority entity ID: " + maybeEntityId.get() + " for configId: " + configId);
+        }
+
+        String entityModelId = maybeEntityId.get();
+
+        // 5) Call the underlying getTotalUpdates
+        long updates = getTotalUpdates(configId, entityModelId);
+        System.out.println("Calculated getTotalUpdates = " + updates + " for entityModelId: "
+                            + entityModelId + ", configId: " + configId);
+
+        return updates;
     }
 
     @Override

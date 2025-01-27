@@ -293,7 +293,7 @@ public abstract class Config implements Writeable, ToXContentObject {
         // If recencyEmphasis is null, use the default value from TimeSeriesSettings
         this.recencyEmphasis = Optional.ofNullable(recencyEmphasis).orElse(TimeSeriesSettings.DEFAULT_RECENCY_EMPHASIS);
         this.seasonIntervals = seasonIntervals;
-        this.historyIntervals = historyIntervals == null ? suggestHistory() : historyIntervals;
+        this.historyIntervals = historyIntervals == null ? getDefaultHistory() : historyIntervals;
         this.customResultIndexMinSize = Strings.trimToNull(resultIndex) == null ? null : customResultIndexMinSize;
         this.customResultIndexMinAge = Strings.trimToNull(resultIndex) == null ? null : customResultIndexMinAge;
         this.customResultIndexTTL = Strings.trimToNull(resultIndex) == null ? null : customResultIndexTTL;
@@ -301,7 +301,7 @@ public abstract class Config implements Writeable, ToXContentObject {
         this.lastUIBreakingChangeTime = lastBreakingUIChangeTime;
     }
 
-    public int suggestHistory() {
+    public int getDefaultHistory() {
         return TimeSeriesSettings.NUM_MIN_SAMPLES + this.shingleSize;
     }
 
@@ -822,5 +822,19 @@ public abstract class Config implements Writeable, ToXContentObject {
             .append("customResultIndexTTL", customResultIndexTTL)
             .append("flattenResultIndexMapping", flattenResultIndexMapping)
             .toString();
+    }
+
+    protected static Integer onlyParseNumberValue(XContentParser parser) throws IOException {
+        if (parser.currentToken() == XContentParser.Token.VALUE_NUMBER) {
+            return parser.intValue();
+        }
+        return null;
+    }
+
+    protected static Boolean onlyParseBooleanValue(XContentParser parser) throws IOException {
+        if (parser.currentToken() == XContentParser.Token.VALUE_BOOLEAN) {
+            return parser.booleanValue();
+        }
+        return null;
     }
 }

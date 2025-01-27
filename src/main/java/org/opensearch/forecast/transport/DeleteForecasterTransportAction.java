@@ -10,6 +10,7 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastTask;
@@ -52,7 +53,8 @@ public class DeleteForecasterTransportAction extends
             AnalysisType.FORECAST,
             ForecastIndex.STATE.getIndexName(),
             Forecaster.class,
-            ForecastTaskType.RUN_ONCE_TASK_TYPES
+            ForecastTaskType.RUN_ONCE_TASK_TYPES,
+            ForecastCommonName.CONFIG_INDEX
         );
     }
 }

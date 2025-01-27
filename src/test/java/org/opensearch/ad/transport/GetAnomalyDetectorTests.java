@@ -38,6 +38,7 @@ import org.opensearch.action.get.MultiGetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.ADTaskProfileRunner;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
@@ -160,7 +161,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
             ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
 
             String indexName = request.index();
-            if (indexName.equals(CommonName.CONFIG_INDEX)) {
+            if (indexName.equals(ADCommonName.CONFIG_INDEX)) {
                 listener.onResponse(null);
             }
             return null;

@@ -61,17 +61,55 @@ public class AggregationPrep {
         return config.getHistoryIntervals();
     }
 
-    public double getBucketHitRate(SearchResponse response, IntervalTimeConfiguration currentInterval, long endMillis) {
+//    public double getBucketHitRate(SearchResponse response) {
+//        // as feature query might contain filter, use feature query as we do in cold start
+//        if (config.getEnabledFeatureIds() != null && config.getEnabledFeatureIds().size() > 0) {
+//            List<Optional<double[]>> features = dateRangeHelper.parseColdStartSampleResp(response, false, config);
+//            return features.stream().filter(Optional::isPresent).count() * 1.0 / getNumberOfSamples();
+//        } else {
+//            return getHistorgramBucketHitRate(response);
+//        }
+//    }
+
+    public long getBucketCount(SearchResponse response) {
         // as feature query might contain filter, use feature query as we do in cold start
         if (config.getEnabledFeatureIds() != null && config.getEnabledFeatureIds().size() > 0) {
             List<Optional<double[]>> features = dateRangeHelper.parseColdStartSampleResp(response, false, config);
-            return features.stream().filter(Optional::isPresent).count() / getNumberOfSamples();
+            return features.stream().filter(Optional::isPresent).count();
         } else {
-            return getHistorgramBucketHitRate(response);
+            return getHistorgramBucketCount(response);
         }
     }
 
-    public double getHistorgramBucketHitRate(SearchResponse response) {
+//    public long getBuckets(SearchResponse response, IntervalTimeConfiguration currentInterval, long endMillis) {
+//        // as feature query might contain filter, use feature query as we do in cold start
+//        if (config.getEnabledFeatureIds() != null && config.getEnabledFeatureIds().size() > 0) {
+//            List<Optional<double[]>> features = dateRangeHelper.parseColdStartSampleResp(response, false, config);
+//            return features.stream().filter(Optional::isPresent).count();
+//        } else {
+//            // return getHistorgramBucketHitRate(response);
+//            return 0;
+//        }
+//    }
+
+//    public double getHistorgramBucketHitRate(SearchResponse response) {
+//        int numberOfSamples = getNumberOfSamples();
+//        if (numberOfSamples == 0) {
+//            return 0;
+//        }
+//        Histogram histogram = validateAndRetrieveHistogramAggregation(response);
+//        if (histogram == null || histogram.getBuckets() == null) {
+//            logger.warn("Empty histogram buckets");
+//            return 0;
+//        }
+//        // getBuckets returns non-empty bucket (e.g., doc_count > 0)
+//        int bucketCount = histogram.getBuckets().size();
+//
+//        System.out.println("hello12:"+bucketCount + " "+numberOfSamples);
+//        return bucketCount * 1.0 / numberOfSamples;
+//    }
+
+    public long getHistorgramBucketCount(SearchResponse response) {
         int numberOfSamples = getNumberOfSamples();
         if (numberOfSamples == 0) {
             return 0;
@@ -84,7 +122,8 @@ public class AggregationPrep {
         // getBuckets returns non-empty bucket (e.g., doc_count > 0)
         int bucketCount = histogram.getBuckets().size();
 
-        return bucketCount / numberOfSamples;
+        System.out.println("hello12:"+bucketCount + " "+numberOfSamples);
+        return bucketCount;
     }
 
     public List<Long> getTimestamps(SearchResponse response) {
@@ -171,6 +210,7 @@ public class AggregationPrep {
         BoolQueryBuilder query = QueryBuilders.boolQuery().filter(config.getFilterQuery());
         if (config.isHighCardinality()) {
             if (topEntity.isEmpty()) {
+                System.out.println("hello2");
                 throw new ValidationException(
                     CommonMessages.CATEGORY_FIELD_TOO_SPARSE,
                     ValidationIssueType.CATEGORY,

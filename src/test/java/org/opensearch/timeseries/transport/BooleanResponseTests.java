@@ -18,6 +18,8 @@ import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.forecast.transport.ForecastRunOnceProfileNodeResponse;
+import org.opensearch.forecast.transport.ForecastRunOnceProfileResponse;
 import org.opensearch.test.OpenSearchTestCase;
 
 public class BooleanResponseTests extends OpenSearchTestCase {
@@ -32,13 +34,13 @@ public class BooleanResponseTests extends OpenSearchTestCase {
             Version.CURRENT
         );
 
-        BooleanNodeResponse nodeResponseTrue = new BooleanNodeResponse(node, true);
-        BooleanNodeResponse nodeResponseFalse = new BooleanNodeResponse(node, false);
-        List<BooleanNodeResponse> nodes = List.of(nodeResponseTrue, nodeResponseFalse);
+        ForecastRunOnceProfileNodeResponse nodeResponseTrue = new ForecastRunOnceProfileNodeResponse(node, true);
+        ForecastRunOnceProfileNodeResponse nodeResponseFalse = new ForecastRunOnceProfileNodeResponse(node, false);
+        List<ForecastRunOnceProfileNodeResponse> nodes = List.of(nodeResponseTrue, nodeResponseFalse);
         List<FailedNodeException> failures = Collections.emptyList();
         ClusterName clusterName = new ClusterName("test-cluster");
 
-        BooleanResponse response = new BooleanResponse(clusterName, nodes, failures);
+        ForecastRunOnceProfileResponse response = new ForecastRunOnceProfileResponse(clusterName, nodes, failures);
 
         // Act: Serialize the response
         BytesStreamOutput output = new BytesStreamOutput();
@@ -46,7 +48,7 @@ public class BooleanResponseTests extends OpenSearchTestCase {
 
         // Deserialize the response
         StreamInput input = output.bytes().streamInput();
-        BooleanResponse deserializedResponse = new BooleanResponse(input);
+        ForecastRunOnceProfileResponse deserializedResponse = new ForecastRunOnceProfileResponse(input);
 
         // Assert
         assertEquals(clusterName, deserializedResponse.getClusterName());
@@ -72,11 +74,11 @@ public class BooleanResponseTests extends OpenSearchTestCase {
             Version.CURRENT
         );
 
-        BooleanNodeResponse nodeResponse1 = new BooleanNodeResponse(node1, true);
-        BooleanNodeResponse nodeResponse2 = new BooleanNodeResponse(node2, false);
-        List<BooleanNodeResponse> nodes = List.of(nodeResponse1, nodeResponse2);
+        ForecastRunOnceProfileNodeResponse nodeResponse1 = new ForecastRunOnceProfileNodeResponse(node1, true);
+        ForecastRunOnceProfileNodeResponse nodeResponse2 = new ForecastRunOnceProfileNodeResponse(node2, false);
+        List<ForecastRunOnceProfileNodeResponse> nodes = List.of(nodeResponse1, nodeResponse2);
         ClusterName clusterName = new ClusterName("test-cluster");
-        BooleanResponse response = new BooleanResponse(clusterName, nodes, Collections.emptyList());
+        ForecastRunOnceProfileResponse response = new ForecastRunOnceProfileResponse(clusterName, nodes, Collections.emptyList());
 
         // Act: Write nodes to output
         BytesStreamOutput output = new BytesStreamOutput();
@@ -84,7 +86,7 @@ public class BooleanResponseTests extends OpenSearchTestCase {
 
         // Read nodes from input
         StreamInput input = output.bytes().streamInput();
-        List<BooleanNodeResponse> readNodes = response.readNodesFrom(input);
+        List<ForecastRunOnceProfileNodeResponse> readNodes = response.readNodesFrom(input);
 
         // Assert
         assertEquals(nodes.size(), readNodes.size());
@@ -102,7 +104,7 @@ public class BooleanResponseTests extends OpenSearchTestCase {
             Version.CURRENT
         );
 
-        BooleanNodeResponse nodeResponse = new BooleanNodeResponse(node, true);
+        ForecastRunOnceProfileNodeResponse nodeResponse = new ForecastRunOnceProfileNodeResponse(node, true);
 
         // Act: Serialize the node response
         BytesStreamOutput output = new BytesStreamOutput();
@@ -110,7 +112,7 @@ public class BooleanResponseTests extends OpenSearchTestCase {
 
         // Deserialize the node response
         StreamInput input = output.bytes().streamInput();
-        BooleanNodeResponse deserializedNodeResponse = new BooleanNodeResponse(input);
+        ForecastRunOnceProfileNodeResponse deserializedNodeResponse = new ForecastRunOnceProfileNodeResponse(input);
 
         // Assert
         assertEquals(node, deserializedNodeResponse.getNode());
@@ -134,13 +136,13 @@ public class BooleanResponseTests extends OpenSearchTestCase {
             Version.CURRENT
         );
 
-        BooleanNodeResponse nodeResponseTrue = new BooleanNodeResponse(node1, true);
-        BooleanNodeResponse nodeResponseFalse = new BooleanNodeResponse(node2, false);
-        List<BooleanNodeResponse> nodes = List.of(nodeResponseTrue, nodeResponseFalse);
+        ForecastRunOnceProfileNodeResponse nodeResponseTrue = new ForecastRunOnceProfileNodeResponse(node1, true);
+        ForecastRunOnceProfileNodeResponse nodeResponseFalse = new ForecastRunOnceProfileNodeResponse(node2, false);
+        List<ForecastRunOnceProfileNodeResponse> nodes = List.of(nodeResponseTrue, nodeResponseFalse);
         ClusterName clusterName = new ClusterName("test-cluster");
 
         // Act
-        BooleanResponse response = new BooleanResponse(clusterName, nodes, Collections.emptyList());
+        ForecastRunOnceProfileResponse response = new ForecastRunOnceProfileResponse(clusterName, nodes, Collections.emptyList());
 
         // Assert
         assertTrue(response.isAnswerTrue()); // Since at least one node responded true
@@ -163,13 +165,13 @@ public class BooleanResponseTests extends OpenSearchTestCase {
             Version.CURRENT
         );
 
-        BooleanNodeResponse nodeResponse1 = new BooleanNodeResponse(node1, false);
-        BooleanNodeResponse nodeResponse2 = new BooleanNodeResponse(node2, false);
-        List<BooleanNodeResponse> nodes = List.of(nodeResponse1, nodeResponse2);
+        ForecastRunOnceProfileNodeResponse nodeResponse1 = new ForecastRunOnceProfileNodeResponse(node1, false);
+        ForecastRunOnceProfileNodeResponse nodeResponse2 = new ForecastRunOnceProfileNodeResponse(node2, false);
+        List<ForecastRunOnceProfileNodeResponse> nodes = List.of(nodeResponse1, nodeResponse2);
         ClusterName clusterName = new ClusterName("test-cluster");
 
         // Act
-        BooleanResponse response = new BooleanResponse(clusterName, nodes, Collections.emptyList());
+        ForecastRunOnceProfileResponse response = new ForecastRunOnceProfileResponse(clusterName, nodes, Collections.emptyList());
 
         // Assert
         assertFalse(response.isAnswerTrue()); // Since all nodes responded false
@@ -185,10 +187,10 @@ public class BooleanResponseTests extends OpenSearchTestCase {
             Version.CURRENT
         );
 
-        BooleanNodeResponse nodeResponse = new BooleanNodeResponse(node, true);
-        List<BooleanNodeResponse> nodes = Collections.singletonList(nodeResponse);
+        ForecastRunOnceProfileNodeResponse nodeResponse = new ForecastRunOnceProfileNodeResponse(node, true);
+        List<ForecastRunOnceProfileNodeResponse> nodes = Collections.singletonList(nodeResponse);
         ClusterName clusterName = new ClusterName("test-cluster");
-        BooleanResponse response = new BooleanResponse(clusterName, nodes, Collections.emptyList());
+        ForecastRunOnceProfileResponse response = new ForecastRunOnceProfileResponse(clusterName, nodes, Collections.emptyList());
 
         // Act
         XContentBuilder builder = XContentFactory.jsonBuilder();

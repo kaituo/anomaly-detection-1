@@ -66,7 +66,6 @@ public class IntervalCalculation {
         this.clock = clock;
         this.topEntity = topEntity;
         this.endMillis = latestTime;
-
     }
 
     public void findInterval(ActionListener<IntervalTimeConfiguration> listener) {
@@ -81,6 +80,7 @@ public class IntervalCalculation {
         }, listener::onFailure);
         // we use 1 minute = 60000 milliseconds to find minimum interval
         LongBounds longBounds = aggregationPrep.getTimeRangeBounds(new IntervalTimeConfiguration(1, ChronoUnit.MINUTES), endMillis);
+        System.out.println("hello14:"+longBounds);
         findMinimumInterval(longBounds, minimumIntervalListener);
     }
 
@@ -141,6 +141,7 @@ public class IntervalCalculation {
         IntervalTimeConfiguration currentIntervalToTry;
         private final long expirationEpochMs;
         private LongBounds currentTimeStampBounds;
+        private IntervalTimeConfiguration minIntervalToTry;
 
         public IntervalRecommendationListener(
             ActionListener<IntervalTimeConfiguration> intervalListener,
@@ -153,15 +154,18 @@ public class IntervalCalculation {
             this.currentIntervalToTry = currentIntervalToTry;
             this.expirationEpochMs = expirationEpochMs;
             this.currentTimeStampBounds = timeStampBounds;
+            this.minIntervalToTry = currentIntervalToTry;
         }
 
         @Override
         public void onResponse(SearchResponse response) {
             try {
                 int newIntervalMinute = increaseAndGetNewInterval(currentIntervalToTry);
-                double fullBucketRate = aggregationPrep.getBucketHitRate(response, currentIntervalToTry, endMillis);
+                long bucketCount = aggregationPrep.getBucketCount(response);
                 // If rate is above success minimum then return interval suggestion.
-                if (fullBucketRate > TimeSeriesSettings.INTERVAL_BUCKET_MINIMUM_SUCCESS_RATE) {
+//                if (bucketHitRate >= TimeSeriesSettings.INTERVAL_BUCKET_MINIMUM_SUCCESS_RATE) {
+                System.out.println("hello50:"+bucketCount);
+                if (bucketCount >= TimeSeriesSettings.NUM_MIN_SAMPLES) {
                     intervalListener.onResponse(this.currentIntervalToTry);
                 } else if (expirationEpochMs < clock.millis()) {
                     intervalListener
@@ -175,6 +179,7 @@ public class IntervalCalculation {
                     logger.info(CommonMessages.TIMEOUT_ON_INTERVAL_REC);
                     // keep trying higher intervals as new interval is below max, and we aren't decreasing yet
                 } else if (newIntervalMinute < TimeSeriesSettings.MAX_INTERVAL_REC_LENGTH_IN_MINUTES) {
+                    System.out.println("hello70:"+newIntervalMinute);
                     searchWithDifferentInterval(newIntervalMinute);
                     // The below block is executed only the first time when new interval is above max and
                     // we aren't decreasing yet, at this point we will start decreasing for the first time
@@ -251,6 +256,7 @@ public class IntervalCalculation {
             SearchRequest searchRequest = aggregationPrep
                 .createSearchRequest(new IntervalTimeConfiguration(1, ChronoUnit.MINUTES), timeStampBounds, topEntity);
             final ActionListener<SearchResponse> searchResponseListener = ActionListener.wrap(response -> {
+                System.out.println("hello53:"+response);
                 List<Long> timestamps = aggregationPrep.getTimestamps(response);
                 if (timestamps.size() < 2) {
                     // to calculate the difference we need at least 2 timestamps
@@ -260,6 +266,8 @@ public class IntervalCalculation {
                 }
 
                 double medianDifference = calculateMedianDifference(timestamps);
+                System.out.println("hello51:"+medianDifference);
+
                 long minimumMinutes = millisecondsToCeilMinutes(((Double) medianDifference).longValue());
                 if (minimumMinutes > TimeSeriesSettings.MAX_INTERVAL_REC_LENGTH_IN_MINUTES) {
                     logger.warn("The minimum interval is too large: {}", minimumMinutes);
@@ -285,8 +293,10 @@ public class IntervalCalculation {
     }
 
     private static double calculateMedianDifference(List<Long> timestamps) {
+        System.out.println("hello60:"+timestamps);
+        // make sure it is sorted
+        Collections.sort(timestamps);
         List<Long> differences = new ArrayList<>();
-
         for (int i = 1; i < timestamps.size(); i++) {
             differences.add(timestamps.get(i) - timestamps.get(i - 1));
         }
@@ -295,10 +305,10 @@ public class IntervalCalculation {
 
         int middle = differences.size() / 2;
         if (differences.size() % 2 == 0) {
-            // If even number of differences, return the average of the two middle values
-            return (differences.get(middle - 1) + differences.get(middle)) / 2.0;
+            // If even, choose the lower of the two middle values (same as numpy.median behavior for integers)
+            return differences.get(middle - 1);
         } else {
-            // If odd number of differences, return the middle value
+            // If odd, return the middle value
             return differences.get(middle);
         }
     }

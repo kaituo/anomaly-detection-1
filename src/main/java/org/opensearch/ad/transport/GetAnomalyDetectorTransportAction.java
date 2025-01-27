@@ -20,6 +20,7 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.ADEntityProfileRunner;
 import org.opensearch.ad.ADTaskProfileRunner;
 import org.opensearch.ad.AnomalyDetectorProfileRunner;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
@@ -81,7 +82,8 @@ public class GetAnomalyDetectorTransportAction extends
             ADTaskType.HISTORICAL_HC_DETECTOR.name(),
             ADTaskType.HISTORICAL_SINGLE_ENTITY.name(),
             AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES,
-            adTaskProfileRunner
+            adTaskProfileRunner,
+            ADCommonName.CONFIG_INDEX
         );
     }
 
@@ -159,6 +161,13 @@ public class GetAnomalyDetectorTransportAction extends
             taskManager,
             taskProfileRunner
         );
+    }
+
+    // no need to adjust for AD
+    @Override
+    protected void adjustState(Optional<ADTask> taskOptional, Job job) {
+        // TODO Auto-generated method stub
+
     }
 
 }

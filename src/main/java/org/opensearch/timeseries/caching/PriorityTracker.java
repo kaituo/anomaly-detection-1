@@ -213,11 +213,27 @@ public class PriorityTracker {
     *
     * @return Get maximum priority entity's Id
     */
+//    public Optional<String> getHighestPriorityEntityId() {
+//        if (priorityList.isEmpty()) {
+//            return Optional.empty();
+//        }
+//        return Optional.of(priorityList).map(list -> list.last()).map(node -> node.key);
+//    }
+
     public Optional<String> getHighestPriorityEntityId() {
+        // Start debugging
+        System.out.println("getHighestPriorityEntityId() called");
+
         if (priorityList.isEmpty()) {
+            System.out.println("priorityList is empty, returning Optional.empty()");
             return Optional.empty();
         }
-        return Optional.of(priorityList).map(list -> list.last()).map(node -> node.key);
+
+        // If not empty, grab the last node
+        String key = priorityList.last().key;
+        System.out.println("priorityList is not empty, highest priority key: " + key);
+
+        return Optional.of(key);
     }
 
     /**

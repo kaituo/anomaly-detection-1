@@ -38,6 +38,7 @@ import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.core.xcontent.XContentParserUtils;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.constant.CommonMessages;
@@ -197,7 +198,7 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
         Consumer<Optional<? extends Config>> function,
         ActionListener<T> listener
     ) {
-        GetRequest getRequest = new GetRequest(CommonName.CONFIG_INDEX, configId);
+        GetRequest getRequest = new GetRequest(analysisType == AnalysisType.AD ? ADCommonName.CONFIG_INDEX : ForecastCommonName.CONFIG_INDEX, configId);
         client.get(getRequest, ActionListener.wrap(response -> {
             if (!response.isExists()) {
                 function.accept(Optional.empty());
@@ -211,6 +212,7 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
                 if (analysisType.isAD()) {
                     config = AnomalyDetector.parse(parser, response.getId(), response.getVersion());
                 } else if (analysisType.isForecast()) {
+                    System.out.println("hello41");
                     config = Forecaster.parse(parser, response.getId(), response.getVersion());
                 } else {
                     throw new UnsupportedOperationException("This method is not supported");
@@ -228,22 +230,24 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
         }));
     }
 
-    public void getConfig(String configID, AnalysisType context, ActionListener<Optional<? extends Config>> listener) {
+    public void getConfig(String configID, AnalysisType context, boolean cache, ActionListener<Optional<? extends Config>> listener) {
         NodeState state = states.get(configID);
         if (state != null && state.getConfigDef() != null) {
+            System.out.println("hello33 cached2");
             listener.onResponse(Optional.of(state.getConfigDef()));
         } else {
-            GetRequest request = new GetRequest(CommonName.CONFIG_INDEX, configID);
+            GetRequest request = new GetRequest(context == AnalysisType.AD ? ADCommonName.CONFIG_INDEX : ForecastCommonName.CONFIG_INDEX, configID);
             BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser = context.isAD()
                 ? AnomalyDetector::parse
                 : Forecaster::parse;
-            clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetConfigResponse(configID, configParser, listener));
+            clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetConfigResponse(configID, configParser, cache, listener));
         }
     }
 
     private ActionListener<GetResponse> onGetConfigResponse(
         String configID,
         BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser,
+        boolean cache,
         ActionListener<Optional<? extends Config>> listener
     ) {
         return ActionListener.wrap(response -> {
@@ -268,8 +272,11 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
                     return;
                 }
 
-                NodeState state = states.computeIfAbsent(configID, configId -> new NodeState(configId, clock));
-                state.setConfigDef(config);
+                if (cache) {
+                    NodeState state = states.computeIfAbsent(configID, configId -> new NodeState(configId, clock));
+                    state.setConfigDef(config);
+                    System.out.println("hello34 cached");
+                }
 
                 listener.onResponse(Optional.of(config));
             } catch (Exception t) {
