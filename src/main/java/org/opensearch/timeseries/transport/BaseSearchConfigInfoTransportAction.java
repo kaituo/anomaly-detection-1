@@ -13,6 +13,7 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.Client;
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
@@ -22,7 +23,6 @@ import org.opensearch.index.query.TermsQueryBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
 
@@ -30,15 +30,18 @@ public abstract class BaseSearchConfigInfoTransportAction extends
     HandledTransportAction<SearchConfigInfoRequest, SearchConfigInfoResponse> {
     private static final Logger LOG = LogManager.getLogger(BaseSearchConfigInfoTransportAction.class);
     private final Client client;
+    protected String configIndexName;
 
     public BaseSearchConfigInfoTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
         Client client,
-        String searchConfigActionName
+        String searchConfigActionName,
+        String configIndexName
     ) {
         super(searchConfigActionName, transportService, actionFilters, SearchConfigInfoRequest::new);
         this.client = client;
+        this.configIndexName = configIndexName;
     }
 
     @Override
@@ -47,7 +50,7 @@ public abstract class BaseSearchConfigInfoTransportAction extends
         String rawPath = request.getRawPath();
         ActionListener<SearchConfigInfoResponse> listener = wrapRestActionListener(actionListener, CommonMessages.FAIL_TO_GET_CONFIG_INFO);
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
-            SearchRequest searchRequest = new SearchRequest().indices(CommonName.CONFIG_INDEX);
+            SearchRequest searchRequest = new SearchRequest().indices(configIndexName);
             if (rawPath.endsWith(RestHandlerUtils.COUNT)) {
                 // Count detectors
                 SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();

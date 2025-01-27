@@ -164,6 +164,7 @@ dependencies {
     testImplementation "org.opensearch:opensearch-core:${opensearch_version}"
     testRuntimeOnly("org.junit.platform:junit-platform-launcher:1.11.2")
     testCompileOnly 'junit:junit:4.13.2'
+    testImplementation 'org.reflections:reflections:0.10.2'
 }
 
 apply plugin: 'java'

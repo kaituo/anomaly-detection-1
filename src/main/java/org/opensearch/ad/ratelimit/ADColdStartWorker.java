@@ -27,7 +27,11 @@ import org.opensearch.ad.ml.ADCheckpointDao;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
+import org.opensearch.ad.model.ADTask;
+import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.task.ADTaskCacheManager;
+import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
@@ -59,7 +63,23 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 // suppress warning due to the use of generic type ModelState
 public class ADColdStartWorker extends
-    ColdStartWorker<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADColdStart, ADPriorityCache, AnomalyResult, ThresholdingResult, ADModelManager, ADSaveResultStrategy> {
+    ColdStartWorker<
+      ThresholdedRandomCutForest,
+      ADIndex,
+      ADIndexManagement,
+      ADCheckpointDao,
+      ADCheckpointWriteWorker,
+      ADColdStart,
+      ADPriorityCache,
+      AnomalyResult,
+      ThresholdingResult,
+      ADModelManager,
+      ADSaveResultStrategy,
+      ADTaskCacheManager,
+      ADTaskType,
+      ADTask,
+      ADTaskManager
+    > {
     public static final String WORKER_NAME = "ad-cold-start";
 
     public ADColdStartWorker(
@@ -82,7 +102,8 @@ public class ADColdStartWorker extends
         NodeStateManager nodeStateManager,
         ADPriorityCache cacheProvider,
         ADModelManager modelManager,
-        ADSaveResultStrategy saveStrategy
+        ADSaveResultStrategy saveStrategy,
+        ADTaskManager taskManager
     ) {
         super(
             WORKER_NAME,
@@ -108,7 +129,8 @@ public class ADColdStartWorker extends
             cacheProvider,
             AnalysisType.AD,
             modelManager,
-            saveStrategy
+            saveStrategy,
+            taskManager
         );
     }
 

@@ -289,4 +289,9 @@ public class TimeSeriesSettings {
 
     // max entities to track per detector
     public static final int MAX_TRACKING_ENTITIES = 1000000;
+
+    // ======================================
+    // Suggest setting
+    // ======================================
+    public static final float WINDOW_DELAY_RATIO = 1.2f;
 }

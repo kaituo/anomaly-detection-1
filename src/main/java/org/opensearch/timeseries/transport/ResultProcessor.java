@@ -239,6 +239,8 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                 scheduleImputeHCTask();
             }
 
+            System.out.println("hello30:"+entityFeatures);
+
             if (entityFeatures != null && false == entityFeatures.isEmpty()) {
                 LOG
                     .info(
@@ -490,6 +492,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
         long dataEndTime,
         String taskId
     ) {
+        System.out.println("hello34:"+config);
         // HC logic starts here
         if (config.isHighCardinality()) {
             Optional<Exception> previousException = nodeStateManager.fetchExceptionAndClear(configID);
@@ -601,18 +604,18 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
      * and confirm the EndRunException is not a false positive.
      *
      * @param exception Exception
-     * @param adID detector Id
+     * @param configID config Id
      * @return the converted exception if the exception is query related
      */
-    private Exception convertedQueryFailureException(Exception exception, String adID) {
+    private Exception convertedQueryFailureException(Exception exception, String configID) {
         if (ExceptionUtil.isIndexNotAvailable(exception)) {
-            return new EndRunException(adID, ResultProcessor.TROUBLE_QUERYING_ERR_MSG + exception.getMessage(), false)
+            return new EndRunException(configID, ResultProcessor.TROUBLE_QUERYING_ERR_MSG + exception.getMessage(), false)
                 .countedInStats(false);
         } else if (exception instanceof SearchPhaseExecutionException && invalidQuery((SearchPhaseExecutionException) exception)) {
             // This is to catch invalid aggregation on wrong field type. For example,
             // sum aggregation on text field. We should end detector run for such case.
             return new EndRunException(
-                adID,
+                configID,
                 CommonMessages.INVALID_SEARCH_QUERY_MSG + " " + ((SearchPhaseExecutionException) exception).getDetailedMessage(),
                 exception,
                 false
@@ -901,7 +904,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                             String
                                 .format(
                                     Locale.ROOT,
-                                    "No data in current window between %d and %d for %s",
+                                    CommonMessages.NO_DATA_MSG + " %d and %d for %s",
                                     dataStartTime,
                                     dataEndTime,
                                     configId

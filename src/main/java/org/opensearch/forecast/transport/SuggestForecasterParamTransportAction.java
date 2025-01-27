@@ -26,6 +26,9 @@ import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.rest.handler.HistorySuggest;
+import org.opensearch.timeseries.rest.handler.IntervalCalculation;
 import org.opensearch.timeseries.transport.BaseSuggestConfigParamTransportAction;
 import org.opensearch.timeseries.transport.SuggestConfigParamRequest;
 import org.opensearch.timeseries.transport.SuggestConfigParamResponse;
@@ -79,25 +82,41 @@ public class SuggestForecasterParamTransportAction extends BaseSuggestConfigPara
         }
 
         Config config = request.getConfig();
+
+        int responseSize = params.size();
+        // history suggest interval too as history suggest depends on interval suggest
+        // so we don't need to call suggestInterval if history is required
+        if (params.contains(SuggestName.HISTORY) && params.contains(SuggestName.INTERVAL)) {
+            responseSize -= 1;
+        }
+
         MultiResponsesDelegateActionListener<SuggestConfigParamResponse> delegateListener =
             new MultiResponsesDelegateActionListener<SuggestConfigParamResponse>(
                 listener,
-                params.size(),
-                CommonMessages.FAIL_SUGGEST_ERR_MSG + config.getId(),
+                responseSize,
+                // we don't usually have a config id as the config is not created yet
+                CommonMessages.FAIL_SUGGEST_ERR_MSG,
                 false
             );
 
-        if (params.contains(SuggestName.INTERVAL)) {
-            suggestInterval(request.getConfig(), user, request.getRequestTimeout(), delegateListener);
-        }
-
+        System.out.println("hello72:"+params+" "+params.contains(SuggestName.HISTORY));
+        // history suggest interval too as history suggest depends on interval suggest
         if (params.contains(SuggestName.HISTORY)) {
-            delegateListener.onResponse(new SuggestConfigParamResponse.Builder().history(config.suggestHistory()).build());
+            suggestHistory(request.getConfig(), user, request.getRequestTimeout(), params.contains(SuggestName.INTERVAL), delegateListener);
+        } else if (params.contains(SuggestName.INTERVAL)) {
+            suggestInterval(request.getConfig(), user, request.getRequestTimeout(),
+                    ActionListener.wrap(intervalEntity -> delegateListener.onResponse(
+                            new SuggestConfigParamResponse.Builder().interval(intervalEntity.getLeft()).build()),
+                            delegateListener::onFailure));
         }
 
         if (params.contains(SuggestName.HORIZON)) {
             Forecaster forecaster = (Forecaster) config;
             delegateListener.onResponse(new SuggestConfigParamResponse.Builder().horizon(forecaster.suggestHorizon()).build());
+        }
+
+        if (params.contains(SuggestName.WINDOW_DELAY)) {
+            suggestWindowDelay(request.getConfig(), user, request.getRequestTimeout(), delegateListener);
         }
     }
 }

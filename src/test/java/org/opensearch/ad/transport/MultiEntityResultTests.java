@@ -67,6 +67,7 @@ import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.action.support.master.AcknowledgedResponse;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
 import org.opensearch.ad.ml.ADModelManager;
@@ -114,7 +115,6 @@ import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.InternalFailure;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.feature.CompositeRetriever;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.model.Entity;
@@ -208,7 +208,7 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(stateManager).getConfig(anyString(), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(stateManager).getConfig(anyString(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         settings = Settings.builder().put(AnomalyDetectorSettings.AD_COOLDOWN_MINUTES.getKey(), TimeValue.timeValueMinutes(5)).build();
 
@@ -453,7 +453,7 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             .build();
         doAnswer(invocation -> {
             ActionListener<GetResponse> listener = invocation.getArgument(1);
-            listener.onResponse(TestHelpers.createGetResponse(detector, detectorId, CommonName.CONFIG_INDEX));
+            listener.onResponse(TestHelpers.createGetResponse(detector, detectorId, ADCommonName.CONFIG_INDEX));
             return null;
         }).when(client).get(any(GetRequest.class), any(ActionListener.class));
 
@@ -761,7 +761,7 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
         ClientUtil clientUtil = mock(ClientUtil.class);
         doAnswer(invocation -> {
             ActionListener<GetResponse> listener = invocation.getArgument(2);
-            listener.onResponse(TestHelpers.createGetResponse(detector, detectorId, CommonName.CONFIG_INDEX));
+            listener.onResponse(TestHelpers.createGetResponse(detector, detectorId, ADCommonName.CONFIG_INDEX));
             return null;
         }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
 
@@ -1230,7 +1230,7 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             listener.onResponse(Optional.of(detector));
             modelNodeInProgress.countDown();
             return null;
-        }).when(modelNodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(modelNodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
         return modelNodeStateManager;
     }
 

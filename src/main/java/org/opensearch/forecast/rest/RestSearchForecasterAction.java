@@ -13,10 +13,11 @@ package org.opensearch.forecast.rest;
 
 import static org.opensearch.timeseries.util.RestHandlerUtils.SEARCH;
 
+import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.transport.SearchForecasterAction;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
-import org.opensearch.timeseries.constant.CommonName;
 
 import com.google.common.collect.ImmutableList;
 
@@ -29,7 +30,7 @@ public class RestSearchForecasterAction extends AbstractForecastSearchAction<For
     private final String SEARCH_FORECASTER_ACTION = "search_forecaster";
 
     public RestSearchForecasterAction() {
-        super(ImmutableList.of(URL_PATH), ImmutableList.of(), CommonName.CONFIG_INDEX, Forecaster.class, SearchForecasterAction.INSTANCE);
+        super(ImmutableList.of(URL_PATH), ImmutableList.of(), ForecastCommonName.CONFIG_INDEX, Forecaster.class, SearchForecasterAction.INSTANCE);
     }
 
     @Override

@@ -48,7 +48,6 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.Job;
@@ -541,7 +540,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             detector.getLastBreakingUIChangeTime()
         );
 
-        deleteIndexWithAdminClient(CommonName.CONFIG_INDEX);
+        deleteIndexWithAdminClient(ADCommonName.CONFIG_INDEX);
 
         TestHelpers
             .assertFailWith(

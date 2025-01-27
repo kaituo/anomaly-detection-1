@@ -22,6 +22,7 @@ import org.opensearch.action.ActionType;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
@@ -82,6 +83,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
     protected TaskProfileRunnerType taskProfileRunner;
     protected ProfileActionType profileAction;
     protected BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser;
+    protected String configIndexName;
 
     public ProfileRunner(
         Client client,
@@ -98,7 +100,8 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
         ProfileName taskProfile,
         ProfileActionType profileAction,
         BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser,
-        TaskProfileRunnerType taskProfileRunner
+        TaskProfileRunnerType taskProfileRunner,
+        String configIndexName
     ) {
         super(requiredSamples);
         this.client = client;
@@ -119,6 +122,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
         this.profileAction = profileAction;
         this.configParser = configParser;
         this.taskProfileRunner = taskProfileRunner;
+        this.configIndexName = configIndexName;
     }
 
     public void profile(String configId, ActionListener<ConfigProfileType> listener, Set<ProfileName> profilesToCollect) {
@@ -134,7 +138,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
         Set<ProfileName> profilesToCollect,
         ActionListener<ConfigProfileType> listener
     ) {
-        GetRequest getConfigRequest = new GetRequest(CommonName.CONFIG_INDEX, configId);
+        GetRequest getConfigRequest = new GetRequest(configIndexName, configId);
         client.get(getConfigRequest, ActionListener.wrap(getConfigResponse -> {
             if (getConfigResponse != null && getConfigResponse.isExists()) {
                 try (
@@ -428,7 +432,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                 long enabledTime = job.getEnabledTime().toEpochMilli();
                 long totalUpdates = profileResponse.getTotalUpdates();
                 ProfileUtil
-                    .confirmRealtimeInitStatus(
+                    .confirmRealtimeResultStatus(
                         config,
                         enabledTime,
                         client,

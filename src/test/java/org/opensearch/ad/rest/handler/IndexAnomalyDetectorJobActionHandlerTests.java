@@ -156,7 +156,6 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
         nodeStateManager = mock(NodeStateManager.class);
 
         adTaskCacheManager = mock(ADTaskCacheManager.class);
-        when(adTaskCacheManager.hasQueriedResultIndex(anyString())).thenReturn(true);
 
         recorder = new ExecuteADResultResponseRecorder(
             anomalyDetectionIndices,
@@ -185,7 +184,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
     @SuppressWarnings("unchecked")
     public void testDelayHCProfile() {
-        when(adTaskManager.isHCRealtimeTaskStartInitializing(anyString())).thenReturn(false);
+        when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(false);
 
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
@@ -194,7 +193,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
         verify(client, times(1)).get(any(), any());
         verify(client, times(1)).execute(any(), any(), any());
         verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
-        verify(adTaskManager, times(1)).isHCRealtimeTaskStartInitializing(anyString());
+        verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(threadPool, times(1)).schedule(any(), any(), any());
         verify(listener, times(1)).onResponse(any());
     }
@@ -212,7 +211,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
             return null;
         }).when(client).execute(any(ADProfileAction.class), any(), any());
 
-        when(adTaskManager.isHCRealtimeTaskStartInitializing(anyString())).thenReturn(true);
+        when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
@@ -221,8 +220,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
         verify(client, times(1)).get(any(), any());
         verify(client, times(2)).execute(any(), any(), any());
         verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
-        verify(adTaskManager, times(1)).isHCRealtimeTaskStartInitializing(anyString());
-        verify(adTaskManager, times(1)).updateLatestRealtimeTaskOnCoordinatingNode(any(), any(), any(), any(), any(), any());
+        verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(threadPool, never()).schedule(any(), any(), any());
         verify(listener, times(1)).onResponse(any());
     }
@@ -238,7 +236,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
             return null;
         }).when(client).execute(any(ADProfileAction.class), any(), any());
 
-        when(adTaskManager.isHCRealtimeTaskStartInitializing(anyString())).thenReturn(true);
+        when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
@@ -247,8 +245,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
         verify(client, times(1)).get(any(), any());
         verify(client, times(2)).execute(any(), any(), any());
         verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
-        verify(adTaskManager, times(1)).isHCRealtimeTaskStartInitializing(anyString());
-        verify(adTaskManager, never()).updateLatestRealtimeTaskOnCoordinatingNode(any(), any(), any(), any(), any(), any());
+        verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(threadPool, never()).schedule(any(), any(), any());
         verify(listener, times(1)).onResponse(any());
     }
@@ -266,16 +263,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
             return null;
         }).when(client).execute(any(ADProfileAction.class), any(), any());
 
-        when(adTaskManager.isHCRealtimeTaskStartInitializing(anyString())).thenReturn(true);
-
-        doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            ActionListener<UpdateResponse> listener = (ActionListener<UpdateResponse>) args[5];
-
-            listener.onFailure(new ResourceNotFoundException(CommonMessages.CAN_NOT_FIND_LATEST_TASK));
-
-            return null;
-        }).when(adTaskManager).updateLatestRealtimeTaskOnCoordinatingNode(any(), any(), any(), any(), any(), any());
+        when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
@@ -284,8 +272,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
         verify(client, times(1)).get(any(), any());
         verify(client, times(2)).execute(any(), any(), any());
         verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
-        verify(adTaskManager, times(1)).isHCRealtimeTaskStartInitializing(anyString());
-        verify(adTaskManager, times(1)).updateLatestRealtimeTaskOnCoordinatingNode(any(), any(), any(), any(), any(), any());
+        verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(adTaskManager, times(1)).removeRealtimeTaskCache(anyString());
         verify(threadPool, never()).schedule(any(), any(), any());
         verify(listener, times(1)).onResponse(any());
@@ -304,16 +291,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
             return null;
         }).when(client).execute(any(ADProfileAction.class), any(), any());
 
-        when(adTaskManager.isHCRealtimeTaskStartInitializing(anyString())).thenReturn(true);
-
-        doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            ActionListener<UpdateResponse> listener = (ActionListener<UpdateResponse>) args[5];
-
-            listener.onFailure(new RuntimeException());
-
-            return null;
-        }).when(adTaskManager).updateLatestRealtimeTaskOnCoordinatingNode(any(), any(), any(), any(), any(), any());
+        when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
@@ -322,8 +300,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
         verify(client, times(1)).get(any(), any());
         verify(client, times(2)).execute(any(), any(), any());
         verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
-        verify(adTaskManager, times(1)).isHCRealtimeTaskStartInitializing(anyString());
-        verify(adTaskManager, times(1)).updateLatestRealtimeTaskOnCoordinatingNode(any(), any(), any(), any(), any(), any());
+        verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(adTaskManager, never()).removeRealtimeTaskCache(anyString());
         verify(adTaskManager, times(1)).skipUpdateRealtimeTask(anyString(), anyString());
         verify(threadPool, never()).schedule(any(), any(), any());

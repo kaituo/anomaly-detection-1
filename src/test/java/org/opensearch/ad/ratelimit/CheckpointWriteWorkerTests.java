@@ -383,7 +383,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         worker.write(state, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
@@ -395,7 +395,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         List<ModelState<ThresholdedRandomCutForest>> states = new ArrayList<>();
         states.add(state);
@@ -409,7 +409,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onFailure(new RuntimeException());
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         worker.write(state, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());

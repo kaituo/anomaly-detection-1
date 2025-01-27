@@ -51,6 +51,7 @@ import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.GroupedActionListener;
 import org.opensearch.action.support.IndicesOptions;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.AdminClient;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.LocalNodeClusterManagerListener;
@@ -136,6 +137,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
     private NamedXContentRegistry xContentRegistry;
     protected BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser;
     protected String customResultIndexPrefix;
+    protected String configIndexName;
 
     protected class IndexState {
         // keep track of whether the mapping version is up-to-date
@@ -167,7 +169,8 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         String resultMapping,
         NamedXContentRegistry xContentRegistry,
         BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser,
-        String customResultIndexPrefix
+        String customResultIndexPrefix,
+        String configIndexName
     )
         throws IOException {
         this.client = client;
@@ -192,6 +195,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         this.xContentRegistry = xContentRegistry;
         this.configParser = configParser;
         this.customResultIndexPrefix = customResultIndexPrefix;
+        this.configIndexName = configIndexName;
     }
 
     /**
@@ -449,7 +453,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      * @throws IOException IOException from {@link IndexManagement#getConfigMappings}
      */
     public void initConfigIndex(ActionListener<CreateIndexResponse> actionListener) throws IOException {
-        CreateIndexRequest request = new CreateIndexRequest(CommonName.CONFIG_INDEX)
+        CreateIndexRequest request = new CreateIndexRequest(configIndexName)
             .mapping(getConfigMappings(), XContentType.JSON)
             .settings(settings);
         adminClient.indices().create(request, actionListener);
@@ -461,7 +465,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      * @return true if config index exists
      */
     public boolean doesConfigIndexExist() {
-        return doesIndexExist(CommonName.CONFIG_INDEX);
+        return doesIndexExist(configIndexName);
     }
 
     /**

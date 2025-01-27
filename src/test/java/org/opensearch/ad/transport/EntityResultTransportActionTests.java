@@ -208,7 +208,7 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(stateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(stateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         cacheMissEntity = "0.0.0.1";
         cacheMissData = new double[] { 0.1 };
@@ -318,7 +318,7 @@ public class EntityResultTransportActionTests extends AbstractTimeSeriesTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(stateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(stateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         PlainActionFuture<AcknowledgedResponse> future = PlainActionFuture.newFuture();
 

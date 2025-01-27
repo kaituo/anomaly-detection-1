@@ -34,6 +34,8 @@ import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.IndicesOptions;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.action.support.replication.ReplicationResponse;
+import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -46,6 +48,7 @@ import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
@@ -146,6 +149,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     protected final Settings settings;
     protected final ValidationAspect configValidationAspect;
     protected boolean breakingUIChange;
+    protected final String configIndexName;
 
     public AbstractTimeSeriesActionHandler(
         Config config,
@@ -175,7 +179,8 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         Integer maxHCConfigs,
         Clock clock,
         Settings settings,
-        ValidationAspect configValidationAspect
+        ValidationAspect configValidationAspect,
+        String configIndexName
     ) {
         this.config = config;
         this.timeSeriesIndices = timeSeriesIndices;
@@ -205,6 +210,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         this.handler = new ConfigUpdateConfirmer<>(taskManager, transportService);
         this.configValidationAspect = configValidationAspect;
         this.breakingUIChange = false;
+        this.configIndexName = configIndexName;
     }
 
     /**
@@ -418,7 +424,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     }
 
     protected void updateConfig(String id, boolean indexingDryRun, ActionListener<T> listener) {
-        GetRequest request = new GetRequest(CommonName.CONFIG_INDEX, id);
+        GetRequest request = new GetRequest(configIndexName, id);
         client
             .get(
                 request,
@@ -486,7 +492,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
             QueryBuilder query = QueryBuilders.boolQuery().filter(QueryBuilders.existsQuery(Config.CATEGORY_FIELD));
 
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(query).size(0).timeout(requestTimeout);
-            SearchRequest searchRequest = new SearchRequest(CommonName.CONFIG_INDEX).source(searchSourceBuilder);
+            SearchRequest searchRequest = new SearchRequest(configIndexName).source(searchSourceBuilder);
             client
                 .search(
                     searchRequest,
@@ -512,7 +518,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                     QueryBuilder query = QueryBuilders.matchAllQuery();
                     SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(query).size(0).timeout(requestTimeout);
 
-                    SearchRequest searchRequest = new SearchRequest(CommonName.CONFIG_INDEX).source(searchSourceBuilder);
+                    SearchRequest searchRequest = new SearchRequest(configIndexName).source(searchSourceBuilder);
 
                     client
                         .search(
@@ -727,7 +733,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                 boolQueryBuilder.mustNot(QueryBuilders.termQuery(RestHandlerUtils._ID, configId));
             }
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQueryBuilder).timeout(requestTimeout);
-            SearchRequest searchRequest = new SearchRequest(CommonName.CONFIG_INDEX).source(searchSourceBuilder);
+            SearchRequest searchRequest = new SearchRequest(configIndexName).source(searchSourceBuilder);
             client
                 .search(
                     searchRequest,
@@ -787,7 +793,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
 
     protected void indexConfig(String id, ActionListener<T> listener) throws IOException {
         Config copiedConfig = copyConfig(user, config);
-        IndexRequest indexRequest = new IndexRequest(CommonName.CONFIG_INDEX)
+        IndexRequest indexRequest = new IndexRequest(config instanceof AnomalyDetector ? configIndexName : ForecastCommonName.CONFIG_INDEX)
             .setRefreshPolicy(refreshPolicy)
             .source(copiedConfig.toXContent(XContentFactory.jsonBuilder(), XCONTENT_WITH_TYPE))
             .setIfSeqNo(seqNo)
@@ -822,14 +828,14 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
 
     protected void onCreateMappingsResponse(CreateIndexResponse response, boolean indexingDryRun, ActionListener<T> listener) {
         if (response.isAcknowledged()) {
-            logger.info("Created {} with mappings.", CommonName.CONFIG_INDEX);
+            logger.info("Created {} with mappings.", configIndexName);
             prepareConfigIndexing(indexingDryRun, listener);
         } else {
-            logger.warn("Created {} with mappings call not acknowledged.", CommonName.CONFIG_INDEX);
+            logger.warn("Created {} with mappings call not acknowledged.", configIndexName);
             listener
                 .onFailure(
                     new OpenSearchStatusException(
-                        "Created " + CommonName.CONFIG_INDEX + "with mappings call not acknowledged.",
+                        "Created " + configIndexName + "with mappings call not acknowledged.",
                         RestStatus.INTERNAL_SERVER_ERROR
                     )
                 );

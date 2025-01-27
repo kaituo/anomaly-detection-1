@@ -40,6 +40,7 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
@@ -90,6 +91,7 @@ import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
@@ -124,6 +126,8 @@ import org.opensearch.timeseries.model.EntityTaskProfile;
 import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
+import org.opensearch.timeseries.task.RealtimeTaskCache;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.transport.StatsNodeResponse;
@@ -1740,36 +1744,6 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         throw new IllegalArgumentException("Fail to parse to Entity for single flow detector");
     }
 
-    /**
-     * Get AD task with task id and execute listener.
-     * @param taskId task id
-     * @param listener action listener
-     */
-    public void getADTask(String taskId, ActionListener<Optional<ADTask>> listener) {
-        GetRequest request = new GetRequest(DETECTION_STATE_INDEX, taskId);
-        client.get(request, ActionListener.wrap(r -> {
-            if (r != null && r.isExists()) {
-                try (XContentParser parser = createXContentParserFromRegistry(xContentRegistry, r.getSourceAsBytesRef())) {
-                    ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                    ADTask adTask = ADTask.parse(parser, r.getId());
-                    listener.onResponse(Optional.ofNullable(adTask));
-                } catch (Exception e) {
-                    logger.error("Failed to parse AD task " + r.getId(), e);
-                    listener.onFailure(e);
-                }
-            } else {
-                listener.onResponse(Optional.empty());
-            }
-        }, e -> {
-            if (e instanceof IndexNotFoundException) {
-                listener.onResponse(Optional.empty());
-            } else {
-                logger.error("Failed to get AD task " + taskId, e);
-                listener.onFailure(e);
-            }
-        }));
-    }
-
     public int getLocalAdUsedBatchTaskSlot() {
         return taskCacheManager.getTotalBatchTaskCount();
     }
@@ -1952,5 +1926,19 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
             transportService,
             listener
         );
+    }
+
+    @Override
+    protected String triageState(Boolean hasResult, String error, Long rcfTotalUpdates) {
+        if (rcfTotalUpdates < TimeSeriesSettings.NUM_MIN_SAMPLES) {
+            return TaskState.INIT.name();
+        } else {
+            return TaskState.RUNNING.name();
+        }
+    }
+
+    @Override
+    protected boolean forbidOverrideChange(String configId, String newState, String oldState) {
+        return TaskState.INIT.name().equals(newState) && TaskState.RUNNING.name().equals(oldState);
     }
 }

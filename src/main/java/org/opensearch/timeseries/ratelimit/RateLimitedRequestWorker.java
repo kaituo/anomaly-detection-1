@@ -182,6 +182,8 @@ public abstract class RateLimitedRequestWorker<RequestType extends QueuedRequest
     // is to separate requests from different detectors and fairly process requests
     // from each detector.
     protected final ConcurrentSkipListMap<String, RequestQueue> requestQueues;
+    // store config ids with in-flight requests with expired time
+    protected final Set<String> inflightConfigs;
     private String lastSelectedRequestQueueId;
     protected Random random;
     private CircuitBreakerService circuitBreakerService;
@@ -247,6 +249,7 @@ public abstract class RateLimitedRequestWorker<RequestType extends QueuedRequest
         this.stateTtl = stateTtl;
         this.nodeStateManager = nodeStateManager;
         this.context = context;
+        this.inflightConfigs = new HashSet<>();
     }
 
     public String getWorkerName() {
@@ -585,9 +588,9 @@ public abstract class RateLimitedRequestWorker<RequestType extends QueuedRequest
     /**
      *
      * @param configId Config Id
-     * @return whether there is any unfinished request belonging to a configId
+     * @return whether there is any request in request queue belonging to a configId
      */
-    public boolean hasConfigId(String configId) {
+    public boolean hasConfigIdInQueue(String configId) {
         for (Map.Entry<String, RequestQueue> requestQueueEntry : requestQueues.entrySet()) {
             String requestId = requestQueueEntry.getKey();
             if (requestId.equals(RequestPriority.LOW.name()) || requestId.equals(RequestPriority.HIGH.name())) {
@@ -597,12 +600,16 @@ public abstract class RateLimitedRequestWorker<RequestType extends QueuedRequest
                 }
             } else {
                 // requestId is config Id
-                if (requestId.equals(configId)) {
+                if (!requestQueueEntry.getValue().isEmpty()) {
                     return true;
                 }
             }
         }
         return false;
+    }
+
+    public boolean hasInflightRequest(String configId) {
+        return inflightConfigs.contains(configId);
     }
 
     /**

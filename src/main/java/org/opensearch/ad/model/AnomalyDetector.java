@@ -237,7 +237,7 @@ public class AnomalyDetector extends Config {
 
         this.detectorType = isHC(categoryFields) ? MULTI_ENTITY.name() : SINGLE_ENTITY.name();
 
-        this.rules = rules == null || rules.isEmpty() ? getDefaultRule() : rules;
+        this.rules = rules == null ? getDefaultRule() : rules;
     }
 
     /*
@@ -709,20 +709,6 @@ public class AnomalyDetector extends Config {
             }
         }
         return rules;
-    }
-
-    private static Integer onlyParseNumberValue(XContentParser parser) throws IOException {
-        if (parser.currentToken() == XContentParser.Token.VALUE_NUMBER) {
-            return parser.intValue();
-        }
-        return null;
-    }
-
-    private static Boolean onlyParseBooleanValue(XContentParser parser) throws IOException {
-        if (parser.currentToken() == XContentParser.Token.VALUE_BOOLEAN) {
-            return parser.booleanValue();
-        }
-        return null;
     }
 
     /**

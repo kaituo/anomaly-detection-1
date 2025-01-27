@@ -768,13 +768,13 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector2));
             return null;
-        }).when(nodeStateManager).getConfig(eq(detectorId2), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(eq(detectorId2), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         doAnswer(invocation -> {
             ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(2);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getConfig(eq(detectorId), eq(AnalysisType.AD), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(eq(detectorId), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         doAnswer(invocation -> {
             MultiGetItemResponse[] items = new MultiGetItemResponse[2];

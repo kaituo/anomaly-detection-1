@@ -31,6 +31,7 @@ import org.opensearch.action.get.MultiGetRequest;
 import org.opensearch.action.get.MultiGetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.Client;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.CheckedConsumer;
@@ -61,6 +62,7 @@ import org.opensearch.timeseries.model.EntityProfile;
 import org.opensearch.timeseries.model.EntityProfileName;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.model.ProfileName;
+import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
@@ -101,6 +103,7 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
     private final String singleStreamHistoricalTaskname;
     private final String hcHistoricalTaskName;
     private final TaskProfileRunnerType taskProfileRunner;
+    protected final String configIndexName;
 
     public BaseGetConfigTransportAction(
         TransportService transportService,
@@ -121,7 +124,8 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         String hcHistoricalTaskName,
         String singleStreamHistoricalTaskname,
         Setting<Boolean> filterByBackendRoleEnableSetting,
-        TaskProfileRunnerType taskProfileRunner
+        TaskProfileRunnerType taskProfileRunner,
+        String configIndexName
     ) {
         super(getConfigAction, transportService, actionFilters, GetConfigRequest::new);
         this.clusterService = clusterService;
@@ -154,6 +158,7 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         this.hcHistoricalTaskName = hcHistoricalTaskName;
         this.singleStreamHistoricalTaskname = singleStreamHistoricalTaskname;
         this.taskProfileRunner = taskProfileRunner;
+        this.configIndexName = configIndexName;
     }
 
     @Override
@@ -188,7 +193,7 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         Optional<TaskClass> historicalConfigTask,
         ActionListener<GetConfigResponseType> listener
     ) {
-        MultiGetRequest.Item configItem = new MultiGetRequest.Item(CommonName.CONFIG_INDEX, configID);
+        MultiGetRequest.Item configItem = new MultiGetRequest.Item(configIndexName, configID);
         MultiGetRequest multiGetRequest = new MultiGetRequest().add(configItem);
         if (returnJob) {
             MultiGetRequest.Item adJobItem = new MultiGetRequest.Item(CommonName.JOB_INDEX, configID);
@@ -255,7 +260,7 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
                             }
                         }
                         getConfigAndJob(configID, returnJob, returnTask, realtimeTask, historicalTask, listener);
-                    }, transportService, true, 2, listener);
+                    }, transportService, false, 2, listener); // false means not reset task state to stopped state
                 } else {
                     getConfigAndJob(configID, returnJob, returnTask, Optional.empty(), Optional.empty(), listener);
                 }
@@ -286,7 +291,7 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
                 long primaryTerm = 0;
 
                 for (MultiGetItemResponse response : responses) {
-                    if (CommonName.CONFIG_INDEX.equals(response.getIndex())) {
+                    if (configIndexName.equals(response.getIndex())) {
                         if (response.getResponse() == null || !response.getResponse().isExists()) {
                             listener
                                 .onFailure(
@@ -329,6 +334,10 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
                         }
                     }
                 }
+
+                adjustState(realtimeTask, job);
+                adjustState(historicalTask, job);
+
                 listener
                     .onResponse(
                         createResponse(
@@ -499,6 +508,8 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
             }
         }, exception -> { listener.onFailure(exception); });
     }
+
+    protected abstract void adjustState(Optional<TaskClass> taskOptional, Job job);
 
     protected abstract EntityProfileRunnerType createEntityProfileRunner(
         Client client,
