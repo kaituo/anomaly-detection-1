@@ -13,6 +13,7 @@ package org.opensearch.forecast.rest;
 
 import static org.opensearch.timeseries.util.RestHandlerUtils.SEARCH;
 
+import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.transport.SearchForecasterAction;
@@ -28,13 +29,14 @@ public class RestSearchForecasterAction extends AbstractForecastSearchAction<For
     private static final String URL_PATH = TimeSeriesAnalyticsPlugin.FORECAST_FORECASTERS_URI + "/" + SEARCH;
     private final String SEARCH_FORECASTER_ACTION = "search_forecaster";
 
-    public RestSearchForecasterAction() {
+    public RestSearchForecasterAction(Settings settings) {
         super(
             ImmutableList.of(URL_PATH),
             ImmutableList.of(),
             ForecastCommonName.CONFIG_INDEX,
             Forecaster.class,
-            SearchForecasterAction.INSTANCE
+            SearchForecasterAction.INSTANCE,
+            settings
         );
     }
 

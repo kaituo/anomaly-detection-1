@@ -14,13 +14,16 @@ package org.opensearch.timeseries.transport;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.junit.After;
 import org.junit.AfterClass;
@@ -37,22 +40,24 @@ import org.opensearch.ad.transport.ADResultBulkTransportAction;
 import org.opensearch.ad.transport.AnomalyResultTests;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.io.stream.BytesStreamOutput;
+import org.opensearch.common.lease.Releasable;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.index.IndexingPressure;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
     private ADResultBulkTransportAction resultBulk;
     private TransportService transportService;
     private ClusterService clusterService;
     private IndexingPressure indexingPressure;
-    private Client client;
+    private DataAccess dataAccess;
     private String detectorId;
 
     @BeforeClass
@@ -83,10 +88,17 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
         ActionFilters actionFilters = mock(ActionFilters.class);
         indexingPressure = mock(IndexingPressure.class);
 
-        client = mock(Client.class);
+        dataAccess = mock(DataAccess.class);
         detectorId = randomAlphaOfLength(5);
 
-        resultBulk = new ADResultBulkTransportAction(transportService, actionFilters, indexingPressure, settings, clusterService, client);
+        resultBulk = new ADResultBulkTransportAction(
+            transportService,
+            actionFilters,
+            indexingPressure,
+            settings,
+            dataAccess,
+            clusterService
+        );
     }
 
     @Override
@@ -97,11 +109,45 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
     }
 
     @SuppressWarnings("unchecked")
+    public void testBindsDataSourceRoutingBeforeBulkWrite() {
+        when(indexingPressure.getCurrentCombinedCoordinatingAndPrimaryBytes()).thenReturn(0L);
+        when(indexingPressure.getCurrentReplicaBytes()).thenReturn(0L);
+
+        String tenantId = "account-1:application-1:workspace-1";
+        String dataSourceId = "data-source-1";
+        AtomicBoolean routingActive = new AtomicBoolean(false);
+        ADResultBulkRequest originalRequest = new ADResultBulkRequest(tenantId, dataSourceId);
+        originalRequest.add(TestHelpers.randomADResultWriteRequest(detectorId, 0.8d, 0d));
+
+        doAnswer(invocation -> {
+            routingActive.set(true);
+            return (Releasable) () -> routingActive.set(false);
+        }).when(dataAccess).bindRouting(tenantId, dataSourceId);
+
+        doAnswer(invocation -> {
+            assertTrue(routingActive.get());
+            TenantContext tenantContext = invocation.getArgument(1);
+            assertEquals(tenantId, tenantContext.getTenantId());
+            assertEquals(dataSourceId, tenantContext.getDataSourceId());
+            ActionListener<BulkResponse> listener = invocation.getArgument(2);
+            listener.onResponse(null);
+            return null;
+        }).when(dataAccess).bulk(any(), any(), any());
+
+        PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
+        resultBulk.doExecute(null, originalRequest, future);
+
+        future.actionGet();
+        assertFalse(routingActive.get());
+        verify(dataAccess).bindRouting(eq(tenantId), eq(dataSourceId));
+    }
+
+    @SuppressWarnings("unchecked")
     public void testSendAll() {
         when(indexingPressure.getCurrentCombinedCoordinatingAndPrimaryBytes()).thenReturn(0L);
         when(indexingPressure.getCurrentReplicaBytes()).thenReturn(0L);
 
-        ADResultBulkRequest originalRequest = new ADResultBulkRequest();
+        ADResultBulkRequest originalRequest = new ADResultBulkRequest((String) null);
         originalRequest.add(TestHelpers.randomADResultWriteRequest(detectorId, 0.8d, 0d));
         originalRequest.add(TestHelpers.randomADResultWriteRequest(detectorId, 8d, 0.2d));
 
@@ -112,15 +158,15 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
                 args.length == 3
             );
 
-            assertTrue(args[1] instanceof BulkRequest);
+            assertTrue(args[0] instanceof BulkRequest);
             assertTrue(args[2] instanceof ActionListener);
-            BulkRequest request = (BulkRequest) args[1];
+            BulkRequest request = (BulkRequest) args[0];
             ActionListener<BulkResponse> listener = (ActionListener<BulkResponse>) args[2];
 
             assertEquals(2, request.requests().size());
             listener.onResponse(null);
             return null;
-        }).when(client).execute(any(), any(), any());
+        }).when(dataAccess).bulk(any(), any(), any());
 
         PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
@@ -134,7 +180,7 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
         when(indexingPressure.getCurrentCombinedCoordinatingAndPrimaryBytes()).thenReturn(1000L);
         when(indexingPressure.getCurrentReplicaBytes()).thenReturn(24L);
 
-        ADResultBulkRequest originalRequest = new ADResultBulkRequest();
+        ADResultBulkRequest originalRequest = new ADResultBulkRequest((String) null);
         originalRequest.add(TestHelpers.randomADResultWriteRequest(detectorId, 0.8d, 0d));
         originalRequest.add(TestHelpers.randomADResultWriteRequest(detectorId, 8d, 0.2d));
 
@@ -145,15 +191,15 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
                 args.length == 3
             );
 
-            assertTrue(args[1] instanceof BulkRequest);
+            assertTrue(args[0] instanceof BulkRequest);
             assertTrue(args[2] instanceof ActionListener);
-            BulkRequest request = (BulkRequest) args[1];
+            BulkRequest request = (BulkRequest) args[0];
             ActionListener<BulkResponse> listener = (ActionListener<BulkResponse>) args[2];
 
             assertEquals(1, request.requests().size());
             listener.onResponse(null);
             return null;
-        }).when(client).execute(any(), any(), any());
+        }).when(dataAccess).bulk(any(), any(), any());
 
         PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
@@ -167,7 +213,7 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
         when(indexingPressure.getCurrentCombinedCoordinatingAndPrimaryBytes()).thenReturn(400L);
         when(indexingPressure.getCurrentReplicaBytes()).thenReturn(421L);
 
-        ADResultBulkRequest originalRequest = new ADResultBulkRequest();
+        ADResultBulkRequest originalRequest = new ADResultBulkRequest((String) null);
         for (int i = 0; i < 1000; i++) {
             originalRequest.add(TestHelpers.randomADResultWriteRequest(detectorId, 0.8d, 0d));
         }
@@ -181,9 +227,9 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
                 args.length == 3
             );
 
-            assertTrue(args[1] instanceof BulkRequest);
+            assertTrue(args[0] instanceof BulkRequest);
             assertTrue(args[2] instanceof ActionListener);
-            BulkRequest request = (BulkRequest) args[1];
+            BulkRequest request = (BulkRequest) args[0];
             ActionListener<BulkResponse> listener = (ActionListener<BulkResponse>) args[2];
 
             int size = request.requests().size();
@@ -192,7 +238,7 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
             assertTrue(String.format(Locale.ROOT, "size is actually %d", size), size < 500);
             listener.onResponse(null);
             return null;
-        }).when(client).execute(any(), any(), any());
+        }).when(dataAccess).bulk(any(), any(), any());
 
         PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
         resultBulk.doExecute(null, originalRequest, future);
@@ -201,7 +247,7 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
     }
 
     public void testSerialzationRequest() throws IOException {
-        ADResultBulkRequest request = new ADResultBulkRequest();
+        ADResultBulkRequest request = new ADResultBulkRequest((String) null);
         request.add(TestHelpers.randomADResultWriteRequest(detectorId, 0.8d, 0d));
         request.add(TestHelpers.randomADResultWriteRequest(detectorId, 8d, 0.2d));
         BytesStreamOutput output = new BytesStreamOutput();
@@ -213,7 +259,7 @@ public class ADResultBulkTransportActionTests extends AbstractTimeSeriesTest {
     }
 
     public void testValidateRequest() {
-        ActionRequestValidationException e = new ADResultBulkRequest().validate();
+        ActionRequestValidationException e = new ADResultBulkRequest((String) null).validate();
         assertThat(e.validationErrors(), hasItem(CommonMessages.NO_REQUESTS_ADDED_ERR));
     }
 }

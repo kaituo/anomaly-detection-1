@@ -5,14 +5,19 @@
 
 package org.opensearch.ad.e2e;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import org.apache.hc.core5.http.HttpHost;
+import org.junit.After;
 import org.junit.BeforeClass;
 import org.opensearch.ad.AbstractADSyntheticDataTest;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.RestClient;
 import org.opensearch.timeseries.AbstractSyntheticDataTest;
 import org.opensearch.timeseries.dataprocessor.ImputationMethod;
@@ -20,6 +25,7 @@ import org.opensearch.timeseries.dataprocessor.ImputationMethod;
 import com.google.gson.JsonObject;
 
 public abstract class MissingIT extends AbstractADSyntheticDataTest {
+    private static final String MODEL_CLUSTER_PROPERTY = "tests.model.rest.cluster";
     protected static double min = 200.0;
     protected static double max = 240.0;
     protected static int dataSize = 400;
@@ -37,11 +43,20 @@ public abstract class MissingIT extends AbstractADSyntheticDataTest {
     public int continuousImputeEndIndex = 35;
 
     protected Map<String, Double> lastSeen = new HashMap<>();
+    private RestClient modelDataClient;
 
     @BeforeClass
     public static void setUpOnce() {
         // Generate the list of doubles
         randomDoubles = generateUniformRandomDoubles(dataSize, min, max);
+    }
+
+    @After
+    public void closeModelDataClient() throws IOException {
+        if (modelDataClient != null) {
+            modelDataClient.close();
+            modelDataClient = null;
+        }
     }
 
     protected void verifyImputation(
@@ -133,13 +148,17 @@ public abstract class MissingIT extends AbstractADSyntheticDataTest {
         Instant trainTime = Instant.ofEpochMilli(trainTimeMillis);
 
         Duration windowDelay = getWindowDelay(trainTimeMillis);
-        String detector = genDetector(trainTestSplit, windowDelay.toMinutes(), hc, imputation, trainTimeMillis, name);
+        String detector = genDetector(trainTestSplit, windowDelay.toMinutes(), hc, imputation, trainTimeMillis, uniqueDetectorName(name));
 
         RestClient client = client();
         String detectorId = createDetector(client, detector);
         LOG.info("Created detector {}", detectorId);
 
         return new TrainResult(detectorId, data, trainTestSplit * numberOfEntities, windowDelay, trainTime, "timestamp");
+    }
+
+    protected String uniqueDetectorName(String baseName) {
+        return baseName + "-" + randomAlphaOfLength(6).toLowerCase(Locale.ROOT);
     }
 
     protected TrainResult createDetector(
@@ -167,8 +186,69 @@ public abstract class MissingIT extends AbstractADSyntheticDataTest {
         return Duration.ofMinutes(windowDelayMinutes);
     }
 
+    protected RestClient ingestClient() throws IOException {
+        return client();
+    }
+
+    protected String datasetName() {
+        return datasetName;
+    }
+
+    protected String customResultIndexField() {
+        String tenantId = tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            return "";
+        }
+        String resultIndex = ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + randomAlphaOfLength(10).toLowerCase(Locale.ROOT);
+        return String.format(Locale.ROOT, "\"result_index\": \"%s\",", resultIndex);
+    }
+
+    protected final RestClient modelDataClient() throws IOException {
+        if (modelDataClient == null) {
+            modelDataClient = buildClient(restClientSettings(), modelHosts());
+        }
+        return modelDataClient;
+    }
+
+    private HttpHost[] modelHosts() {
+        String cluster = System.getProperty(MODEL_CLUSTER_PROPERTY);
+        if (cluster == null || cluster.isBlank()) {
+            throw new IllegalStateException("Must specify [" + MODEL_CLUSTER_PROPERTY + "] to run " + getClass().getSimpleName());
+        }
+
+        String[] stringUrls = cluster.split(",");
+        HttpHost[] hosts = new HttpHost[stringUrls.length];
+        for (int i = 0; i < stringUrls.length; i++) {
+            String stringUrl = stringUrls[i].trim();
+            int portSeparator = stringUrl.lastIndexOf(':');
+            if (portSeparator < 0) {
+                throw new IllegalArgumentException("Illegal cluster url [" + stringUrl + "]");
+            }
+            String host = stringUrl.substring(0, portSeparator);
+            int port = Integer.parseInt(stringUrl.substring(portSeparator + 1));
+            hosts[i] = buildHttpHost(host, port);
+        }
+        return hosts;
+    }
+
     protected void ingestUniformSingleFeatureData(int ingestDataSize, List<JsonObject> data) throws Exception {
-        ingestUniformSingleFeatureData(ingestDataSize, data, datasetName, categoricalField);
+        String mapping = String
+            .format(
+                Locale.ROOT,
+                "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\":"
+                    + "\"date\""
+                    + "},"
+                    + " \"data\": { \"type\": \"double\" },"
+                    + "\"%s\": { \"type\": \"keyword\"} } } }",
+                categoricalField
+            );
+
+        RestClient client = ingestClient();
+        if (ingestDataSize <= 0) {
+            bulkIndexData(data, datasetName(), client, mapping, data.size());
+        } else {
+            bulkIndexData(data, datasetName(), client, mapping, ingestDataSize);
+        }
     }
 
     protected JsonObject createJsonObject(long timestamp, String component, double dataValue) {

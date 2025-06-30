@@ -25,46 +25,82 @@ public class ResultBulkResponse extends ActionResponse {
     public static final String RETRY_REQUESTS_JSON_KEY = "retry_requests";
 
     private List<IndexRequest> retryRequests;
+    private List<IndexRequest> missingResultIndexRequests;
 
     /**
      *
      * @param retryRequests a list of requests to retry
      */
     public ResultBulkResponse(List<IndexRequest> retryRequests) {
+        this(retryRequests, null);
+    }
+
+    /**
+     *
+     * @param retryRequests a list of transiently failed requests to retry
+     * @param missingResultIndexRequests a list of requests that failed because the target result index or alias is missing
+     */
+    public ResultBulkResponse(List<IndexRequest> retryRequests, List<IndexRequest> missingResultIndexRequests) {
         this.retryRequests = retryRequests;
+        this.missingResultIndexRequests = missingResultIndexRequests;
     }
 
     public ResultBulkResponse() {
         this.retryRequests = null;
+        this.missingResultIndexRequests = null;
     }
 
     public ResultBulkResponse(StreamInput in) throws IOException {
+        retryRequests = readIndexRequests(in);
+        missingResultIndexRequests = readIndexRequests(in);
+    }
+
+    private List<IndexRequest> readIndexRequests(StreamInput in) throws IOException {
         int size = in.readInt();
         if (size > 0) {
-            retryRequests = new ArrayList<>(size);
+            List<IndexRequest> requests = new ArrayList<>(size);
             for (int i = 0; i < size; i++) {
-                retryRequests.add(new IndexRequest(in));
+                requests.add(new IndexRequest(in));
             }
+            return requests;
         }
+        return null;
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
-        if (retryRequests == null || retryRequests.size() == 0) {
+        writeIndexRequests(out, retryRequests);
+        writeIndexRequests(out, missingResultIndexRequests);
+    }
+
+    private void writeIndexRequests(StreamOutput out, List<IndexRequest> requests) throws IOException {
+        if (requests == null || requests.size() == 0) {
             out.writeInt(0);
         } else {
-            out.writeInt(retryRequests.size());
-            for (IndexRequest result : retryRequests) {
+            out.writeInt(requests.size());
+            for (IndexRequest result : requests) {
                 result.writeTo(out);
             }
         }
     }
 
     public boolean hasFailures() {
+        return hasRetryRequests() || hasMissingResultIndexRequests();
+    }
+
+    public boolean hasRetryRequests() {
         return retryRequests != null && retryRequests.size() > 0;
+    }
+
+    public boolean hasMissingResultIndexRequests() {
+        return missingResultIndexRequests != null && missingResultIndexRequests.size() > 0;
     }
 
     public Optional<List<IndexRequest>> getRetryRequests() {
         return Optional.ofNullable(retryRequests);
+    }
+
+    public Optional<List<IndexRequest>> getMissingResultIndexRequests() {
+        return Optional.ofNullable(missingResultIndexRequests);
     }
 }

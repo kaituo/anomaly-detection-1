@@ -12,8 +12,8 @@ import org.opensearch.common.inject.Inject;
 import org.opensearch.forecast.caching.ForecastCacheBuffer;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
 import org.opensearch.forecast.ml.ForecastColdStart;
 import org.opensearch.forecast.ml.ForecastModelManager;
@@ -29,11 +29,11 @@ import org.opensearch.forecast.ratelimit.ForecastColdEntityWorker;
 import org.opensearch.forecast.ratelimit.ForecastColdStartWorker;
 import org.opensearch.forecast.ratelimit.ForecastResultWriteRequest;
 import org.opensearch.forecast.ratelimit.ForecastSaveResultStrategy;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
@@ -44,7 +44,7 @@ import org.opensearch.transport.TransportService;
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 
 public class ForecastSingleStreamResultTransportAction extends
-    AbstractSingleStreamResultTransportAction<RCFCaster, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastCheckpointMaintainWorker, ForecastCacheBuffer, ForecastPriorityCache, ForecastCacheProvider, ForecastResult, RCFCasterResult, ForecastColdStart, ForecastModelManager, ForecastPriorityCache, ForecastSaveResultStrategy, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastColdStartWorker, ForecastRealTimeInferencer, ForecastCheckpointReadWorker, ForecastResultWriteRequest, ForecastColdEntityWorker> {
+    AbstractSingleStreamResultTransportAction<RCFCaster, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastCheckpointMaintainWorker, ForecastCacheBuffer, ForecastPriorityCache, ForecastCacheProvider, ForecastResult, RCFCasterResult, ForecastColdStart, ForecastModelManager, ForecastPriorityCache, ForecastSaveResultStrategy, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastColdStartWorker, ForecastRealTimeInferencer, ForecastCheckpointReadWorker, ForecastResultWriteRequest, ForecastColdEntityWorker> {
 
     private static final Logger LOG = LogManager.getLogger(ForecastSingleStreamResultTransportAction.class);
 
@@ -54,7 +54,7 @@ public class ForecastSingleStreamResultTransportAction extends
         ActionFilters actionFilters,
         CircuitBreakerService circuitBreakerService,
         ForecastCacheProvider cache,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         ForecastCheckpointReadWorker checkpointReadQueue,
         ForecastRealTimeInferencer inferencer,
         ThreadPool threadPool,
@@ -71,7 +71,7 @@ public class ForecastSingleStreamResultTransportAction extends
             AnalysisType.FORECAST,
             inferencer,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             coldEntityWorker
         );
     }
@@ -84,7 +84,8 @@ public class ForecastSingleStreamResultTransportAction extends
             RequestPriority.MEDIUM,
             result,
             config.getCustomResultIndexOrAlias(),
-            config.getFlattenResultIndexAlias()
+            config.getFlattenResultIndexAlias(),
+            config.getDataSourceId()
         );
     }
 }

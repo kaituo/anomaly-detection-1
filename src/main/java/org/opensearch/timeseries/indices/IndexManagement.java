@@ -11,12 +11,12 @@
 
 package org.opensearch.timeseries.indices;
 
-import static org.opensearch.ad.indices.ADIndexManagement.getFlattenedResultMappings;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
+import static org.opensearch.timeseries.util.IndexUtils.parseResultFieldConfigs;
+import static org.opensearch.timeseries.util.IndexUtils.validateMappingFields;
 import static org.opensearch.timeseries.util.RestHandlerUtils.createXContentParserFromRegistry;
 
 import java.io.IOException;
-import java.net.URL;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -24,10 +24,11 @@ import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.apache.logging.log4j.LogManager;
@@ -59,12 +60,10 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
-import org.opensearch.common.xcontent.XContentHelper;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.commons.InjectSecurity;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.Strings;
-import org.opensearch.core.common.bytes.BytesArray;
 import org.opensearch.core.common.unit.ByteSizeUnit;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
@@ -77,6 +76,9 @@ import org.opensearch.search.SearchHit;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.threadpool.Scheduler;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
@@ -85,16 +87,17 @@ import org.opensearch.timeseries.constant.CommonValue;
 import org.opensearch.timeseries.function.BiCheckedFunction;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.model.Config;
-import org.opensearch.timeseries.settings.TimeSeriesSettings;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.rest.handler.store.DataManagement;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 import org.opensearch.transport.client.AdminClient;
 import org.opensearch.transport.client.Client;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.base.Charsets;
-import com.google.common.io.Resources;
-
-public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSeriesIndex> implements LocalNodeClusterManagerListener {
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant; org.opensearch.cluster.service.ClusterService#state usage: Only meant to be used in single-tenant.")
+public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSeriesIndex>
+    implements
+        LocalNodeClusterManagerListener,
+        DataManagement<IndexType> {
     private static final Logger logger = LogManager.getLogger(IndexManagement.class);
 
     // minimum shards of the job index
@@ -110,7 +113,8 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
     protected final Client client;
     protected final AdminClient adminClient;
     protected final ThreadPool threadPool;
-    protected DiscoveryNodeFilterer nodeFilter;
+    protected DiscoveryNodeSelector nodeFilter;
+    protected final DataAccess dataAccess;
     // index settings
     protected final Settings settings;
     // don't retry updating endlessly. Can be annoying if there are too many exception logs.
@@ -138,30 +142,15 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
     private NamedXContentRegistry xContentRegistry;
     protected BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser;
     protected String customResultIndexPrefix;
-    private final ObjectMapper objectMapper = new ObjectMapper();
     protected String configIndexName;
-
-    protected class IndexState {
-        // keep track of whether the mapping version is up-to-date
-        public Boolean mappingUpToDate;
-        // keep track of whether the setting needs to change
-        public Boolean settingUpToDate;
-        // record schema version reading from the mapping file
-        public Integer schemaVersion;
-
-        public IndexState(String mappingFile) {
-            this.mappingUpToDate = false;
-            this.settingUpToDate = false;
-            this.schemaVersion = IndexManagement.parseSchemaVersion(mappingFile);
-        }
-    }
+    protected List<String> resultIndexPrefixes;
 
     protected IndexManagement(
         Client client,
         ClusterService clusterService,
         ThreadPool threadPool,
         Settings settings,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         int maxUpdateRunningTimes,
         Class<IndexType> indexType,
         int maxPrimaryShards,
@@ -172,7 +161,9 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         NamedXContentRegistry xContentRegistry,
         BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser,
         String customResultIndexPrefix,
-        String configIndexName
+        String configIndexName,
+        List<String> resultIndexPrefixes,
+        DataAccess dataAccess
     )
         throws IOException {
         this.client = client;
@@ -198,6 +189,9 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         this.configParser = configParser;
         this.customResultIndexPrefix = customResultIndexPrefix;
         this.configIndexName = configIndexName;
+        this.indexStates = new EnumMap<>(indexType);
+        this.resultIndexPrefixes = resultIndexPrefixes;
+        this.dataAccess = dataAccess;
     }
 
     /**
@@ -205,8 +199,12 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      * @param alias Alias name
      * @return true if the alias exists
      */
-    public boolean doesAliasExist(String alias) {
+    protected boolean doesAliasExist(String alias) {
         return clusterService.state().metadata().hasAlias(alias);
+    }
+
+    public String getConfigIndexName() {
+        return configIndexName;
     }
 
     public static Integer parseSchemaVersion(String mapping) {
@@ -269,18 +267,71 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         return value;
     }
 
-    public boolean doesIndexExist(String indexName) {
+    protected boolean doesIndexExist(String indexName) {
         return clusterService.state().metadata().hasIndex(indexName);
     }
 
-    protected static String getMappings(String mappingFileRelativePath) throws IOException {
-        URL url = IndexManagement.class.getClassLoader().getResource(mappingFileRelativePath);
-        return Resources.toString(url, Charsets.UTF_8);
+    // Exists for index-backed code paths that can read local cluster state synchronously.
+    public boolean doesResultIndexExists(String indexName, String tenantId) {
+        boolean matched = false;
+        for (String resultIndexPrefix : resultIndexPrefixes) {
+            if (indexName.startsWith(resultIndexPrefix)) {
+                matched = true;
+                break;
+            }
+        }
+        return matched && doesIndexExist(indexName);
     }
 
-    public static String getScripts(String scriptFileRelativePath) throws IOException {
-        URL url = IndexManagement.class.getClassLoader().getResource(scriptFileRelativePath);
-        return Resources.toString(url, Charsets.UTF_8);
+    // Exists for index-backed code paths that can read local cluster state synchronously.
+    public boolean doesResultAliasExists(String aliasName, String tenantId) {
+        boolean matched = false;
+        for (String resultIndexPrefix : resultIndexPrefixes) {
+            if (aliasName.startsWith(resultIndexPrefix)) {
+                matched = true;
+                break;
+            }
+        }
+        return matched && doesAliasExist(aliasName);
+    }
+
+    /*
+     * The listener overloads are intentionally synchronous in single-tenant mode:
+     * result index and alias existence are read from the local cluster state, so
+     * dispatching to a thread pool would add scheduling overhead without removing IO.
+     */
+    @Override
+    public void doesResultIndexExists(String indexName, ActionListener<Boolean> listener, String tenantId) {
+        try {
+            listener.onResponse(doesResultIndexExists(indexName, tenantId));
+        } catch (Exception e) {
+            listener.onFailure(e);
+        }
+    }
+
+    @Override
+    public void doesResultAliasExists(String aliasName, ActionListener<Boolean> listener, String tenantId) {
+        try {
+            listener.onResponse(doesResultAliasExists(aliasName, tenantId));
+        } catch (Exception e) {
+            listener.onFailure(e);
+        }
+    }
+
+    @Override
+    public void doesResultIndexOrAliasExists(
+        String indexOrAliasName,
+        ActionListener<Boolean> listener,
+        String tenantId,
+        String dataSourceId
+    ) {
+        doesResultIndexExists(indexOrAliasName, ActionListener.wrap(indexExists -> {
+            if (indexExists) {
+                listener.onResponse(true);
+                return;
+            }
+            doesResultAliasExists(indexOrAliasName, listener, tenantId);
+        }, listener::onFailure), tenantId);
     }
 
     protected void choosePrimaryShards(CreateIndexRequest request, boolean hiddenIndex) {
@@ -445,9 +496,9 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      * Create config index if not exist.
      *
      * @param actionListener action called after create index
-     * @throws IOException IOException from {@link IndexManagement#getConfigMappings}
+     * @param tenantId tenant id
      */
-    public void initConfigIndexIfAbsent(ActionListener<CreateIndexResponse> actionListener) throws IOException {
+    public void initConfigIndexIfAbsent(ActionListener<CreateIndexResponse> actionListener, String tenantId) {
         if (!doesConfigIndexExist()) {
             initConfigIndex(actionListener);
         }
@@ -457,13 +508,18 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      * Create config index directly.
      *
      * @param actionListener action called after create index
-     * @throws IOException IOException from {@link IndexManagement#getConfigMappings}
      */
-    public void initConfigIndex(ActionListener<CreateIndexResponse> actionListener) throws IOException {
-        CreateIndexRequest request = new CreateIndexRequest(configIndexName)
-            .mapping(getConfigMappings(), XContentType.JSON)
-            .settings(settings);
-        adminClient.indices().create(request, actionListener);
+    @Override
+    public void initConfigIndex(ActionListener<CreateIndexResponse> actionListener) {
+        try {
+            CreateIndexRequest request = new CreateIndexRequest(configIndexName)
+                .mapping(IndexResourceLoader.getConfigMappings(), XContentType.JSON)
+                .settings(settings);
+            adminClient.indices().create(request, actionListener);
+        } catch (IOException e) {
+            logger.error("Fail to init config index", e);
+            actionListener.onFailure(e);
+        }
     }
 
     /**
@@ -471,6 +527,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      *
      * @return true if config index exists
      */
+    @Override
     public boolean doesConfigIndexExist() {
         return doesIndexExist(configIndexName);
     }
@@ -485,33 +542,14 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
     }
 
     /**
-     * Get config index mapping in json format.
-     *
-     * @return config index mapping
-     * @throws IOException IOException if mapping file can't be read correctly
-     */
-    public static String getConfigMappings() throws IOException {
-        return getMappings(TimeSeriesSettings.CONFIG_INDEX_MAPPING_FILE);
-    }
-
-    /**
-     * Get job index mapping in json format.
-     *
-     * @return job index mapping
-     * @throws IOException IOException if mapping file can't be read correctly
-     */
-    public static String getJobMappings() throws IOException {
-        return getMappings(TimeSeriesSettings.JOBS_INDEX_MAPPING_FILE);
-    }
-
-    /**
      * Createjob index.
      *
      * @param actionListener action called after create index
      */
     public void initJobIndex(ActionListener<CreateIndexResponse> actionListener) {
         try {
-            CreateIndexRequest request = new CreateIndexRequest(CommonName.JOB_INDEX).mapping(getJobMappings(), XContentType.JSON);
+            CreateIndexRequest request = new CreateIndexRequest(CommonName.JOB_INDEX)
+                .mapping(IndexResourceLoader.getJobMappings(), XContentType.JSON);
             request
                 .settings(
                     Settings
@@ -562,11 +600,13 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      *
      * @throws IllegalArgumentException If the result index mapping is found to be invalid.
      */
+    @Override
     public <T> void validateResultIndexAndExecute(
         String resultIndexOrAlias,
         ExecutorFunction function,
         boolean mappingValidated,
-        ActionListener<T> listener
+        ActionListener<T> listener,
+        String tenantId
     ) {
         if (!mappingValidated) {
             validateResultIndexMapping(resultIndexOrAlias, ActionListener.wrap(validMapping -> {
@@ -592,13 +632,15 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         ExecutorFunction function,
         ActionListener<T> listener
     ) throws IOException {
-        IndexRequest indexRequest = createDummyIndexRequest(resultIndexOrAlias);
+        // Use a unique ID to avoid concurrent validators colliding on the same dummy doc.
+        String requestDummyId = UUID.randomUUID().toString();
+        IndexRequest indexRequest = createDummyIndexRequest(resultIndexOrAlias, requestDummyId);
 
         // User may have no write permission on custom result index. Talked with security plugin team, seems no easy way to verify
         // if user has write permission. So just tried to write and delete a dummy result to verify.
         client.index(indexRequest, ActionListener.wrap(response -> {
             logger.debug("Successfully wrote dummy result to result index {}", resultIndexOrAlias);
-            client.delete(createDummyDeleteRequest(resultIndexOrAlias), ActionListener.wrap(deleteResponse -> {
+            client.delete(createDummyDeleteRequest(resultIndexOrAlias, requestDummyId), ActionListener.wrap(deleteResponse -> {
                 logger.debug("Successfully deleted dummy result from result index {}", resultIndexOrAlias);
                 function.execute();
             }, ex -> {
@@ -611,7 +653,8 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         }));
     }
 
-    public void update() {
+    @Override
+    public void update(String tenantId) {
         if ((allMappingUpdated && allSettingUpdated) || updateRunningTimes >= maxUpdateRunningTimes || updateRunning.get()) {
             return;
         }
@@ -768,6 +811,14 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
                 return;
             }
 
+            List<String> candidateResultIndices = deduplicateCustomResultIndexAliases(candidateResultAliases);
+            if (candidateResultIndices.isEmpty()) {
+                logger.info("candidate custom result indices are empty after dedup.");
+                markMappingUpdated(customIndex);
+                delegateListeneer.onResponse(null);
+                return;
+            }
+
             final GroupedActionListener<Void> customIndexMappingUpdateListener = new GroupedActionListener<>(
                 ActionListener.wrap(mappingUpdateResponse -> {
                     markMappingUpdated(customIndex);
@@ -776,14 +827,14 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
                     delegateListeneer.onResponse(null);
                     logger.error("Fail to update result indices' mappings", exception);
                 }),
-                candidateResultAliases.size()
+                candidateResultIndices.size()
             );
 
             processResultIndexMappingIteration(
                 0,
                 getSchemaVersion(customIndex),
                 customIndex.getMapping(),
-                candidateResultAliases,
+                candidateResultIndices,
                 customIndexMappingUpdateListener
             );
         }, e -> delegateListeneer.onFailure(new TimeSeriesException("Fail to update custom result indices' mapping.", e))));
@@ -811,7 +862,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         SearchRequest searchRequest = new SearchRequest()
             .indices(new String[] { configIndex.getIndexName() })
             .source(new SearchSourceBuilder().size(10000).query(boolQuery));
-        client.search(searchRequest, ActionListener.wrap(r -> {
+        dataAccess.search(searchRequest, TenantContext.systemWide(), ActionListener.wrap(r -> {
             if (r == null || r.getHits().getTotalHits() == null || r.getHits().getTotalHits().value() == 0) {
                 logger.info("no config available.");
                 listener.onResponse(new ArrayList<Config>());
@@ -843,13 +894,13 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         int indexPos,
         Integer newestSchemaVersion,
         String mappingSource,
-        List<Config> candidateResultIndices,
+        List<String> candidateResultIndices,
         GroupedActionListener<Void> conglomerateListeneer
     ) {
         if (indexPos >= candidateResultIndices.size()) {
             return;
         }
-        String index = candidateResultIndices.get(indexPos).getCustomResultIndexOrAlias();
+        String index = candidateResultIndices.get(indexPos);
         logger.info(new ParameterizedMessage("Check [{}]'s mapping", index));
         shouldUpdateIndex(index, true, newestSchemaVersion, ActionListener.wrap(shouldUpdate -> {
             if (shouldUpdate) {
@@ -911,6 +962,17 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
                 conglomerateListeneer
             );
         }));
+    }
+
+    private List<String> deduplicateCustomResultIndexAliases(List<Config> candidateResultAliases) {
+        Set<String> uniqueIndices = new LinkedHashSet<>();
+        for (Config config : candidateResultAliases) {
+            String indexOrAlias = config.getCustomResultIndexOrAlias();
+            if (indexOrAlias != null) {
+                uniqueIndices.add(indexOrAlias);
+            }
+        }
+        return new ArrayList<>(uniqueIndices);
     }
 
     private void markMappingUpdated(IndexType adIndex) {
@@ -989,17 +1051,24 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      * @param index Index metadata
      * @return The schema version of the given Index
      */
+    @Override
     public int getSchemaVersion(IndexType index) {
         IndexState indexState = this.indexStates.computeIfAbsent(index, k -> new IndexState(k.getMapping()));
         return indexState.schemaVersion;
     }
 
-    public <T> void initCustomResultIndexAndExecute(String resultIndexOrAlias, ExecutorFunction function, ActionListener<T> listener) {
+    @Override
+    public <T> void initCustomResultIndexAndExecute(
+        String resultIndexOrAlias,
+        ExecutorFunction function,
+        ActionListener<T> listener,
+        String tenantId
+    ) {
         if (!doesIndexExist(resultIndexOrAlias) && !doesAliasExist(resultIndexOrAlias)) {
             initCustomResultIndexDirectly(resultIndexOrAlias, ActionListener.wrap(response -> {
                 if (response.isAcknowledged()) {
                     logger.info("Successfully created result index {}", resultIndexOrAlias);
-                    validateResultIndexAndExecute(resultIndexOrAlias, function, false, listener);
+                    validateResultIndexAndExecute(resultIndexOrAlias, function, true, listener, tenantId);
                 } else {
                     String error = "Creating result index with mappings call not acknowledged: " + resultIndexOrAlias;
                     logger.error(error);
@@ -1008,14 +1077,14 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
             }, exception -> {
                 if (ExceptionsHelper.unwrapCause(exception) instanceof ResourceAlreadyExistsException) {
                     // It is possible the index has been created while we sending the create request
-                    validateResultIndexAndExecute(resultIndexOrAlias, function, false, listener);
+                    validateResultIndexAndExecute(resultIndexOrAlias, function, false, listener, tenantId);
                 } else {
                     logger.error("Failed to create result index " + resultIndexOrAlias, exception);
                     listener.onFailure(exception);
                 }
-            }));
+            }), tenantId, null);
         } else {
-            validateResultIndexAndExecute(resultIndexOrAlias, function, false, listener);
+            validateResultIndexAndExecute(resultIndexOrAlias, function, false, listener, tenantId);
         }
     }
 
@@ -1024,13 +1093,18 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
      * @param flattenedResultIndexAlias the flattened result index alias
      * @param actionListener the action listener
      */
-    public void initFlattenedResultIndex(String flattenedResultIndexAlias, ActionListener<CreateIndexResponse> actionListener) {
+    @Override
+    public void initFlattenedResultIndex(
+        String flattenedResultIndexAlias,
+        ActionListener<CreateIndexResponse> actionListener,
+        String tenantId
+    ) {
         try {
-            String indexName = getCustomResultIndexPattern(flattenedResultIndexAlias);
+            String indexName = TimeSeriesIndex.getCustomResultIndexPattern(flattenedResultIndexAlias);
             logger.info("Initializing flattened result index: {}", indexName);
 
             CreateIndexRequest request = new CreateIndexRequest(indexName)
-                .mapping(getFlattenedResultMappings(), XContentType.JSON)
+                .mapping(IndexResourceLoader.getFlattenedResultMappingsFromContent(resultMapping), XContentType.JSON)
                 .settings(settings);
 
             if (flattenedResultIndexAlias != null) {
@@ -1060,16 +1134,17 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
 
     public <T> void validateCustomIndexForBackendJob(
         String resultIndexOrAlias,
-        String securityLogId,
+        String configId,
         String user,
         List<String> roles,
         ExecutorFunction function,
-        ActionListener<T> listener
+        ActionListener<T> listener,
+        String tenantId
     ) {
         if (!doesIndexExist(resultIndexOrAlias) && !doesAliasExist(resultIndexOrAlias)) {
             initCustomResultIndexDirectly(resultIndexOrAlias, ActionListener.wrap(response -> {
                 if (response.isAcknowledged()) {
-                    executeOnCustomIndex(resultIndexOrAlias, securityLogId, user, roles, function, listener);
+                    executeOnCustomIndex(resultIndexOrAlias, configId, user, roles, function, listener, tenantId);
                 } else {
                     String error = "Creating custom result index with mappings call not acknowledged";
                     logger.error(error);
@@ -1078,15 +1153,15 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
             }, exception -> {
                 if (ExceptionsHelper.unwrapCause(exception) instanceof ResourceAlreadyExistsException) {
                     // It is possible the index has been created while we sending the create request
-                    executeOnCustomIndex(resultIndexOrAlias, securityLogId, user, roles, function, listener);
+                    executeOnCustomIndex(resultIndexOrAlias, configId, user, roles, function, listener, tenantId);
                 } else {
                     listener.onFailure(exception);
                 }
-            }));
+            }), tenantId, null);
         } else {
             validateResultIndexMapping(resultIndexOrAlias, ActionListener.wrap(validMapping -> {
                 if (validMapping) {
-                    executeOnCustomIndex(resultIndexOrAlias, securityLogId, user, roles, function, listener);
+                    executeOnCustomIndex(resultIndexOrAlias, configId, user, roles, function, listener, tenantId);
                 } else {
                     listener.onFailure(new EndRunException("Result index mapping is not correct", true));
                 }
@@ -1100,7 +1175,8 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         String user,
         List<String> roles,
         ExecutorFunction function,
-        ActionListener<T> listener
+        ActionListener<T> listener,
+        String tenantId
     ) {
         try (InjectSecurity injectSecurity = new InjectSecurity(securityLogId, settings, client.threadPool().getThreadContext())) {
             injectSecurity.inject(user, roles);
@@ -1111,7 +1187,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
             validateResultIndexAndExecute(resultIndexOrAlias, () -> {
                 injectSecurity.close();
                 function.execute();
-            }, true, wrappedListener);
+            }, true, wrappedListener, tenantId);
         } catch (Exception e) {
             logger.error("Failed to validate custom index for backend job " + securityLogId, e);
             listener.onFailure(e);
@@ -1165,13 +1241,17 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
             return;
         }
 
-        Map<String, Object> asMap = XContentHelper.convertToMap(new BytesArray(resultMapping), false, XContentType.JSON).v2();
-        Object properties = asMap.get(CommonName.PROPERTIES);
-        if (properties instanceof Map) {
-            RESULT_FIELD_CONFIGS = (Map<String, Object>) properties;
-        } else {
-            logger.error("Fail to read result mapping file.");
-        }
+        RESULT_FIELD_CONFIGS = parseResultFieldConfigs(resultMapping, logger);
+    }
+
+    @Override
+    public void validateResultIndexMapping(
+        String resultIndexOrAlias,
+        ActionListener<Boolean> thenDo,
+        String tenantId,
+        String dataSourceId
+    ) {
+        validateResultIndexMapping(resultIndexOrAlias, thenDo);
     }
 
     /**
@@ -1187,72 +1267,23 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
                 if (RESULT_FIELD_CONFIGS == null) {
                     // failed to populate the field
                     thenDo.onResponse(false);
+                    return;
                 }
                 IndexMetadata indexMetadata = clusterService.state().metadata().index(concreteIndex);
                 Map<String, Object> indexMapping = indexMetadata.mapping().sourceAsMap();
                 String propertyName = CommonName.PROPERTIES;
                 if (!indexMapping.containsKey(propertyName) || !(indexMapping.get(propertyName) instanceof LinkedHashMap)) {
                     thenDo.onResponse(false);
+                    return;
                 }
-                LinkedHashMap<String, Object> mapping = (LinkedHashMap<String, Object>) indexMapping.get(propertyName);
-                boolean correctResultIndexMapping = true;
-
-                for (String fieldName : RESULT_FIELD_CONFIGS.keySet()) {
-                    Object defaultSchema = RESULT_FIELD_CONFIGS.get(fieldName);
-                    // the field might be a map or map of map
-                    // example: map: {type=date, format=strict_date_time||epoch_millis}
-                    // map of map: {type=nested, properties={likelihood={type=double}, value_list={type=nested,
-                    // properties={data={type=double},
-                    // feature_id={type=keyword}}}}}
-                    // if it is a map of map, Object.equals can compare them regardless of order
-                    if (!mapping.containsKey(fieldName)) {
-                        logger.warn("mapping mismatch due to missing {}", fieldName);
-                        correctResultIndexMapping = false;
-                        break;
-                    }
-                    Object actualSchema = mapping.get(fieldName);
-                    if (!isSchemaSuperset(actualSchema, defaultSchema)) {
-                        logger.warn("mapping mismatch due to {}", fieldName);
-                        correctResultIndexMapping = false;
-                        break;
-                    }
-                }
-                thenDo.onResponse(correctResultIndexMapping);
+                @SuppressWarnings("unchecked")
+                Map<String, Object> mapping = (LinkedHashMap<String, Object>) indexMapping.get(propertyName);
+                thenDo.onResponse(validateMappingFields(mapping, RESULT_FIELD_CONFIGS, logger));
             } catch (Exception e) {
                 logger.error("Failed to validate result index mapping for index " + concreteIndex, e);
                 thenDo.onResponse(false);
             }
         }, thenDo::onFailure));
-    }
-
-    /**
-     * Recursively checks if schema1 is a superset of schema2.
-     * @param schema1 the potential superset schema object
-     * @param schema2 the subset schema object
-     * @return true if schema1 is a superset of schema2
-     */
-    private boolean isSchemaSuperset(Object schema1, Object schema2) {
-        if (schema1 == schema2) {
-            return true;
-        }
-        if (schema1 == null || schema2 == null) {
-            return false;
-        }
-        if (schema1 instanceof Map && schema2 instanceof Map) {
-            Map<?, ?> map1 = (Map<?, ?>) schema1;
-            Map<?, ?> map2 = (Map<?, ?>) schema2;
-            for (Map.Entry<?, ?> entry : map2.entrySet()) {
-                Object key = entry.getKey();
-                if (!map1.containsKey(key)) {
-                    return false;
-                }
-                if (!isSchemaSuperset(map1.get(key), entry.getValue())) {
-                    return false;
-                }
-            }
-            return true;
-        }
-        return schema1.equals(schema2);
     }
 
     /**
@@ -1313,7 +1344,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
     }
 
     private void handleResultIndexRolloverAndDelete(String indexAlias, Config config, IndexType resultIndex) {
-        RolloverRequest rolloverRequest = buildRolloverRequest(indexAlias, getCustomResultIndexPattern(indexAlias));
+        RolloverRequest rolloverRequest = buildRolloverRequest(indexAlias, TimeSeriesIndex.getCustomResultIndexPattern(indexAlias));
 
         // add rollover conditions if found in config
         if (config.getCustomResultIndexMinAge() != null) {
@@ -1327,7 +1358,7 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         proceedWithRolloverAndDelete(
             indexAlias,
             rolloverRequest,
-            getAllCustomResultIndexPattern(indexAlias),
+            TimeSeriesIndex.getAllCustomResultIndexPattern(indexAlias),
             resultIndex,
             config.getCustomResultIndexTTL()
         );
@@ -1407,31 +1438,32 @@ public abstract class IndexManagement<IndexType extends Enum<IndexType> & TimeSe
         }
     }
 
-    protected String getCustomResultIndexPattern(String customResultIndexAlias) {
-        return String.format(Locale.ROOT, "<%s-history-{now/d}-1>", customResultIndexAlias);
-    }
-
-    public static String getAllCustomResultIndexPattern(String customResultIndexAlias) {
-        return String.format(Locale.ROOT, "%s*", customResultIndexAlias);
-    }
-
-    public abstract boolean doesCheckpointIndexExist();
-
-    public abstract void initCheckpointIndex(ActionListener<CreateIndexResponse> actionListener);
-
     public abstract boolean doesDefaultResultIndexExist();
 
     public abstract boolean doesStateIndexExist();
 
     public abstract void initDefaultResultIndexDirectly(ActionListener<CreateIndexResponse> actionListener);
 
-    protected abstract IndexRequest createDummyIndexRequest(String resultIndex) throws IOException;
+    protected IndexRequest createDummyIndexRequest(String resultIndex) throws IOException {
+        return createDummyIndexRequest(resultIndex, null);
+    }
 
-    protected abstract DeleteRequest createDummyDeleteRequest(String resultIndex) throws IOException;
+    protected DeleteRequest createDummyDeleteRequest(String resultIndex) throws IOException {
+        return createDummyDeleteRequest(resultIndex, null);
+    }
+
+    protected abstract IndexRequest createDummyIndexRequest(String resultIndex, String dummyId) throws IOException;
+
+    protected abstract DeleteRequest createDummyDeleteRequest(String resultIndex, String dummyId) throws IOException;
 
     protected abstract void rolloverAndDeleteHistoryIndex();
 
-    public abstract void initCustomResultIndexDirectly(String resultIndex, ActionListener<CreateIndexResponse> actionListener);
+    public abstract void initCustomResultIndexDirectly(
+        String resultIndex,
+        ActionListener<CreateIndexResponse> actionListener,
+        String tenantId,
+        String dataSourceId
+    );
 
     public abstract void initStateIndex(ActionListener<CreateIndexResponse> actionListener);
 }

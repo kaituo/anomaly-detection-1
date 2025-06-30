@@ -17,7 +17,6 @@ import static org.opensearch.ad.constant.ADCommonMessages.EXCEED_HISTORICAL_ANAL
 import static org.opensearch.ad.constant.ADCommonMessages.HC_DETECTOR_TASK_IS_UPDATING;
 import static org.opensearch.ad.constant.ADCommonMessages.NO_ELIGIBLE_NODE_TO_RUN_DETECTOR;
 import static org.opensearch.ad.constant.ADCommonName.DETECTION_STATE_INDEX;
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.ad.model.ADTask.DETECTOR_ID_FIELD;
 import static org.opensearch.ad.model.ADTaskType.HISTORICAL_DETECTOR_TASK_TYPES;
 import static org.opensearch.ad.model.ADTaskType.REALTIME_TASK_TYPES;
@@ -28,7 +27,6 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_BATCH_TASK_
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_RUNNING_ENTITIES_PER_DETECTOR_FOR_HISTORICAL_ANALYSIS;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_BATCH_TASK_THREAD_POOL_NAME;
 import static org.opensearch.timeseries.model.TaskState.NOT_ENDED_STATES;
 import static org.opensearch.timeseries.model.TaskType.taskTypeToString;
 import static org.opensearch.timeseries.stats.InternalStatNames.AD_DETECTOR_ASSIGNED_BATCH_TASK_SLOT_COUNT;
@@ -40,7 +38,6 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -61,23 +58,23 @@ import org.opensearch.OpenSearchStatusException;
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.Version;
 import org.opensearch.action.ActionListenerResponseHandler;
+import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.ad.ADTaskProfileRunner;
-import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.client.ADNodeCommunicator;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskAction;
 import org.opensearch.ad.model.ADTaskProfile;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.transport.ADBatchAnomalyResultAction;
 import org.opensearch.ad.transport.ADBatchAnomalyResultRequest;
 import org.opensearch.ad.transport.ADCancelTaskAction;
 import org.opensearch.ad.transport.ADCancelTaskRequest;
-import org.opensearch.ad.transport.ADStatsNodesAction;
-import org.opensearch.ad.transport.ForwardADTaskAction;
 import org.opensearch.ad.transport.ForwardADTaskRequest;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -94,7 +91,6 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.core.xcontent.XContentParser;
-import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.index.query.TermsQueryBuilder;
@@ -103,7 +99,10 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.DuplicateTaskException;
 import org.opensearch.timeseries.common.exception.EndRunException;
@@ -127,7 +126,7 @@ import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.transport.StatsNodeResponse;
 import org.opensearch.timeseries.transport.StatsRequest;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.transport.TransportRequestOptions;
@@ -141,7 +140,8 @@ import com.google.common.collect.ImmutableSet;
 /**
  * Manage AD task.
  */
-public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement> {
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Historical.")
+public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADDelegatingDataManagement> {
     public static final String AD_TASK_LEAD_NODE_MODEL_ID = "ad_task_lead_node_model_id";
     public static final String AD_TASK_MAINTAINENCE_NODE_MODEL_ID = "ad_task_maintainence_node_model_id";
     // HC batch task timeout after 10 minutes if no update after last known run time.
@@ -150,7 +150,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
     static final String STATE_INDEX_NOT_EXIST_MSG = "State index does not exist.";
     private final Set<String> retryableErrors = ImmutableSet.of(EXCEED_HISTORICAL_ANALYSIS_LIMIT, NO_ELIGIBLE_NODE_TO_RUN_DETECTOR);
 
-    private final DiscoveryNodeFilterer nodeFilter;
+    private final DiscoveryNodeSelector nodeFilter;
 
     private final HashRing hashRing;
     private volatile Integer pieceIntervalSeconds;
@@ -164,29 +164,32 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
     private final Semaphore scaleEntityTaskLane;
     private static final int SCALE_ENTITY_TASK_LANE_INTERVAL_IN_MILLIS = 10_000; // 10 seconds
     private final ADTaskProfileRunner taskProfileRunner;
+    private final ADDelegatingDataManagement stateIndexStore;
+    private final Client client;
+    private final ADNodeCommunicator nodeCommunicator;
 
     public ADTaskManager(
         Settings settings,
         ClusterService clusterService,
         Client client,
         NamedXContentRegistry xContentRegistry,
-        ADIndexManagement detectionIndices,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         HashRing hashRing,
         ADTaskCacheManager adTaskCacheManager,
         ThreadPool threadPool,
-        NodeStateManager nodeStateManager,
-        ADTaskProfileRunner taskProfileRunner
+        StateManager nodeStateManager,
+        DataAccess taskSearcher,
+        ADDelegatingDataManagement stateIndexStore,
+        ADTaskProfileRunner taskProfileRunner,
+        ADNodeCommunicator nodeCommunicator
     ) {
         super(
             adTaskCacheManager,
             clusterService,
-            client,
             DETECTION_STATE_INDEX,
             ADTaskType.REALTIME_TASK_TYPES,
             ADTaskType.HISTORICAL_DETECTOR_TASK_TYPES,
             Collections.emptyList(),
-            detectionIndices,
             nodeStateManager,
             AnalysisType.AD,
             xContentRegistry,
@@ -194,14 +197,16 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
             MAX_OLD_AD_TASK_DOCS_PER_DETECTOR,
             settings,
             threadPool,
-            ALL_AD_RESULTS_INDEX_PATTERN,
-            AD_BATCH_TASK_THREAD_POOL_NAME,
+            taskSearcher,
+            ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN,
+            ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME,
             DELETE_AD_RESULT_WHEN_DELETE_DETECTOR,
             TaskState.STOPPED
         );
 
         this.nodeFilter = nodeFilter;
         this.hashRing = hashRing;
+        this.stateIndexStore = stateIndexStore;
 
         this.pieceIntervalSeconds = BATCH_TASK_PIECE_INTERVAL_SECONDS.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(BATCH_TASK_PIECE_INTERVAL_SECONDS, it -> pieceIntervalSeconds = it);
@@ -226,6 +231,8 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         this.checkingTaskSlot = new Semaphore(1);
         this.scaleEntityTaskLane = new Semaphore(1);
         this.taskProfileRunner = taskProfileRunner;
+        this.client = client;
+        this.nodeCommunicator = Objects.requireNonNull(nodeCommunicator, "nodeCommunicator must not be null");
     }
 
     /**
@@ -267,6 +274,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         forwardRequestToLeadNode(new ForwardADTaskRequest(adTask, ADTaskAction.CHECK_AVAILABLE_TASK_SLOTS), transportService, listener);
     }
 
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: mostly historical; forwardStaleRunningEntitiesToCoordinatingNode localhost only in multi-tenant.")
     public void forwardRequestToLeadNode(
         ForwardADTaskRequest forwardADTaskRequest,
         TransportService transportService,
@@ -277,13 +285,13 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                 listener.onFailure(new ResourceNotFoundException("Can't find AD task lead node"));
                 return;
             }
-            transportService
-                .sendRequest(
+            nodeCommunicator
+                .forwardADTask(
                     node.get(),
-                    ForwardADTaskAction.NAME,
                     forwardADTaskRequest,
                     transportRequestOptions,
-                    new ActionListenerResponseHandler<>(listener, JobResponse::new)
+                    new ActionListenerResponseHandler<>(listener, JobResponse::new),
+                    transportService
                 );
         }, listener);
     }
@@ -350,6 +358,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
      * @param node ES node
      * @param listener action listener
      */
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: mostly historical; forwardStaleRunningEntitiesToCoordinatingNode localhost only in multi-tenant.")
     protected void forwardDetectRequestToCoordinatingNode(
         AnomalyDetector detector,
         DateRange detectionDateRange,
@@ -361,15 +370,15 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         ActionListener<JobResponse> listener
     ) {
         Version adVersion = hashRing.getVersion(node.getId());
-        transportService
-            .sendRequest(
+        nodeCommunicator
+            .forwardADTask(
                 node,
-                ForwardADTaskAction.NAME,
                 // We need to check AD version of remote node as we may send clean detector cache request to old
                 // node, check ADTaskManager#cleanDetectorCache.
                 new ForwardADTaskRequest(detector, detectionDateRange, user, adTaskAction, availableTaskSlots, adVersion),
                 transportRequestOptions,
-                new ActionListenerResponseHandler<>(listener, JobResponse::new)
+                new ActionListenerResponseHandler<>(listener, JobResponse::new),
+                transportService
             );
     }
 
@@ -381,20 +390,34 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
      * @param transportService transport service
      * @param listener action listener
      */
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: mostly historical; forwardStaleRunningEntitiesToCoordinatingNode localhost only in multi-tenant.")
     protected void forwardADTaskToCoordinatingNode(
         ADTask adTask,
         ADTaskAction adTaskAction,
         TransportService transportService,
         ActionListener<JobResponse> listener
     ) {
+        forwardADTaskToCoordinatingNodeWithDetector(adTask.getDetector(), adTask, adTaskAction, transportService, listener);
+    }
+
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: mostly historical; realtime cleanup uses config-index detector.")
+    protected void forwardADTaskToCoordinatingNodeWithDetector(
+        AnomalyDetector detector,
+        ADTask adTask,
+        ADTaskAction adTaskAction,
+        TransportService transportService,
+        ActionListener<JobResponse> listener
+    ) {
         logger.debug("Forward AD task to coordinating node, task id: {}, action: {}", adTask.getTaskId(), adTaskAction.name());
-        transportService
-            .sendRequest(
+        nodeCommunicator
+            .forwardADTask(
+                // if coordinating node is not found, it will throw ResourceNotFoundException
+                // we handled this in the caller of method forwardADTaskToCoordinatingNode.
                 getCoordinatingNode(adTask),
-                ForwardADTaskAction.NAME,
-                new ForwardADTaskRequest(adTask, adTaskAction),
+                ForwardADTaskRequest.fromTaskAndDetector(adTask, detector, adTaskAction),
                 transportRequestOptions,
-                new ActionListenerResponseHandler<>(listener, JobResponse::new)
+                new ActionListenerResponseHandler<>(listener, JobResponse::new),
+                transportService
             );
     }
 
@@ -407,6 +430,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
      * @param staleRunningEntity stale running entities
      * @param listener action listener
      */
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: mostly historical; forwardStaleRunningEntitiesToCoordinatingNode localhost only in multi-tenant.")
     protected void forwardStaleRunningEntitiesToCoordinatingNode(
         ADTask adTask,
         ADTaskAction adTaskAction,
@@ -414,13 +438,13 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         List<String> staleRunningEntity,
         ActionListener<JobResponse> listener
     ) {
-        transportService
-            .sendRequest(
+        nodeCommunicator
+            .forwardADTask(
                 getCoordinatingNode(adTask),
-                ForwardADTaskAction.NAME,
                 new ForwardADTaskRequest(adTask, adTaskAction, staleRunningEntity),
                 transportRequestOptions,
-                new ActionListenerResponseHandler<>(listener, JobResponse::new)
+                new ActionListenerResponseHandler<>(listener, JobResponse::new),
+                transportService
             );
     }
 
@@ -465,15 +489,15 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         });
         hashRing.getNodesWithSameLocalVersion(nodes -> {
             int maxAdTaskSlots = nodes.length * maxAdBatchTaskPerNode;
-            StatsRequest adStatsRequest = new StatsRequest(nodes);
+            StatsRequest adStatsRequest = new StatsRequest(detector.getTenantId(), nodes);
             adStatsRequest
                 .addAll(ImmutableSet.of(AD_USED_BATCH_TASK_SLOT_COUNT.getName(), AD_DETECTOR_ASSIGNED_BATCH_TASK_SLOT_COUNT.getName()));
-            client.execute(ADStatsNodesAction.INSTANCE, adStatsRequest, ActionListener.wrap(adStatsResponse -> {
+            nodeCommunicator.stat(adStatsRequest, ActionListener.wrap(adStatsResponse -> {
                 int totalUsedTaskSlots = 0; // Total entity tasks running on worker nodes
                 int totalAssignedTaskSlots = 0; // Total assigned task slots on coordinating nodes
                 for (StatsNodeResponse response : adStatsResponse.getNodes()) {
-                    totalUsedTaskSlots += (int) response.getStatsMap().get(AD_USED_BATCH_TASK_SLOT_COUNT.getName());
-                    totalAssignedTaskSlots += (int) response.getStatsMap().get(AD_DETECTOR_ASSIGNED_BATCH_TASK_SLOT_COUNT.getName());
+                    totalUsedTaskSlots += getIntStat(response, AD_USED_BATCH_TASK_SLOT_COUNT.getName());
+                    totalAssignedTaskSlots += getIntStat(response, AD_DETECTOR_ASSIGNED_BATCH_TASK_SLOT_COUNT.getName());
                 }
                 logger
                     .info(
@@ -534,6 +558,14 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         }, wrappedActionListener);
     }
 
+    private int getIntStat(StatsNodeResponse response, String statName) {
+        Object value = response.getStatsMap().get(statName);
+        if (value instanceof Number) {
+            return ((Number) value).intValue();
+        }
+        throw new IllegalStateException("Missing numeric stat [" + statName + "] from node [" + response.getNode().getId() + "]");
+    }
+
     private void forwardToCoordinatingNode(
         ADTask adTask,
         AnomalyDetector detector,
@@ -564,19 +596,20 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         }
     }
 
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: mostly historical; forwardStaleRunningEntitiesToCoordinatingNode localhost only in multi-tenant.")
     protected void scaleTaskLaneOnCoordinatingNode(
         ADTask adTask,
         int approvedTaskSlot,
         TransportService transportService,
         ActionListener<JobResponse> listener
     ) {
-        transportService
-            .sendRequest(
+        nodeCommunicator
+            .forwardADTask(
                 getCoordinatingNode(adTask),
-                ForwardADTaskAction.NAME,
                 new ForwardADTaskRequest(adTask, approvedTaskSlot, ADTaskAction.SCALE_ENTITY_TASK_SLOTS),
                 transportRequestOptions,
-                new ActionListenerResponseHandler<>(listener, JobResponse::new)
+                new ActionListenerResponseHandler<>(listener, JobResponse::new),
+                transportService
             );
     }
 
@@ -600,11 +633,14 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         try {
             String coordinatingNodeId = adTask.getCoordinatingNode();
             Version coordinatingNodeVersion = hashRing.getVersion(coordinatingNodeId);
-            Version localNodeVersion = hashRing.getVersion(clusterService.localNode().getId());
+            Version localNodeVersion = hashRing.getVersion(hashRing.getLocalNodeIdForHashRing());
             if (!isSameVersion(coordinatingNodeVersion, localNodeVersion)) {
                 throw new ResourceNotFoundException(
                     adTask.getConfigId(),
-                    "AD task coordinating node has different version than local node"
+                    "AD task coordinating node has different version than local node. Coordinating node version: "
+                        + coordinatingNodeVersion
+                        + ", local node version: "
+                        + localNodeVersion
                 );
             }
 
@@ -623,13 +659,20 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
 
             throw new ResourceNotFoundException(adTask.getConfigId(), "AD task coordinating node not found");
         } catch (Exception e) {
-            logger.error("Error locating coordinating node", e);
+            // In a multi-tenant environment, it's possible that the coordinating keeps changing due to auto scaling or node restart.
+            // We don't need to print the stack trace for this error.
+            logger.error("Error locating coordinating node: {}", e.getMessage());
             throw new ResourceNotFoundException(adTask.getConfigId(), "AD task coordinating node not found");
         }
     }
 
     private boolean isSameVersion(Version version1, Version version2) {
         return (version1 == null && version2 == null) || (version1 != null && version2 != null && version1.compareTo(version2) == 0);
+    }
+
+    @Override
+    protected String getLocalCoordinatingNodeIdForHistoricalTask() {
+        return hashRing.getLocalNodeIdForHashRing();
     }
 
     @Override
@@ -812,17 +855,46 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         ExecutorFunction function,
         ActionListener<T> listener
     ) {
+        ADTask task = (ADTask) adTask;
+        String detectorId = adTask.getConfigId();
+        if (adTask.isRealTimeTask()) {
+            nodeStateManager.getConfig(detectorId, adTask.getTenantId(), AnalysisType.AD, configOptional -> {
+                if (configOptional.isEmpty()) {
+                    listener.onFailure(new ResourceNotFoundException(detectorId, "Detector not found"));
+                    return;
+                }
+                cleanConfigCacheWithDetector((AnomalyDetector) configOptional.get(), task, transportService, function, listener);
+            }, listener);
+            return;
+        }
+        cleanConfigCacheWithDetector(task.getDetector(), task, transportService, function, listener);
+    }
+
+    private <T> void cleanConfigCacheWithDetector(
+        AnomalyDetector detector,
+        ADTask adTask,
+        TransportService transportService,
+        ExecutorFunction function,
+        ActionListener<T> listener
+    ) {
         String coordinatingNode = adTask.getCoordinatingNode();
         String detectorId = adTask.getConfigId();
         String taskId = adTask.getTaskId();
         try {
-            forwardADTaskToCoordinatingNode((ADTask) adTask, ADTaskAction.CLEAN_CACHE, transportService, ActionListener.wrap(r -> {
-                function.execute();
-            }, e -> {
-                logger.error("Failed to clear detector cache on coordinating node " + coordinatingNode, e);
-                listener.onFailure(e);
-            }));
+            forwardADTaskToCoordinatingNodeWithDetector(
+                detector,
+                adTask,
+                ADTaskAction.CLEAN_CACHE,
+                transportService,
+                ActionListener.wrap(r -> {
+                    function.execute();
+                }, e -> {
+                    logger.error("Failed to clear detector cache on coordinating node " + coordinatingNode, e);
+                    listener.onFailure(e);
+                })
+            );
         } catch (ResourceNotFoundException e) {
+            // since the node has left or has different software version, we don't need to clean up the cache on it.
             logger
                 .warn(
                     "Task coordinating node left cluster or has different software version, taskId: {}, detectorId: {}, coordinatingNode: {}",
@@ -1004,15 +1076,36 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         ActionListener<Boolean> listener
     ) {
         try {
-            if (taskCacheManager.getRealtimeTaskCache(detectorId) != null) {
+            String tenantId = config.getTenantId();
+            String localNodeId = clusterService.localNode().getId();
+            boolean hasLocalCache = taskCacheManager.getRealtimeTaskCache(detectorId) != null;
+            logger
+                .info(
+                    "initRealtimeTaskCacheAndCleanupStaleCache enter config={} tenant={} localNode={} hasLocalCache={}",
+                    detectorId,
+                    tenantId,
+                    localNodeId,
+                    hasLocalCache
+                );
+            if (hasLocalCache) {
+                logger.info("Skip latest realtime task lookup because local cache already exists for config={}", detectorId);
                 listener.onResponse(false);
                 return;
             }
 
             AnomalyDetector detector = (AnomalyDetector) config;
-            getAndExecuteOnLatestConfigLevelTask(detectorId, REALTIME_TASK_TYPES, (adTaskOptional) -> {
+            logger.debug("Query latest realtime task config={} tenant={}", detectorId, tenantId);
+            getAndExecuteOnLatestConfigLevelTask(detectorId, config.getTenantId(), REALTIME_TASK_TYPES, (adTaskOptional) -> {
+                logger
+                    .debug(
+                        "Realtime task lookup callback enter config={} tenant={} taskPresent={}",
+                        detectorId,
+                        tenantId,
+                        adTaskOptional.isPresent()
+                    );
                 if (!adTaskOptional.isPresent()) {
-                    logger.debug("Can't find realtime task for detector {}, init realtime task cache directly", detectorId);
+                    logger.debug("Latest realtime task missing before recreate config={} tenant={}", detectorId, tenantId);
+                    logger.debug("Can't find realtime task for config {}, init realtime task cache directly", detectorId);
                     ExecutorFunction function = () -> createNewTask(
                         detector,
                         null,
@@ -1021,33 +1114,44 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                         clusterService.localNode().getId(),
                         TaskState.CREATED,
                         ActionListener.wrap(r -> {
-                            logger.info("Recreate realtime task successfully for detector {}", detectorId);
+                            String recreatedTaskId = r instanceof JobResponse ? ((JobResponse) r).getId() : "unknown";
+                            logger.debug("Recreate realtime task succeeded config={} taskId={}", detectorId, recreatedTaskId);
+                            logger.debug("Recreate realtime task successfully for config {}", detectorId);
                             taskCacheManager.initRealtimeTaskCache(detectorId, detector.getIntervalInMilliseconds());
                             listener.onResponse(true);
                         }, e -> {
-                            logger.error("Failed to recreate realtime task for detector " + detectorId, e);
+                            logger.error("Recreate realtime task failed config={}", detectorId, e);
+                            logger.error("Failed to recreate realtime task for config " + detectorId, e);
                             listener.onFailure(e);
                         })
                     );
-                    recreateRealtimeTask(function, listener);
+                    logger.debug("Attempt realtime task recreate config={} tenant={}", detectorId, tenantId);
+                    recreateRealtimeTask(function, listener, config.getTenantId());
                     return;
                 }
 
                 ADTask adTask = adTaskOptional.get();
-                String localNodeId = clusterService.localNode().getId();
                 String oldCoordinatingNode = adTask.getCoordinatingNode();
+                logger
+                    .debug(
+                        "Latest realtime task found config={} taskId={} state={} coordinatingNode={}",
+                        detectorId,
+                        adTask.getTaskId(),
+                        adTask.getState(),
+                        oldCoordinatingNode
+                    );
                 if (oldCoordinatingNode != null && !localNodeId.equals(oldCoordinatingNode)) {
                     logger
                         .warn(
-                            "AD realtime job coordinating node changed from {} to this node {} for detector {}",
+                            "Realtime job coordinating node changed from {} to this node {} for config {}",
                             oldCoordinatingNode,
                             localNodeId,
                             detectorId
                         );
                     cleanConfigCache(adTask, transportService, () -> {
                         logger
-                            .info(
-                                "Realtime task cache cleaned on old coordinating node {} for detector {}",
+                            .debug(
+                                "Realtime task cache cleaned on old coordinating node {} for config {}",
                                 oldCoordinatingNode,
                                 detectorId
                             );
@@ -1055,24 +1159,27 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                         listener.onResponse(true);
                     }, listener);
                 } else {
-                    logger.info("Init realtime task cache for detector {}", detectorId);
+                    logger.debug("Init realtime task cache for config {}", detectorId);
                     taskCacheManager.initRealtimeTaskCache(detectorId, detector.getIntervalInMilliseconds());
                     listener.onResponse(true);
                 }
             }, transportService, false, listener);
         } catch (Exception e) {
-            logger.error("Failed to init realtime task cache for " + detectorId, e);
+            logger.error("Failed to init realtime task cache for config " + detectorId, e);
             listener.onFailure(e);
         }
     }
 
-    private void recreateRealtimeTask(ExecutorFunction function, ActionListener<Boolean> listener) {
-        if (indexManagement.doesStateIndexExist()) {
+    private void recreateRealtimeTask(ExecutorFunction function, ActionListener<Boolean> listener, String tenantId) {
+        if (stateIndexStore.doesStateIndexExist()) {
+            logger.debug("Recreate realtime task using existing state index tenant={}", tenantId);
             function.execute();
         } else {
+            logger.debug("Recreate realtime task by initializing missing state index tenant={}", tenantId);
             // If detection index doesn't exist, create index and execute function.
-            indexManagement.initStateIndex(ActionListener.wrap(r -> {
-                if (r.isAcknowledged()) {
+            stateIndexStore.initStateIndex(ActionListener.wrap((CreateIndexResponse r) -> {
+                if (r != null && r.isAcknowledged()) {
+                    logger.debug("State index initialized for realtime task recreate tenant={}", tenantId);
                     logger.info("Created {} with mappings.", DETECTION_STATE_INDEX);
                     function.execute();
                 } else {
@@ -1082,9 +1189,10 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                 }
             }, e -> {
                 if (ExceptionsHelper.unwrapCause(e) instanceof ResourceAlreadyExistsException) {
+                    logger.info("State index already exists during realtime task recreate tenant={}", tenantId);
                     function.execute();
                 } else {
-                    logger.error("Failed to init anomaly detection state index", e);
+                    logger.error("Failed to init state index", e);
                     listener.onFailure(e);
                 }
             }));
@@ -1175,9 +1283,10 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
      * Set state for HC detector level task when all entities done.
      *
      * The state could be FINISHED,FAILED or STOPPED.
-     * 1. If input task state is FINISHED, will check FINISHED entity task count. If
-     * there is no FINISHED entity task, will set HC detector level task as FAILED; otherwise
-     * set as FINISHED.
+     * 1. If input task state is FINISHED, will check successful entity task count from the
+     * coordinating node cache first, then fall back to the state index. If there is no
+     * FINISHED entity task from either source, will set HC detector level task as FAILED;
+     * otherwise set as FINISHED.
      * 2. If input task state is not FINISHED, will set HC detector level task's state as the same.
      *
      * @param adTask AD task
@@ -1188,6 +1297,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         String detectorId = adTask.getConfigId();
         String taskId = adTask.isHistoricalEntityTask() ? adTask.getParentTaskId() : adTask.getTaskId();
         String detectorTaskId = adTask.getConfigLevelTaskId();
+        String tenantId = adTask.getTenantId();
 
         ActionListener<UpdateResponse> wrappedListener = ActionListener.wrap(response -> {
             logger.info("Historical HC detector done with state: {}. Remove from cache, detector id:{}", state.name(), detectorId);
@@ -1205,74 +1315,56 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
 
         long timeoutInMillis = 2000;// wait for 2 seconds to acquire updating HC detector task semaphore
         if (state == TaskState.FINISHED) {
-            this.countEntityTasksByState(detectorTaskId, ImmutableList.of(TaskState.FINISHED), ActionListener.wrap(r -> {
-                logger.info("number of finished entity tasks: {}, for detector {}", r, adTask.getConfigId());
-                // Set task as FAILED if no finished entity task; otherwise set as FINISHED
-                TaskState hcDetectorTaskState = r == 0 ? TaskState.FAILED : TaskState.FINISHED;
-                // execute in AD batch task thread pool in case waiting for semaphore waste any shared OpenSearch thread pool
-                threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
-                    updateADHCDetectorTask(
-                        detectorId,
-                        taskId,
-                        ImmutableMap
-                            .of(
-                                TimeSeriesTask.STATE_FIELD,
-                                hcDetectorTaskState.name(),
-                                TimeSeriesTask.TASK_PROGRESS_FIELD,
-                                1.0,
-                                TimeSeriesTask.EXECUTION_END_TIME_FIELD,
-                                Instant.now().toEpochMilli()
-                            ),
-                        timeoutInMillis,
-                        wrappedListener
-                    );
-                });
+            int successfulEntityTaskCount = taskCacheManager.getSuccessfulEntityTaskCount(detectorId);
+            if (successfulEntityTaskCount > 0) {
+                logger.info("number of cached successful entity tasks: {}, for detector {}", successfulEntityTaskCount, adTask.getConfigId());
+                updateHCDetectorTaskDone(detectorId, taskId, TaskState.FINISHED, null, true, timeoutInMillis, tenantId, wrappedListener);
+            } else {
+                this.countEntityTasksByState(detectorTaskId, ImmutableList.of(TaskState.FINISHED), tenantId, ActionListener.wrap(r -> {
+                    logger.info("number of finished entity tasks: {}, for detector {}", r, adTask.getConfigId());
+                    // Set task as FAILED if no finished entity task; otherwise set as FINISHED
+                    TaskState hcDetectorTaskState = r == 0 ? TaskState.FAILED : TaskState.FINISHED;
+                    updateHCDetectorTaskDone(detectorId, taskId, hcDetectorTaskState, null, true, timeoutInMillis, tenantId, wrappedListener);
 
-            }, e -> {
-                logger.error("Failed to get finished entity tasks", e);
-                String errorMessage = ExceptionUtil.getErrorMessage(e);
-                threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
-                    updateADHCDetectorTask(
-                        detectorId,
-                        taskId,
-                        ImmutableMap
-                            .of(
-                                TimeSeriesTask.STATE_FIELD,
-                                TaskState.FAILED.name(),// set as FAILED if fail to get finished entity tasks.
-                                TimeSeriesTask.TASK_PROGRESS_FIELD,
-                                1.0,
-                                TimeSeriesTask.ERROR_FIELD,
-                                errorMessage,
-                                TimeSeriesTask.EXECUTION_END_TIME_FIELD,
-                                Instant.now().toEpochMilli()
-                            ),
-                        timeoutInMillis,
-                        wrappedListener
-                    );
-                });
-            }));
+                }, e -> {
+                    logger.error("Failed to get finished entity tasks", e);
+                    String errorMessage = ExceptionUtil.getErrorMessage(e);
+                    updateHCDetectorTaskDone(detectorId, taskId, TaskState.FAILED, errorMessage, true, timeoutInMillis, tenantId, wrappedListener);
+                }));
+            }
         } else {
-            threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
-                updateADHCDetectorTask(
-                    detectorId,
-                    taskId,
-                    ImmutableMap
-                        .of(
-                            TimeSeriesTask.STATE_FIELD,
-                            state.name(),
-                            TimeSeriesTask.ERROR_FIELD,
-                            adTask.getError(),
-                            TimeSeriesTask.EXECUTION_END_TIME_FIELD,
-                            Instant.now().toEpochMilli()
-                        ),
-                    timeoutInMillis,
-                    wrappedListener
-                );
-            });
+            updateHCDetectorTaskDone(detectorId, taskId, state, adTask.getError(), false, timeoutInMillis, tenantId, wrappedListener);
 
         }
 
         listener.onResponse(new JobResponse(taskId));
+    }
+
+    private void updateHCDetectorTaskDone(
+        String detectorId,
+        String taskId,
+        TaskState state,
+        String error,
+        boolean updateTaskProgress,
+        long timeoutInMillis,
+        String tenantId,
+        ActionListener<UpdateResponse> listener
+    ) {
+        ImmutableMap.Builder<String, Object> updatedFieldsBuilder = ImmutableMap
+            .<String, Object>builder()
+            .put(TimeSeriesTask.STATE_FIELD, state.name())
+            .put(TimeSeriesTask.EXECUTION_END_TIME_FIELD, Instant.now().toEpochMilli());
+        if (updateTaskProgress) {
+            updatedFieldsBuilder.put(TimeSeriesTask.TASK_PROGRESS_FIELD, 1.0);
+        }
+        if (error != null) {
+            updatedFieldsBuilder.put(TimeSeriesTask.ERROR_FIELD, error);
+        }
+        Map<String, Object> updatedFields = updatedFieldsBuilder.build();
+        // execute in AD batch task thread pool in case waiting for semaphore wastes shared OpenSearch thread pool
+        threadPool.executor(ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
+            updateADHCDetectorTask(detectorId, taskId, updatedFields, timeoutInMillis, tenantId, listener);
+        });
     }
 
     /**
@@ -1282,7 +1374,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
      * @param taskStates task states
      * @param listener action listener
      */
-    public void countEntityTasksByState(String detectorTaskId, List<TaskState> taskStates, ActionListener<Long> listener) {
+    public void countEntityTasksByState(String detectorTaskId, List<TaskState> taskStates, String tenantId, ActionListener<Long> listener) {
         BoolQueryBuilder queryBuilder = new BoolQueryBuilder();
         queryBuilder.filter(new TermQueryBuilder(TimeSeriesTask.PARENT_TASK_ID_FIELD, detectorTaskId));
         if (taskStates != null && taskStates.size() > 0) {
@@ -1298,7 +1390,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         SearchRequest request = new SearchRequest();
         request.source(sourceBuilder);
         request.indices(DETECTION_STATE_INDEX);
-        client.search(request, ActionListener.wrap(r -> {
+        dataAccess.search(request, TenantContext.user(tenantId), ActionListener.wrap(r -> {
             TotalHits totalHits = r.getHits().getTotalHits();
             listener.onResponse(totalHits.value());
         }, e -> listener.onFailure(e)));
@@ -1314,8 +1406,8 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
      * @param taskId AD task id
      * @param updatedFields updated fields, key: filed name, value: new value
      */
-    public void updateADHCDetectorTask(String detectorId, String taskId, Map<String, Object> updatedFields) {
-        updateADHCDetectorTask(detectorId, taskId, updatedFields, 0, ActionListener.wrap(response -> {
+    public void updateADHCDetectorTask(String detectorId, String taskId, Map<String, Object> updatedFields, String tenantId) {
+        updateADHCDetectorTask(detectorId, taskId, updatedFields, 0, tenantId, ActionListener.wrap(response -> {
             if (response == null) {
                 logger.debug("Skip updating AD task: {}", taskId);
             } else if (response.status() == RestStatus.OK) {
@@ -1349,16 +1441,15 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         String taskId,
         Map<String, Object> updatedFields,
         long timeoutInMillis,
+        String tenantId,
         ActionListener<UpdateResponse> listener
     ) {
         try {
             if (taskCacheManager.tryAcquireTaskUpdatingSemaphore(detectorId, timeoutInMillis)) {
                 try {
-                    updateTask(
-                        taskId,
-                        updatedFields,
-                        ActionListener.runAfter(listener, () -> { taskCacheManager.releaseTaskUpdatingSemaphore(detectorId); })
-                    );
+                    updateTask(taskId, updatedFields, tenantId, ActionListener.runAfter(listener, () -> {
+                        taskCacheManager.releaseTaskUpdatingSemaphore(detectorId);
+                    }));
                 } catch (Exception e) {
                     logger.error("Failed to update detector task " + taskId, e);
                     taskCacheManager.releaseTaskUpdatingSemaphore(detectorId);
@@ -1614,7 +1705,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                 detectorTaskProfile.setDetectorTaskSlots(1);
             }
         }
-        threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
+        threadPool.executor(ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
             // Clean expired HC batch task run states as it may exists after HC historical analysis done if user cancel
             // before querying top entities done. We will clean it in hourly cron, check "maintainRunningHistoricalTasks"
             // method. Clean it up here when get task profile to release memory earlier.
@@ -1783,7 +1874,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
      *    clean up.
      *
      * @param transportService transport service
-     * @param size return how many tasks
+     * @param size page size per search request
      */
     public void maintainRunningHistoricalTasks(TransportService transportService, int size) {
         // Clean expired HC batch task run state cache.
@@ -1801,21 +1892,50 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
         query.filter(new TermQueryBuilder(TimeSeriesTask.IS_LATEST_FIELD, true));
         query.filter(new TermsQueryBuilder(TimeSeriesTask.TASK_TYPE_FIELD, taskTypeToString(HISTORICAL_DETECTOR_TASK_TYPES)));
         query.filter(new TermsQueryBuilder(TimeSeriesTask.STATE_FIELD, NOT_ENDED_STATES));
+        ConcurrentLinkedQueue<ADTask> taskQueue = new ConcurrentLinkedQueue<>();
+        searchRunningHistoricalTasksForMaintenance(query, size, null, taskQueue, transportService);
+    }
+
+    /**
+     * Search running historical tasks for maintenance. In a multitenant environment, we may not finish with one search request.
+     * So we need to paginate the search request.
+     * 
+     * @param query query builder
+     * @param pageSize page size
+     * @param searchAfter sort values from the last hit of the previous page; {@code null} for the first page
+     * @param taskQueue task queue
+     * @param transportService transport service
+     */
+    private void searchRunningHistoricalTasksForMaintenance(
+        BoolQueryBuilder query,
+        int pageSize,
+        Object[] searchAfter,
+        ConcurrentLinkedQueue<ADTask> taskQueue,
+        TransportService transportService
+    ) {
         SearchSourceBuilder sourceBuilder = new SearchSourceBuilder();
         // default maintain interval is 5 seconds, so maintain 10 tasks will take at least 50 seconds.
-        sourceBuilder.query(query).sort(TimeSeriesTask.LAST_UPDATE_TIME_FIELD, SortOrder.DESC).size(size);
+        sourceBuilder
+            .query(query)
+            .sort(TimeSeriesTask.LAST_UPDATE_TIME_FIELD, SortOrder.DESC)
+            // Tie-breaker to make paging deterministic when multiple docs share the same last_update_time.
+            .sort("_id", SortOrder.DESC)
+            .size(pageSize);
+        if (searchAfter != null) {
+            sourceBuilder.searchAfter(searchAfter);
+        }
         SearchRequest searchRequest = new SearchRequest();
         searchRequest.source(sourceBuilder);
         searchRequest.indices(DETECTION_STATE_INDEX);
 
-        client.search(searchRequest, ActionListener.wrap(r -> {
-            if (r == null || r.getHits().getTotalHits() == null || r.getHits().getTotalHits().value() == 0) {
+        dataAccess.search(searchRequest, TenantContext.systemWide(), ActionListener.wrap(r -> {
+            if (r == null || r.getHits() == null || r.getHits().getHits() == null || r.getHits().getHits().length == 0) {
+                maintainRunningHistoricalTask(taskQueue, transportService);
                 return;
             }
-            ConcurrentLinkedQueue<ADTask> taskQueue = new ConcurrentLinkedQueue<>();
-            Iterator<SearchHit> iterator = r.getHits().iterator();
-            while (iterator.hasNext()) {
-                SearchHit searchHit = iterator.next();
+
+            SearchHit[] hits = r.getHits().getHits();
+            for (SearchHit searchHit : hits) {
                 try (XContentParser parser = createXContentParserFromRegistry(xContentRegistry, searchHit.getSourceRef())) {
                     ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                     taskQueue.add(ADTask.parse(parser, searchHit.getId()));
@@ -1823,19 +1943,31 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                     logger.error("Maintaining running historical task: failed to parse AD task " + searchHit.getId(), e);
                 }
             }
-            maintainRunningHistoricalTask(taskQueue, transportService);
+
+            // Continue paginating only when we received a full page; otherwise we've reached the end.
+            if (hits.length < pageSize) {
+                maintainRunningHistoricalTask(taskQueue, transportService);
+                return;
+            }
+
+            searchRunningHistoricalTasksForMaintenance(query, pageSize, hits[hits.length - 1].getSortValues(), taskQueue, transportService);
         }, e -> {
-            if (e instanceof IndexNotFoundException) {
+            if (ExceptionUtil.isIndexNotFoundInMessage(e) || ExceptionUtil.isSearchPhaseExecutionException(e)) {
                 // the method will be called hourly
                 // don't log stack trace as most of OpenSearch domains have no AD installed
                 logger.debug(STATE_INDEX_NOT_EXIST_MSG);
             } else {
                 logger.error("Failed to search historical tasks in maintaining job", e);
             }
+            maintainRunningHistoricalTask(taskQueue, transportService);
         }));
     }
 
     private void maintainRunningHistoricalTask(ConcurrentLinkedQueue<ADTask> taskQueue, TransportService transportService) {
+        maintainRunningHistoricalTask(taskQueue, transportService, 0);
+    }
+
+    private void maintainRunningHistoricalTask(ConcurrentLinkedQueue<ADTask> taskQueue, TransportService transportService, int page) {
         ADTask adTask = taskQueue.poll();
         if (adTask == null) {
             return;
@@ -1847,7 +1979,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
             }, transportService, ActionListener.wrap(r -> {
                 logger.debug("Reset historical task state done for task {}, detector {}", adTask.getTaskId(), adTask.getConfigId());
             }, e -> { logger.error("Failed to reset historical task state for task " + adTask.getTaskId(), e); }));
-        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), AD_BATCH_TASK_THREAD_POOL_NAME);
+        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME);
     }
 
     @Override

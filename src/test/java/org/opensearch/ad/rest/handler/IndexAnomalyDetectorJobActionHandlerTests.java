@@ -16,6 +16,7 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -33,8 +34,6 @@ import java.util.Optional;
 import org.apache.lucene.search.TotalHits;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchRequest;
@@ -44,12 +43,11 @@ import org.opensearch.ad.ExecuteADResultResponseRecorder;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.mock.model.MockSimpleLog;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.transport.ADProfileAction;
 import org.opensearch.ad.transport.AnomalyResultAction;
 import org.opensearch.ad.transport.AnomalyResultResponse;
 import org.opensearch.common.settings.Settings;
@@ -60,13 +58,19 @@ import org.opensearch.search.SearchHits;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.common.exception.InternalFailure;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
+import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
@@ -78,7 +82,7 @@ import com.google.common.collect.ImmutableList;
 
 public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCase {
 
-    private static ADIndexManagement anomalyDetectionIndices;
+    private static ADDelegatingDataManagement anomalyDetectionIndices;
     private static String detectorId;
 
     private static NamedXContentRegistry xContentRegistry;
@@ -92,15 +96,17 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
     private ExecuteADResultResponseRecorder recorder;
     private Client client;
     private ADIndexJobActionHandler handler;
-    private ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> anomalyResultHandler;
+    private ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADDelegatingDataManagement> anomalyResultHandler;
     private NodeStateManager nodeStateManager;
     private TransportService transportService;
     private Clock clock;
+    private NodeCommunicator nodeCommunicator;
+    private DataAccess dataAccess;
 
     @BeforeClass
     public static void setOnce() throws IOException {
         detectorId = "123";
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
+        anomalyDetectionIndices = mock(ADDelegatingDataManagement.class);
         xContentRegistry = NamedXContentRegistry.EMPTY;
         when(anomalyDetectionIndices.doesJobIndexExist()).thenReturn(true);
         // make sure getAndExecuteOnLatestConfigLevelTask called in startConfig
@@ -115,16 +121,6 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
     public void setUp() throws Exception {
         super.setUp();
         client = mock(Client.class);
-        doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
-
-            GetResponse response = mock(GetResponse.class);
-            when(response.isExists()).thenReturn(false);
-            listener.onResponse(response);
-
-            return null;
-        }).when(client).get(any(GetRequest.class), any());
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
@@ -150,33 +146,41 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
         adTaskManager = mock(ADTaskManager.class);
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<JobResponse> listener = (ActionListener<JobResponse>) args[5];
+            ActionListener<JobResponse> listener = (ActionListener<JobResponse>) args[6];
 
             JobResponse response = mock(JobResponse.class);
             listener.onResponse(response);
 
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), nullable(String.class), any(), eq(false), any(), any(), any());
 
-        threadPool = mock(ThreadPool.class);
+        threadPool = TestHelpers.createThreadPool();
 
         anomalyResultHandler = mock(ResultBulkIndexingHandler.class);
 
         nodeStateManager = mock(NodeStateManager.class);
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onResponse(Optional.empty());
+            return null;
+        }).when(nodeStateManager).getJob(anyString(), any(), anyBoolean(), any(ActionListener.class));
+        nodeCommunicator = mock(NodeCommunicator.class);
+        dataAccess = mock(DataAccess.class);
 
         clock = mock(Clock.class);
 
         recorder = new ExecuteADResultResponseRecorder(
-            anomalyDetectionIndices,
             anomalyResultHandler,
             adTaskManager,
             nodeFilter,
             threadPool,
-            client,
+            nodeCommunicator,
+            dataAccess,
             nodeStateManager,
             clock,
             32
         );
+        RunContext runContext = new SdkRunContext();
 
         handler = new ADIndexJobActionHandler(
             client,
@@ -185,7 +189,8 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
             adTaskManager,
             recorder,
             nodeStateManager,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         transportService = mock(TransportService.class);
@@ -205,9 +210,9 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         handler.startJob(detector, transportService, clock, listener);
 
-        verify(client, times(1)).get(any(), any());
+        verify(nodeStateManager, times(1)).getJob(anyString(), any(), eq(false), any(ActionListener.class));
         verify(client, times(1)).execute(any(), any(), any());
-        verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
+        verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), nullable(String.class), any(), eq(false), any(), any(), any());
         verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(threadPool, times(1)).schedule(any(), any(), any());
         verify(listener, times(1)).onResponse(any());
@@ -217,14 +222,14 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
     public void testNoDelayHCProfile() {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             ProfileResponse response = mock(ProfileResponse.class);
             when(response.getTotalUpdates()).thenReturn(3L);
             listener.onResponse(response);
 
             return null;
-        }).when(client).execute(any(ADProfileAction.class), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
 
         when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
@@ -232,9 +237,10 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         handler.startJob(detector, transportService, clock, listener);
 
-        verify(client, times(1)).get(any(), any());
+        verify(nodeStateManager, times(1)).getJob(anyString(), any(), eq(false), any(ActionListener.class));
         verify(client, times(1)).execute(any(), any(), any());
-        verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
+        verify(adTaskManager, times(1))
+            .getAndExecuteOnLatestConfigLevelTask(any(), nullable(String.class), any(), eq(false), any(), any(), any());
         verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(threadPool, never()).schedule(any(), any(), any());
         verify(listener, times(1)).onResponse(any());
@@ -244,12 +250,12 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
     public void testHCProfileException() {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             listener.onFailure(new RuntimeException());
 
             return null;
-        }).when(client).execute(any(ADProfileAction.class), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
 
         when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
@@ -257,9 +263,10 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         handler.startJob(detector, transportService, clock, listener);
 
-        verify(client, times(1)).get(any(), any());
+        verify(nodeStateManager, times(1)).getJob(anyString(), any(), eq(false), any(ActionListener.class));
         verify(client, times(1)).execute(any(), any(), any());
-        verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
+        verify(adTaskManager, times(1))
+            .getAndExecuteOnLatestConfigLevelTask(any(), nullable(String.class), any(), eq(false), any(), any(), any());
         verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(threadPool, never()).schedule(any(), any(), any());
         verify(listener, times(1)).onResponse(any());
@@ -283,7 +290,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         doAnswer(invocation -> {
             SearchRequest request = invocation.getArgument(0);
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
 
             // We identify the search for recent results by looking for the config_id field in the query source.
             // This distinguishes it from other potential search calls in the test.
@@ -291,18 +298,19 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
                 listener.onResponse(mockSearchResponse);
             }
             return null;
-        }).when(client).search(any(SearchRequest.class), any());
+        }).when(dataAccess).search(any(SearchRequest.class), any(), any());
 
         when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
         doAnswer(invocation -> {
-            ActionListener<UpdateResponse> cb = (ActionListener<UpdateResponse>) invocation.getArgument(6);
+            ActionListener<UpdateResponse> cb = (ActionListener<UpdateResponse>) invocation.getArgument(7);
             cb.onFailure(new ResourceNotFoundException(CommonMessages.CAN_NOT_FIND_LATEST_TASK));
             return null;
         })
             .when(adTaskManager)
             .updateLatestRealtimeTaskOnCoordinatingNode(
                 eq("123"),                // we know the configId
+                eq(null),
                 isNull(),                 // taskState must be null
                 eq(0L),                   // rcfTotalUpdates
                 eq(10L),                  // configIntervalInMinutes
@@ -313,25 +321,27 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<Optional<AnomalyDetector>> listener = (ActionListener<Optional<AnomalyDetector>>) args[3];
+            ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>> listener =
+                (ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>>) args[4];
             listener.onResponse(Optional.of(detector));
 
             return null;
-        }).when(nodeStateManager).getConfig(any(), any(), anyBoolean(), any());
+        }).when(nodeStateManager).getConfig(any(), any(), eq(AnalysisType.AD), anyBoolean(), any());
 
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
         handler.startJob(detector, transportService, clock, listener);
 
-        verify(client, times(1)).get(any(), any());
+        verify(nodeStateManager, times(1)).getJob(anyString(), any(), eq(false), any(ActionListener.class));
         verify(client, times(1)).execute(any(), any(), any());
         // long interval detector does not execute profile since profile only reads in-memory model cache
         // but long interval detector does not have in-memory model cache
-        verify(client, never()).execute(any(ADProfileAction.class), any(), any());
-        verify(nodeStateManager, times(2)).getConfig(any(), any(), anyBoolean(), any());
+        verify(nodeCommunicator, never()).profile(any(), any());
+        verify(nodeStateManager, times(2)).getConfig(any(), any(), eq(AnalysisType.AD), anyBoolean(), any());
         verify(adTaskManager, times(1))
             .updateLatestRealtimeTaskOnCoordinatingNode(
                 eq("123"),                // we know the configId
+                eq(null),
                 isNull(),                 // taskState must be null
                 eq(0L),                   // rcfTotalUpdates
                 eq(10L),                  // configIntervalInMinutes
@@ -339,7 +349,8 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
                 eq(false),                 // hasRecentResult must be null
                 any(ActionListener.class) // listener
             );
-        verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
+        verify(adTaskManager, times(1))
+            .getAndExecuteOnLatestConfigLevelTask(any(), nullable(String.class), any(), eq(false), any(), any(), any());
         verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(adTaskManager, times(1)).removeRealtimeTaskCache(anyString());
         verify(threadPool, never()).schedule(any(), any(), any());
@@ -364,7 +375,7 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         doAnswer(invocation -> {
             SearchRequest request = invocation.getArgument(0);
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
 
             // We identify the search for recent results by looking for the config_id field in the query source.
             // This distinguishes it from other potential search calls in the test.
@@ -372,30 +383,31 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
                 listener.onResponse(mockSearchResponse);
             }
             return null;
-        }).when(client).search(any(SearchRequest.class), any());
+        }).when(dataAccess).search(any(SearchRequest.class), any(), any());
 
         // ensure 3 total updates
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             ProfileResponse response = mock(ProfileResponse.class);
             when(response.getTotalUpdates()).thenReturn(3L);
             listener.onResponse(response);
 
             return null;
-        }).when(client).execute(any(ADProfileAction.class), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
 
         when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
         doAnswer(invocation -> {
-            ActionListener<UpdateResponse> cb = (ActionListener<UpdateResponse>) invocation.getArgument(6);
+            ActionListener<UpdateResponse> cb = (ActionListener<UpdateResponse>) invocation.getArgument(7);
             cb.onFailure(new ResourceNotFoundException(CommonMessages.CAN_NOT_FIND_LATEST_TASK));
             return null;
         })
             .when(adTaskManager)
             .updateLatestRealtimeTaskOnCoordinatingNode(
                 eq("123"),                // we know the configId
+                eq(null),
                 isNull(),                 // taskState must be null
                 eq(3L),                   // rcfTotalUpdates
                 eq(10L),                  // configIntervalInMinutes
@@ -406,22 +418,25 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<Optional<AnomalyDetector>> listener = (ActionListener<Optional<AnomalyDetector>>) args[3];
+            ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>> listener =
+                (ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>>) args[4];
             listener.onResponse(Optional.of(detector));
 
             return null;
-        }).when(nodeStateManager).getConfig(any(), any(), anyBoolean(), any());
+        }).when(nodeStateManager).getConfig(any(), any(), eq(AnalysisType.AD), anyBoolean(), any());
 
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
         handler.startJob(detector, transportService, clock, listener);
 
-        verify(client, times(1)).get(any(), any());
-        verify(client, times(2)).execute(any(), any(), any());
-        verify(nodeStateManager, times(2)).getConfig(any(), any(), anyBoolean(), any());
+        verify(nodeStateManager, times(1)).getJob(anyString(), any(), eq(false), any(ActionListener.class));
+        verify(client, times(1)).execute(any(), any(), any());
+        verify(nodeCommunicator, times(1)).profile(any(), any());
+        verify(nodeStateManager, times(2)).getConfig(any(), any(), eq(AnalysisType.AD), anyBoolean(), any());
         verify(adTaskManager, times(1))
             .updateLatestRealtimeTaskOnCoordinatingNode(
                 eq("123"),                // we know the configId
+                eq(null),
                 isNull(),                 // taskState must be null
                 eq(3L),                   // rcfTotalUpdates
                 eq(10L),                  // configIntervalInMinutes
@@ -429,7 +444,8 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
                 eq(false),                 // hasRecentResult must be null
                 any(ActionListener.class) // listener
             );
-        verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
+        verify(adTaskManager, times(1))
+            .getAndExecuteOnLatestConfigLevelTask(any(), nullable(String.class), any(), eq(false), any(), any(), any());
         verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(adTaskManager, times(1)).removeRealtimeTaskCache(anyString());
         verify(threadPool, never()).schedule(any(), any(), any());
@@ -440,14 +456,14 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
     public void testUpdateLatestRealtimeTaskOnCoordinatingException() {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             ProfileResponse response = mock(ProfileResponse.class);
             when(response.getTotalUpdates()).thenReturn(3L);
             listener.onResponse(response);
 
             return null;
-        }).when(client).execute(any(ADProfileAction.class), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
 
         when(adTaskManager.isRealtimeTaskStartInitializing(anyString())).thenReturn(true);
 
@@ -455,9 +471,10 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
 
         handler.startJob(detector, transportService, clock, listener);
 
-        verify(client, times(1)).get(any(), any());
+        verify(nodeStateManager, times(1)).getJob(anyString(), any(), eq(false), any(ActionListener.class));
         verify(client, times(1)).execute(any(), any(), any());
-        verify(adTaskManager, times(1)).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
+        verify(adTaskManager, times(1))
+            .getAndExecuteOnLatestConfigLevelTask(any(), nullable(String.class), any(), eq(false), any(), any(), any());
         verify(adTaskManager, times(1)).isRealtimeTaskStartInitializing(anyString());
         verify(adTaskManager, never()).removeRealtimeTaskCache(anyString());
         verify(adTaskManager, times(1)).skipUpdateRealtimeTask(anyString(), anyString());
@@ -489,16 +506,16 @@ public class IndexAnomalyDetectorJobActionHandlerTests extends OpenSearchTestCas
                 null,
                 ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + "index"
             );
-        when(anomalyDetectionIndices.doesIndexExist(anyString())).thenReturn(false);
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<Optional<AnomalyDetector>> listener2 = (ActionListener<Optional<AnomalyDetector>>) args[3];
+            ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>> listener2 =
+                (ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>>) args[4];
             listener2.onResponse(Optional.of(detector));
 
             return null;
-        }).when(nodeStateManager).getConfig(any(), any(), anyBoolean(), any());
+        }).when(nodeStateManager).getConfig(any(), any(), eq(AnalysisType.AD), anyBoolean(), any());
         handler.startJob(detector, transportService, clock, listener);
-        verify(anomalyResultHandler, times(1)).index(any(), any(), eq(ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + "index"));
+        verify(anomalyResultHandler, times(1)).index(any(), any(), eq(ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + "index"), any(), any());
         // we only schedule delayed update when there is no index exception (recorder.indexResultException in startJob
         // method won't schedule delayed update)
         verify(threadPool, never()).schedule(any(), any(), any());

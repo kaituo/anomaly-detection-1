@@ -18,6 +18,7 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 
 public class JobResponse extends ActionResponse implements ToXContentObject {
@@ -44,5 +45,24 @@ public class JobResponse extends ActionResponse implements ToXContentObject {
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         return builder.startObject().field(RestHandlerUtils._ID, id).endObject();
+    }
+
+    public static JobResponse parse(XContentParser parser) throws IOException {
+        String id = null;
+
+        if (parser.currentToken() == null) {
+            parser.nextToken();
+        }
+
+        while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
+            String fieldName = parser.currentName();
+            parser.nextToken();
+
+            if (RestHandlerUtils._ID.equals(fieldName)) {
+                id = parser.text();
+            }
+        }
+
+        return new JobResponse(id);
     }
 }

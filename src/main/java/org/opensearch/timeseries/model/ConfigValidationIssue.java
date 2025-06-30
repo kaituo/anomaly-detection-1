@@ -11,7 +11,10 @@
 
 package org.opensearch.timeseries.model;
 
+import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
+
 import java.io.IOException;
+import java.util.Locale;
 import java.util.Map;
 
 import org.opensearch.core.common.io.stream.StreamInput;
@@ -19,6 +22,7 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.common.io.stream.Writeable;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.core.xcontent.XContentParser;
 
 import com.google.common.base.Objects;
 
@@ -147,5 +151,43 @@ public class ConfigValidationIssue implements ToXContentObject, Writeable {
     @Override
     public int hashCode() {
         return Objects.hashCode(aspect, message, subIssues, subIssues, type);
+    }
+
+    public static ConfigValidationIssue parse(XContentParser parser, String aspectName) throws IOException {
+        ValidationAspect aspect = ValidationAspect.valueOf(aspectName.toUpperCase(Locale.ROOT));
+        ValidationIssueType type = null;
+        String message = null;
+        Map<String, String> subIssues = null;
+        IntervalTimeConfiguration intervalSuggestion = null;
+
+        ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
+
+        while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
+            String typeName = parser.currentName();
+            type = ValidationIssueType.valueOf(typeName.toUpperCase(Locale.ROOT));
+            parser.nextToken();
+
+            while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
+                String fieldName = parser.currentName();
+                parser.nextToken();
+
+                switch (fieldName) {
+                    case MESSAGE_FIELD:
+                        message = parser.text();
+                        break;
+                    case SUB_ISSUES_FIELD_NAME:
+                        subIssues = parser.mapStrings();
+                        break;
+                    case SUGGESTED_FIELD_NAME:
+                        intervalSuggestion = (IntervalTimeConfiguration) TimeConfiguration.parse(parser);
+                        break;
+                    default:
+                        parser.skipChildren();
+                        break;
+                }
+            }
+        }
+
+        return new ConfigValidationIssue(aspect, type, message, subIssues, intervalSuggestion);
     }
 }

@@ -13,8 +13,10 @@ package org.opensearch.ad.cluster.diskcleanup;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -32,11 +34,13 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
-import org.opensearch.index.reindex.DeleteByQueryAction;
+import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.index.store.StoreStats;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.cluster.diskcleanup.IndexCleanup;
-import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.transport.client.Client;
 import org.opensearch.transport.client.IndicesAdminClient;
 
@@ -49,7 +53,7 @@ public class IndexCleanupTests extends AbstractTimeSeriesTest {
     ClusterService clusterService;
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
-    ClientUtil clientUtil;
+    DataAccess dataAccess;
 
     IndexCleanup indexCleanup;
 
@@ -76,7 +80,8 @@ public class IndexCleanupTests extends AbstractTimeSeriesTest {
         MockitoAnnotations.initMocks(this);
         when(clusterService.state().getRoutingTable().hasIndex(anyString())).thenReturn(true);
         super.setUpLog4jForJUnit(IndexCleanup.class);
-        indexCleanup = new IndexCleanup(client, clientUtil, clusterService);
+        RunContext runContext = new SdkRunContext();
+        indexCleanup = new IndexCleanup(client, dataAccess, clusterService, runContext);
         when(indicesStatsResponse.getShards()).thenReturn(new ShardStats[] { shardStats });
         when(shardStats.getStats()).thenReturn(commonStats);
         when(commonStats.getStore()).thenReturn(storeStats);
@@ -99,9 +104,33 @@ public class IndexCleanupTests extends AbstractTimeSeriesTest {
     public void testDeleteDocsBasedOnShardSizeWithCleanupNeededAsTrue() throws Exception {
         long maxShardSize = 1000;
         when(storeStats.getSizeInBytes()).thenReturn(maxShardSize + 1);
+        doAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            ActionListener<BulkByScrollResponse> listener = (ActionListener<BulkByScrollResponse>) args[2];
+            BulkByScrollResponse response = mock(BulkByScrollResponse.class);
+            when(response.getDeleted()).thenReturn(0L);
+            listener.onResponse(response);
+            return null;
+        }).when(dataAccess).deleteByQuery(any(), any(), any());
         indexCleanup.deleteDocsBasedOnShardSize("indexname", maxShardSize, null, ActionListener.wrap(result -> {
             assertTrue(result);
-            verify(clientUtil).execute(eq(DeleteByQueryAction.INSTANCE), any(), any());
+            verify(dataAccess, times(1)).deleteByQuery(any(), argThat(ctx -> ctx != null && ctx.isSystemWide()), any());
+        }, exception -> { throw new RuntimeException(exception); }));
+    }
+
+    public void testDeleteDocsByQueryDelegatesSystemWideDelete() {
+        doAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            ActionListener<BulkByScrollResponse> listener = (ActionListener<BulkByScrollResponse>) args[2];
+            BulkByScrollResponse response = mock(BulkByScrollResponse.class);
+            when(response.getDeleted()).thenReturn(10L);
+            listener.onResponse(response);
+            return null;
+        }).when(dataAccess).deleteByQuery(any(), any(), any());
+
+        indexCleanup.deleteDocsByQuery("indexname", null, ActionListener.wrap(deleted -> {
+            assertEquals(10L, deleted.longValue());
+            verify(dataAccess, times(1)).deleteByQuery(any(), argThat(ctx -> ctx != null && ctx.isSystemWide()), any());
         }, exception -> { throw new RuntimeException(exception); }));
     }
 

@@ -30,21 +30,28 @@ public class DeleteConfigRequest extends ActionRequest implements DocRequest {
 
     private String configID;
     private String configIndex;
+    private String tenantID;
 
     public DeleteConfigRequest(StreamInput in) throws IOException {
         super(in);
         this.configID = in.readString();
         this.configIndex = in.readString();
+        this.tenantID = in.readOptionalString();
     }
 
-    public DeleteConfigRequest(String configId, String configIndex) {
+    public DeleteConfigRequest(String configId, String configIndex, String tenantID) {
         super();
         this.configID = configId;
         this.configIndex = configIndex;
+        this.tenantID = tenantID;
     }
 
     public String getConfigID() {
         return configID;
+    }
+
+    public String getTenantID() {
+        return tenantID;
     }
 
     @Override
@@ -52,6 +59,7 @@ public class DeleteConfigRequest extends ActionRequest implements DocRequest {
         super.writeTo(out);
         out.writeString(configID);
         out.writeString(configIndex);
+        out.writeOptionalString(tenantID);
     }
 
     @Override

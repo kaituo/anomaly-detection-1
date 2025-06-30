@@ -25,9 +25,12 @@ import java.io.IOException;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -36,17 +39,24 @@ import org.junit.Ignore;
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.ActionRequest;
 import org.opensearch.action.ActionType;
+import org.opensearch.action.DocWriteResponse.Result;
 import org.opensearch.action.get.GetAction;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
+import org.opensearch.action.index.IndexAction;
+import org.opensearch.action.index.IndexRequest;
+import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchAction;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.WriteRequest;
+import org.opensearch.action.support.replication.ReplicationResponse.ShardInfo;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorActionHandler;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -56,6 +66,8 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
+import org.opensearch.core.index.Index;
+import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.threadpool.TestThreadPool;
@@ -63,10 +75,15 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
+import org.opensearch.timeseries.rest.handler.AbstractTimeSeriesActionHandler;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.node.NodeClient;
@@ -80,6 +97,7 @@ import org.opensearch.transport.client.node.NodeClient;
  */
 public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTest {
     static ThreadPool threadPool;
+
     private String TEXT_FIELD_TYPE = "text";
     private IndexAnomalyDetectorActionHandler handler;
     private ClusterService clusterService;
@@ -87,7 +105,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
     private SecurityClientUtil clientUtil;
     private TransportService transportService;
     // private ActionListener<IndexAnomalyDetectorResponse> channel;
-    private ADIndexManagement anomalyDetectionIndices;
+    private ADDelegatingDataManagement anomalyDetectionIndices;
+    private ADIndexManagement adIndexManagement;
     private String detectorId;
     private Long seqNo;
     private Long primaryTerm;
@@ -102,7 +121,9 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
     private RestRequest.Method method;
     private ADTaskManager adTaskManager;
     private SearchFeatureDao searchFeatureDao;
+    private DataAccess dataAccess;
     private ClusterName clusterName;
+    private RunContext runContext;
 
     @BeforeClass
     public static void beforeClass() {
@@ -123,6 +144,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         settings = Settings.EMPTY;
 
         clusterService = mock(ClusterService.class);
+        when(clusterService.getSettings()).thenReturn(settings);
         ClusterName clusterName = new ClusterName("test");
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().build()).build();
         when(clusterService.state()).thenReturn(clusterState);
@@ -130,10 +152,13 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         clientMock = spy(new NodeClient(settings, threadPool));
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        useDataAccess(clientMock);
         transportService = mock(TransportService.class);
+        runContext = new SdkRunContext();
 
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
-        when(anomalyDetectionIndices.doesConfigIndexExist()).thenReturn(true);
+        adIndexManagement = mock(ADIndexManagement.class);
+        when(adIndexManagement.doesConfigIndexExist()).thenReturn(true);
+        anomalyDetectionIndices = new ADDelegatingDataManagement(adIndexManagement, null, clusterService);
 
         detectorId = "123";
         seqNo = 0L;
@@ -166,8 +191,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -185,8 +209,187 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
+    }
+
+    private void useDataAccess(NodeClient client) {
+        dataAccess = new DefaultDataAccess(
+            client,
+            clusterService,
+            clientUtil,
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
+    }
+
+    @SuppressWarnings("unchecked")
+    private void allowNoRunningBatchTask() {
+        doAnswer(invocation -> {
+            Consumer<Optional<?>> function = invocation.getArgument(3);
+            function.accept(Optional.empty());
+            return null;
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(eq(detectorId), any(), any(), any(), any(), eq(false), any());
+    }
+
+    private AnomalyDetector buildSingleStreamDetector(String name) throws IOException {
+        return TestHelpers.AnomalyDetectorBuilder
+            .newInstance(0)
+            .setDetectorId(detectorId)
+            .setName(name)
+            .setTimeField("timestamp")
+            .setIndices(Arrays.asList("test-index"))
+            .build();
+    }
+
+    private IndexAnomalyDetectorActionHandler createPutHandler(AnomalyDetector detector) {
+        return new IndexAnomalyDetectorActionHandler(
+            clusterService,
+            dataAccess,
+            transportService,
+            anomalyDetectionIndices,
+            detectorId,
+            seqNo,
+            primaryTerm,
+            refreshPolicy,
+            detector,
+            requestTimeout,
+            maxSingleEntityAnomalyDetectors,
+            maxMultiEntityAnomalyDetectors,
+            maxAnomalyFeatures,
+            maxCategoricalFields,
+            RestRequest.Method.PUT,
+            xContentRegistry(),
+            null,
+            adTaskManager,
+            searchFeatureDao,
+            Settings.EMPTY,
+            runContext
+        );
+    }
+
+    private IndexResponse createIndexResponse(String id) {
+        IndexResponse.Builder response = new IndexResponse.Builder();
+        response.setResult(Result.CREATED);
+        response.setShardId(new ShardId(new Index(ADCommonName.CONFIG_INDEX, "_uuid"), 0));
+        response.setId(id);
+        response.setVersion(1L);
+        response.setShardInfo(new ShardInfo(1, 1));
+        return response.build();
+    }
+
+    @SuppressWarnings("unchecked")
+    private NodeClient createPutClient(
+        AnomalyDetector existingDetector,
+        SearchResponse configNameResponse,
+        AtomicInteger configNameSearches,
+        AtomicInteger indexRequests
+    ) throws IOException {
+        GetResponse getDetectorResponse = TestHelpers
+            .createGetResponse(existingDetector, existingDetector.getId(), ADCommonName.CONFIG_INDEX);
+        SearchResponse userIndexResponse = mock(SearchResponse.class);
+        when(userIndexResponse.getHits()).thenReturn(TestHelpers.createSearchHits(1));
+
+        return new NodeClient(Settings.EMPTY, threadPool) {
+            @Override
+            public <Request extends ActionRequest, Response extends ActionResponse> void doExecute(
+                ActionType<Response> action,
+                Request request,
+                ActionListener<Response> listener
+            ) {
+                try {
+                    if (action.equals(GetFieldMappingsAction.INSTANCE)) {
+                        GetFieldMappingsResponse response = new GetFieldMappingsResponse(
+                            TestHelpers
+                                .createFieldMappings(
+                                    existingDetector.getIndices().get(0),
+                                    existingDetector.getTimeField(),
+                                    CommonName.DATE_TYPE
+                                )
+                        );
+                        listener.onResponse((Response) response);
+                    } else if (action.equals(GetAction.INSTANCE)) {
+                        listener.onResponse((Response) getDetectorResponse);
+                    } else if (action.equals(SearchAction.INSTANCE)) {
+                        SearchRequest searchRequest = (SearchRequest) request;
+                        if (searchRequest.indices().length > 0 && searchRequest.indices()[0].equals(ADCommonName.CONFIG_INDEX)) {
+                            configNameSearches.incrementAndGet();
+                            listener.onResponse((Response) configNameResponse);
+                        } else {
+                            listener.onResponse((Response) userIndexResponse);
+                        }
+                    } else if (action.equals(IndexAction.INSTANCE)) {
+                        indexRequests.incrementAndGet();
+                        IndexRequest indexRequest = (IndexRequest) request;
+                        listener.onResponse((Response) createIndexResponse(indexRequest.id()));
+                    } else {
+                        assertTrue("unexpected action: " + action.name(), false);
+                    }
+                } catch (IOException e) {
+                    listener.onFailure(e);
+                }
+            }
+        };
+    }
+
+    public void testPutWithUnchangedNameSkipsDuplicateNameSearch() throws IOException, InterruptedException {
+        String detectorName = "same-name";
+        AnomalyDetector existingDetector = buildSingleStreamDetector(detectorName);
+        AnomalyDetector updatedDetector = buildSingleStreamDetector(detectorName);
+
+        SearchResponse duplicateNameResponse = mock(SearchResponse.class);
+        when(duplicateNameResponse.getHits()).thenReturn(TestHelpers.createSearchHits(1));
+        AtomicInteger configNameSearches = new AtomicInteger();
+        AtomicInteger indexRequests = new AtomicInteger();
+
+        NodeClient clientSpy = spy(createPutClient(existingDetector, duplicateNameResponse, configNameSearches, indexRequests));
+        useDataAccess(clientSpy);
+        allowNoRunningBatchTask();
+        handler = createPutHandler(updatedDetector);
+
+        CountDownLatch inProgressLatch = new CountDownLatch(1);
+        handler.start(ActionListener.wrap(r -> {
+            assertNotNull(r);
+            inProgressLatch.countDown();
+        }, e -> {
+            assertTrue("actual: " + e, false);
+            inProgressLatch.countDown();
+        }));
+
+        assertTrue(inProgressLatch.await(10, TimeUnit.SECONDS));
+        assertEquals(0, configNameSearches.get());
+        assertEquals(1, indexRequests.get());
+        verify(clientSpy, times(1)).execute(eq(IndexAction.INSTANCE), any(), any());
+    }
+
+    public void testPutWithRenamedDetectorStillChecksDuplicateName() throws IOException, InterruptedException {
+        AnomalyDetector existingDetector = buildSingleStreamDetector("old-name");
+        AnomalyDetector updatedDetector = buildSingleStreamDetector("new-name");
+
+        SearchResponse duplicateNameResponse = mock(SearchResponse.class);
+        when(duplicateNameResponse.getHits()).thenReturn(TestHelpers.createSearchHits(1));
+        AtomicInteger configNameSearches = new AtomicInteger();
+        AtomicInteger indexRequests = new AtomicInteger();
+
+        NodeClient clientSpy = spy(createPutClient(existingDetector, duplicateNameResponse, configNameSearches, indexRequests));
+        useDataAccess(clientSpy);
+        allowNoRunningBatchTask();
+        handler = createPutHandler(updatedDetector);
+
+        CountDownLatch inProgressLatch = new CountDownLatch(1);
+        handler.start(ActionListener.wrap(r -> {
+            assertTrue("should throw error", false);
+            inProgressLatch.countDown();
+        }, e -> {
+            assertTrue("actual: " + e, e instanceof OpenSearchStatusException);
+            assertEquals(RestStatus.CONFLICT, ((OpenSearchStatusException) e).status());
+            inProgressLatch.countDown();
+        }));
+
+        assertTrue(inProgressLatch.await(10, TimeUnit.SECONDS));
+        assertEquals(1, configNameSearches.get());
+        assertEquals(0, indexRequests.get());
+        verify(clientSpy, never()).execute(eq(IndexAction.INSTANCE), any(), any());
     }
 
     // we support upto 2 category fields now
@@ -213,11 +416,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        useDataAccess(clientSpy);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -236,7 +439,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -295,11 +499,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         };
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        useDataAccess(client);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -317,7 +521,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -384,11 +589,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        useDataAccess(clientSpy);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -406,7 +611,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -484,14 +690,14 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        useDataAccess(clientSpy);
         ClusterName clusterName = new ClusterName("test");
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -509,7 +715,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -611,11 +818,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        useDataAccess(clientSpy);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -633,7 +840,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -706,8 +914,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -725,7 +932,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -793,8 +1001,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -812,7 +1019,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -879,7 +1087,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
                         false,
                         Instant.now(),
                         detector.getFrequency(),
-                        null
+                        null,
+                        detector.getTenantId()
                     );
                     try {
                         listener.onResponse((Response) TestHelpers.createGetResponse(clone, clone.getId(), ADCommonName.CONFIG_INDEX));
@@ -892,13 +1101,13 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.PUT;
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -916,7 +1125,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -931,5 +1141,82 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         assertTrue(inProgressLatch.await(10, TimeUnit.SECONDS));
         verify(clientSpy, times(1)).execute(eq(GetFieldMappingsAction.INSTANCE), any(), any());
         verify(clientSpy, times(1)).execute(eq(GetAction.INSTANCE), any(), any());
+    }
+
+    public void testAossRejectsFlattenCustomResultIndexBeforeCreatingResources() throws InterruptedException {
+        ADDelegatingDataManagement dataManagement = mock(ADDelegatingDataManagement.class);
+        Settings aossSettings = Settings.builder().put(AnomalyDetectorSettings.REMOTE_METADATA_SERVICE_NAME.getKey(), "aoss").build();
+        AnomalyDetector flatteningDetector = new AnomalyDetector(
+            detector.getId(),
+            detector.getVersion(),
+            detector.getName(),
+            detector.getDescription(),
+            detector.getTimeField(),
+            detector.getIndices(),
+            detector.getFeatureAttributes(),
+            detector.getFilterQuery(),
+            detector.getInterval(),
+            detector.getWindowDelay(),
+            detector.getShingleSize(),
+            detector.getUiMetadata(),
+            detector.getSchemaVersion(),
+            Instant.now(),
+            detector.getCategoryFields(),
+            detector.getUser(),
+            "opensearch-ad-plugin-result-custom",
+            detector.getImputationOption(),
+            detector.getRecencyEmphasis(),
+            detector.getSeasonIntervals(),
+            detector.getHistoryIntervals(),
+            null,
+            detector.getCustomResultIndexMinSize(),
+            detector.getCustomResultIndexMinAge(),
+            detector.getCustomResultIndexTTL(),
+            true,
+            Instant.now(),
+            detector.getFrequency(),
+            null,
+            detector.getTenantId()
+        );
+
+        handler = new IndexAnomalyDetectorActionHandler(
+            clusterService,
+            dataAccess,
+            transportService,
+            dataManagement,
+            detectorId,
+            seqNo,
+            primaryTerm,
+            refreshPolicy,
+            flatteningDetector,
+            requestTimeout,
+            maxSingleEntityAnomalyDetectors,
+            maxMultiEntityAnomalyDetectors,
+            maxAnomalyFeatures,
+            maxCategoricalFields,
+            RestRequest.Method.POST,
+            xContentRegistry(),
+            null,
+            adTaskManager,
+            searchFeatureDao,
+            aossSettings,
+            runContext
+        );
+
+        final CountDownLatch inProgressLatch = new CountDownLatch(1);
+        handler.start(ActionListener.wrap(r -> {
+            assertTrue("should not reach here", false);
+            inProgressLatch.countDown();
+        }, e -> {
+            assertTrue(e instanceof OpenSearchStatusException);
+            OpenSearchStatusException statusException = (OpenSearchStatusException) e;
+            assertEquals(RestStatus.BAD_REQUEST, statusException.status());
+            assertTrue(statusException.getMessage().contains(AbstractTimeSeriesActionHandler.AOSS_FLATTEN_CUSTOM_RESULT_INDEX_UNSUPPORTED));
+            inProgressLatch.countDown();
+        }));
+
+        assertTrue(inProgressLatch.await(10, TimeUnit.SECONDS));
+        verify(dataManagement, never()).initCustomResultIndexAndExecute(any(), any(), any(), any());
+        verify(dataManagement, never()).initFlattenedResultIndex(any(), any(), any());
     }
 }

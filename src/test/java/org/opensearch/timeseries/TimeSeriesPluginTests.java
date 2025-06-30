@@ -11,20 +11,8 @@
 
 package org.opensearch.timeseries;
 
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
-
-import java.util.List;
-
 import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.opensearch.ad.ADUnitTestCase;
-import org.opensearch.cluster.service.ClusterService;
-import org.opensearch.common.settings.ClusterSettings;
-import org.opensearch.common.settings.Setting;
-import org.opensearch.common.settings.Settings;
-import org.opensearch.env.Environment;
-import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.transport.client.Client;
 
 import io.protostuff.LinkedBuffer;
 
@@ -53,27 +41,7 @@ public class TimeSeriesPluginTests extends ADUnitTestCase {
     }
 
     public void testDeserializeRCFBufferPool() throws Exception {
-        Settings.Builder settingsBuilder = Settings.builder();
-        List<Setting<?>> allSettings = plugin.getSettings();
-        for (Setting<?> setting : allSettings) {
-            Object defaultVal = setting.getDefault(Settings.EMPTY);
-            if (defaultVal instanceof Boolean) {
-                settingsBuilder.put(setting.getKey(), (Boolean) defaultVal);
-            } else {
-                settingsBuilder.put(setting.getKey(), defaultVal.toString());
-            }
-        }
-        Settings settings = settingsBuilder.build();
-
-        Setting<?>[] settingArray = new Setting<?>[allSettings.size()];
-        settingArray = allSettings.toArray(settingArray);
-
-        ClusterSettings clusterSettings = clusterSetting(settings, settingArray);
-        ClusterService clusterService = new ClusterService(settings, clusterSettings, mock(ThreadPool.class), null);
-
-        Environment environment = mock(Environment.class);
-        when(environment.settings()).thenReturn(settings);
-        plugin.createComponents(mock(Client.class), clusterService, null, null, null, null, environment, null, null, null, null);
+        plugin.serializeRCFBufferPool = plugin.createSerializeRCFBufferPool();
         GenericObjectPool<LinkedBuffer> deserializeRCFBufferPool = plugin.serializeRCFBufferPool;
         deserializeRCFBufferPool.addObject();
         LinkedBuffer buffer = deserializeRCFBufferPool.borrowObject();

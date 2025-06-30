@@ -9,6 +9,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -91,7 +92,8 @@ public class ADSaveResultStrategy implements SaveResultStrategy<AnomalyResult, T
                     result.getAnomalyGrade() > 0 ? RequestPriority.HIGH : RequestPriority.MEDIUM,
                     result,
                     config.getCustomResultIndexOrAlias(),
-                    config.getFlattenResultIndexAlias()
+                    config.getFlattenResultIndexAlias(),
+                    config.getDataSourceId()
                 )
             );
     }
@@ -107,6 +109,16 @@ public class ADSaveResultStrategy implements SaveResultStrategy<AnomalyResult, T
         Optional<Entity> entity,
         String taskId
     ) {
+        long saveAllStartNanos = System.nanoTime();
+        LOG
+            .info(
+                "AD saveAllResults start config={} model={} taskId={} thresholdResults={} entityPresent={}",
+                config.getId(),
+                modelId,
+                taskId,
+                results.size(),
+                entity.isPresent()
+            );
         List<ADResultWriteRequest> writeRequests = new ArrayList<>();
         for (int i = 0; i < results.size(); i++) {
             ThresholdingResult result = results.get(i);
@@ -134,15 +146,48 @@ public class ADSaveResultStrategy implements SaveResultStrategy<AnomalyResult, T
                                 r.getAnomalyGrade() > 0 ? RequestPriority.HIGH : RequestPriority.MEDIUM,
                                 r,
                                 config.getCustomResultIndexOrAlias(),
-                                config.getFlattenResultIndexAlias()
+                                config.getFlattenResultIndexAlias(),
+                                config.getDataSourceId()
                             )
                         );
                 }
             }
         }
-        LOG.debug("writeRequests: {}, resultWriteWorker: {}", writeRequests.size(), resultWriteWorker);
+        LOG
+            .info(
+                "AD saveAllResults converted config={} model={} taskId={} writeRequests={} conversionElapsedMs={}",
+                config.getId(),
+                modelId,
+                taskId,
+                writeRequests.size(),
+                elapsedMillis(saveAllStartNanos)
+            );
         if (!writeRequests.isEmpty()) {
+            long putAllStartNanos = System.nanoTime();
             resultWriteWorker.putAll(writeRequests);
+            LOG
+                .info(
+                    "AD saveAllResults putAll returned config={} model={} taskId={} writeRequests={} putAllElapsedMs={} totalElapsedMs={}",
+                    config.getId(),
+                    modelId,
+                    taskId,
+                    writeRequests.size(),
+                    elapsedMillis(putAllStartNanos),
+                    elapsedMillis(saveAllStartNanos)
+                );
+        } else {
+            LOG
+                .info(
+                    "AD saveAllResults no writes config={} model={} taskId={} totalElapsedMs={}",
+                    config.getId(),
+                    modelId,
+                    taskId,
+                    elapsedMillis(saveAllStartNanos)
+                );
         }
+    }
+
+    private static long elapsedMillis(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
     }
 }

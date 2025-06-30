@@ -114,6 +114,7 @@ public class MLUtil {
             model.getLeft(),
             detectorId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,

@@ -19,6 +19,7 @@ import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
 import org.opensearch.ad.caching.ADCacheProvider;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -27,8 +28,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.Sample;
@@ -71,7 +71,7 @@ public class ADHCImputeTransportAction extends
     private static final Logger LOG = LogManager.getLogger(ADHCImputeTransportAction.class);
 
     private ADCacheProvider cache;
-    private NodeStateManager nodeStateManager;
+    private StateManager nodeStateManager;
     private ADRealTimeInferencer adInferencer;
     private HashRing hashRing;
 
@@ -82,7 +82,7 @@ public class ADHCImputeTransportAction extends
         TransportService transportService,
         ActionFilters actionFilters,
         ADCacheProvider priorityCache,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         ADRealTimeInferencer adInferencer,
         HashRing hashRing
     ) {
@@ -94,7 +94,7 @@ public class ADHCImputeTransportAction extends
             actionFilters,
             ADHCImputeRequest::new,
             ADHCImputeNodeRequest::new,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             ADHCImputeNodeResponse.class
         );
         this.cache = priorityCache;
@@ -125,7 +125,8 @@ public class ADHCImputeTransportAction extends
     @Override
     protected ADHCImputeNodeResponse nodeOperation(ADHCImputeNodeRequest nodeRequest) {
         String configId = nodeRequest.getRequest().getConfigId();
-        nodeStateManager.getConfig(configId, AnalysisType.AD, true, ActionListenerExecutor.wrap(configOptional -> {
+        String tenantId = nodeRequest.getRequest().getTenantId();
+        nodeStateManager.getConfig(configId, tenantId, AnalysisType.AD, true, ActionListenerExecutor.wrap(configOptional -> {
             if (configOptional.isEmpty()) {
                 LOG.warn(String.format(Locale.ROOT, "cannot find config %s", configId));
                 return;
@@ -135,16 +136,17 @@ public class ADHCImputeTransportAction extends
             long dataStartMillis = nodeRequest.getRequest().getDataStartMillis();
             String taskId = nodeRequest.getRequest().getTaskId();
 
-            List<ModelState<ThresholdedRandomCutForest>> allModels = cache.get().getAllModels(configId);
+            List<ModelState<ThresholdedRandomCutForest>> allModels = cache.get().getAllModels(config.getTenantId(), configId);
             processImputeIteration(
                 allModels.iterator(),
                 config,
                 config.getEnabledFeatureIds().size(),
                 dataEndMillis,
                 dataStartMillis,
-                taskId
+                taskId,
+                nodeRequest.getRequest()
             );
-        }, e -> nodeStateManager.setException(configId, e), threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)));
+        }, e -> nodeStateManager.setException(configId, e), threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)));
 
         Optional<Exception> previousException = nodeStateManager.fetchExceptionAndClear(configId);
 
@@ -161,13 +163,14 @@ public class ADHCImputeTransportAction extends
         int featureSize,
         long dataEndMillis,
         long dataStartMillis,
-        String taskId
+        String taskId,
+        ADHCImputeRequest request
     ) {
         if (!modelStateIterator.hasNext()) {
             return;
         }
         ModelState<ThresholdedRandomCutForest> modelState = modelStateIterator.next();
-        if (shouldProcessModelState(modelState, dataEndMillis, clusterService, hashRing)) {
+        if (shouldProcessModelState(modelState, dataEndMillis, request, clusterService, hashRing)) {
             double[] nanArray = new double[featureSize];
             Arrays.fill(nanArray, Double.NaN);
             LOG
@@ -184,14 +187,14 @@ public class ADHCImputeTransportAction extends
                     config,
                     taskId,
                     ActionListener.wrap(r -> {
-                        processImputeIteration(modelStateIterator, config, featureSize, dataEndMillis, dataStartMillis, taskId);
+                        processImputeIteration(modelStateIterator, config, featureSize, dataEndMillis, dataStartMillis, taskId, request);
                     }, e -> {
                         LOG.error("Failed to impute for model " + modelState.getModelId(), e);
-                        processImputeIteration(modelStateIterator, config, featureSize, dataEndMillis, dataStartMillis, taskId);
+                        processImputeIteration(modelStateIterator, config, featureSize, dataEndMillis, dataStartMillis, taskId, request);
                     })
                 );
         } else {
-            processImputeIteration(modelStateIterator, config, featureSize, dataEndMillis, dataStartMillis, taskId);
+            processImputeIteration(modelStateIterator, config, featureSize, dataEndMillis, dataStartMillis, taskId, request);
         }
     }
 
@@ -205,6 +208,11 @@ public class ADHCImputeTransportAction extends
      * - The entity associated with the model state is present.
      * - The owning node for real-time processing of the entity, with the same local version, is present in the hash ring.
      * - The owning node for real-time processing matches the current local node.
+     *   The HC impute request is broadcast to all eligible nodes so each node can inspect its local hot models,
+     *   but a node may still host stale model states after hash ring changes. This check ensures only the
+     *   canonical owning node applies imputation and prevents both the old and new owner from advancing the
+     *   same entity model. In multi-tenant mode, the HTTP hop carries the target hash-ring node id so we can
+     *   compare ownership in hash-ring key space instead of guessing from cluster-state addresses.
      *
      * This method helps avoid processing model states that were already handled in previous intervals. The conditions
      * ensure that only the relevant model states are processed while accounting for scenarios where processing can occur
@@ -219,6 +227,7 @@ public class ADHCImputeTransportAction extends
     private boolean shouldProcessModelState(
         ModelState<ThresholdedRandomCutForest> modelState,
         long dataEndTime,
+        ADHCImputeRequest request,
         ClusterService clusterService,
         HashRing hashRing
     ) {
@@ -238,7 +247,32 @@ public class ADHCImputeTransportAction extends
             && dataEndTime / 1000 > lastInputTimestampSecs
             && modelState.getEntity().isPresent()
             && owningNode.isPresent()
-            && owningNode.get().getId().equals(clusterService.localNode().getId());
+            && isLocalOwningNode(owningNode.get(), request, clusterService.localNode());
+    }
+
+    private boolean isLocalOwningNode(DiscoveryNode owningNode, ADHCImputeRequest request, DiscoveryNode localNode) {
+        String localOwningNodeId = request.getTargetNodeId();
+        if (localOwningNodeId == null && localNode != null) {
+            localOwningNodeId = localNode.getId();
+        }
+        if (localOwningNodeId == null) {
+            return false;
+        }
+        if (localOwningNodeId.equals(owningNode.getId())) {
+            return true;
+        }
+        return extractNodeHost(localOwningNodeId).equals(extractNodeHost(owningNode.getId()));
+    }
+
+    private String extractNodeHost(String nodeId) {
+        if (nodeId == null) {
+            return "";
+        }
+        int separator = nodeId.lastIndexOf(':');
+        if (separator <= 0) {
+            return nodeId;
+        }
+        return nodeId.substring(0, separator);
     }
 
 }

@@ -67,6 +67,11 @@ public class ADHCBatchTaskCache {
     // Record how many times the task has retried. Key is task id.
     private Map<String, AtomicInteger> taskRetryTimes;
 
+    // Count successful entity tasks on the coordinating node. The task state index
+    // can lag behind this cache in multitenant deployments that replicate state
+    // through an asynchronous pipeline.
+    private AtomicInteger successfulEntityTaskCount;
+
     // record last time when HC detector scales entity task slots
     private Instant lastScaleEntityTaskSlotsTime;
 
@@ -79,6 +84,7 @@ public class ADHCBatchTaskCache {
         this.tempEntities = new ConcurrentLinkedQueue<>();
         this.taskRetryTimes = new ConcurrentHashMap<>();
         this.detectorTaskUpdatingSemaphore = new Semaphore(1);
+        this.successfulEntityTaskCount = new AtomicInteger(0);
         this.topEntitiesInited = false;
         this.lastScaleEntityTaskSlotsTime = Instant.now();
         this.latestTaskRunTime = Instant.now();
@@ -136,6 +142,15 @@ public class ADHCBatchTaskCache {
 
     public int getTaskRetryTimes(String taskId) {
         return taskRetryTimes.computeIfAbsent(taskId, id -> new AtomicInteger(0)).get();
+    }
+
+    public void recordSuccessfulEntityTask() {
+        this.refreshLatestTaskRunTime();
+        this.successfulEntityTaskCount.incrementAndGet();
+    }
+
+    public int getSuccessfulEntityTaskCount() {
+        return this.successfulEntityTaskCount.get();
     }
 
     /**
@@ -235,6 +250,7 @@ public class ADHCBatchTaskCache {
         this.runningEntities.clear();
         this.tempEntities.clear();
         this.taskRetryTimes.clear();
+        this.successfulEntityTaskCount.set(0);
     }
 
     /**

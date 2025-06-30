@@ -24,6 +24,8 @@ public class JobRequestTests extends OpenSearchTestCase {
         long endMillis = 1622635200000L;   // June 2, 2021 00:00:00 GMT
         double[] datapoint = new double[] { 1.0, 2.0, 3.0 };
         String taskId = "test-task-id";
+        String tenantId = "tenant-id";
+        String configJson = "{\"name\":\"detector\"}";
 
         // Create the original request
         SingleStreamResultRequest originalRequest = new SingleStreamResultRequest(
@@ -32,7 +34,9 @@ public class JobRequestTests extends OpenSearchTestCase {
             startMillis,
             endMillis,
             datapoint,
-            taskId
+            taskId,
+            tenantId,
+            configJson
         );
 
         // Serialize the request to a BytesStreamOutput
@@ -50,6 +54,8 @@ public class JobRequestTests extends OpenSearchTestCase {
         assertEquals(originalRequest.getEnd(), deserializedRequest.getEnd());
         assertArrayEquals(originalRequest.getDataPoint(), deserializedRequest.getDataPoint(), 0.0001);
         assertEquals(originalRequest.getTaskId(), deserializedRequest.getTaskId());
+        assertEquals(originalRequest.getTenantId(), deserializedRequest.getTenantId());
+        assertEquals(originalRequest.getConfigJson(), deserializedRequest.getConfigJson());
     }
 
     public void testSerializationDeserialization_NullTaskId() throws IOException {
@@ -66,7 +72,8 @@ public class JobRequestTests extends OpenSearchTestCase {
             startMillis,
             endMillis,
             datapoint,
-            taskId
+            taskId,
+            null
         );
 
         BytesStreamOutput out = new BytesStreamOutput();
@@ -90,8 +97,19 @@ public class JobRequestTests extends OpenSearchTestCase {
         long endMillis = 1622635200000L;
         double[] datapoint = new double[] { 1.0, 2.0, 3.0 };
         String taskId = "test-task-id";
+        String tenantId = "tenant-id";
+        String configJson = "{\"name\":\"detector\"}";
 
-        SingleStreamResultRequest request = new SingleStreamResultRequest(configId, modelId, startMillis, endMillis, datapoint, taskId);
+        SingleStreamResultRequest request = new SingleStreamResultRequest(
+            configId,
+            modelId,
+            startMillis,
+            endMillis,
+            datapoint,
+            taskId,
+            tenantId,
+            configJson
+        );
 
         XContentBuilder builder = XContentFactory.jsonBuilder();
         request.toXContent(builder, null);
@@ -100,7 +118,7 @@ public class JobRequestTests extends OpenSearchTestCase {
         String expectedJson = String
             .format(
                 Locale.ROOT,
-                "{\"%s\":\"%s\",\"%s\":\"%s\",\"%s\":%d,\"%s\":%d,\"%s\":[1.0,2.0,3.0],\"%s\":\"%s\"}",
+                "{\"%s\":\"%s\",\"%s\":\"%s\",\"%s\":%d,\"%s\":%d,\"%s\":[1.0,2.0,3.0],\"%s\":\"%s\",\"%s\":\"%s\"}",
                 CommonName.CONFIG_ID_KEY,
                 configId,
                 CommonName.MODEL_ID_KEY,
@@ -111,10 +129,15 @@ public class JobRequestTests extends OpenSearchTestCase {
                 endMillis,
                 CommonName.VALUE_LIST_FIELD,
                 CommonName.RUN_ONCE_FIELD,
-                taskId
+                taskId,
+                CommonName.TENANT_ID_FIELD,
+                tenantId
             );
 
-        assertEquals(expectedJson, jsonString);
+        assertTrue(jsonString.contains(expectedJson.substring(0, expectedJson.length() - 1)));
+        assertTrue(
+            jsonString.contains(String.format(Locale.ROOT, ",\"%s\":\"{\\\"name\\\":\\\"detector\\\"}\"}", CommonName.CONFIG_JSON_FIELD))
+        );
     }
 
     public void testToXContent_NullTaskId() throws IOException {
@@ -125,7 +148,15 @@ public class JobRequestTests extends OpenSearchTestCase {
         double[] datapoint = new double[] { 1.0, 2.0, 3.0 };
         String taskId = null;
 
-        SingleStreamResultRequest request = new SingleStreamResultRequest(configId, modelId, startMillis, endMillis, datapoint, taskId);
+        SingleStreamResultRequest request = new SingleStreamResultRequest(
+            configId,
+            modelId,
+            startMillis,
+            endMillis,
+            datapoint,
+            taskId,
+            null
+        );
 
         XContentBuilder builder = XContentFactory.jsonBuilder();
         request.toXContent(builder, null);
@@ -158,7 +189,15 @@ public class JobRequestTests extends OpenSearchTestCase {
         double[] datapoint = new double[] { 1.0, 2.0, 3.0 };
         String taskId = "test-task-id";
 
-        SingleStreamResultRequest request = new SingleStreamResultRequest(configId, modelId, startMillis, endMillis, datapoint, taskId);
+        SingleStreamResultRequest request = new SingleStreamResultRequest(
+            configId,
+            modelId,
+            startMillis,
+            endMillis,
+            datapoint,
+            taskId,
+            null
+        );
 
         ActionRequestValidationException validationException = request.validate();
         assertNotNull(validationException);
@@ -173,7 +212,15 @@ public class JobRequestTests extends OpenSearchTestCase {
         double[] datapoint = new double[] { 1.0, 2.0, 3.0 };
         String taskId = "test-task-id";
 
-        SingleStreamResultRequest request = new SingleStreamResultRequest(configId, modelId, startMillis, endMillis, datapoint, taskId);
+        SingleStreamResultRequest request = new SingleStreamResultRequest(
+            configId,
+            modelId,
+            startMillis,
+            endMillis,
+            datapoint,
+            taskId,
+            null
+        );
 
         ActionRequestValidationException validationException = request.validate();
         assertNotNull(validationException);
@@ -188,7 +235,15 @@ public class JobRequestTests extends OpenSearchTestCase {
         double[] datapoint = new double[] { 1.0, 2.0, 3.0 };
         String taskId = "test-task-id";
 
-        SingleStreamResultRequest request = new SingleStreamResultRequest(configId, modelId, startMillis, endMillis, datapoint, taskId);
+        SingleStreamResultRequest request = new SingleStreamResultRequest(
+            configId,
+            modelId,
+            startMillis,
+            endMillis,
+            datapoint,
+            taskId,
+            null
+        );
 
         ActionRequestValidationException validationException = request.validate();
         assertNotNull(validationException);

@@ -23,9 +23,10 @@ import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.ExistsQueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Config;
-import org.opensearch.transport.client.Client;
 
 public class ProfileUtil {
     /**
@@ -90,7 +91,7 @@ public class ProfileUtil {
     public static void confirmRealtimeResultStatus(
         Config config,
         long startTime,
-        Client client,
+        DataAccess dataAccess,
         AnalysisType analysisType,
         ActionListener<SearchResponse> listener
     ) {
@@ -103,6 +104,6 @@ public class ProfileUtil {
             throw new IllegalArgumentException("Analysis type is not supported, type: : " + analysisType);
         }
 
-        client.search(searchLatestResult, listener);
+        dataAccess.search(searchLatestResult, TenantContext.user(config), listener);
     }
 }

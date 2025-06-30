@@ -22,21 +22,22 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.AnomalyDetectorJobTransportAction;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.transport.JobRequest;
 import org.opensearch.timeseries.transport.JobResponse;
@@ -50,15 +51,16 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends HandledTransp
     private final Client client;
     private final ClusterService clusterService;
     private final Settings settings;
-    private final ADIndexManagement anomalyDetectionIndices;
+    private final ADDelegatingDataManagement anomalyDetectionIndices;
     private final NamedXContentRegistry xContentRegistry;
     private volatile Boolean filterByEnabled;
-    private ThreadContext.StoredContext context;
+    private RunContext.RestorableContext context;
     private final ADTaskManager adTaskManager;
     private final TransportService transportService;
     private final ExecuteADResultResponseRecorder recorder;
     private final NodeStateManager nodeStateManager;
     private Clock clock;
+    private final RunContext runContext;
 
     @Inject
     public MockAnomalyDetectorJobTransportActionWithUser(
@@ -67,7 +69,7 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends HandledTransp
         Client client,
         ClusterService clusterService,
         Settings settings,
-        ADIndexManagement anomalyDetectionIndices,
+        ADDelegatingDataManagement anomalyDetectionIndices,
         NamedXContentRegistry xContentRegistry,
         ADTaskManager adTaskManager,
         ExecuteADResultResponseRecorder recorder,
@@ -84,8 +86,8 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends HandledTransp
         filterByEnabled = AD_FILTER_BY_BACKEND_ROLES.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_FILTER_BY_BACKEND_ROLES, it -> filterByEnabled = it);
 
-        ThreadContext threadContext = new ThreadContext(settings);
-        context = threadContext.stashContext();
+        context = () -> {};
+        this.runContext = new SdkRunContext();
         this.recorder = recorder;
         this.nodeStateManager = nodeStateManager;
         this.clock = Clock.systemDefaultZone();
@@ -101,22 +103,33 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends HandledTransp
         String userStr = "user_name|backendrole1,backendrole2|roles1,role2";
         // By the time request reaches here, the user permissions are validated by Security plugin.
         User user = User.parse(userStr);
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
-            resolveUserAndExecute(
-                user,
-                detectorId,
-                filterByEnabled,
-                listener,
-                (anomalyDetector) -> executeDetector(listener, detectorId, rawPath, requestTimeout, user, detectionDateRange, historical),
-                client,
-                clusterService,
-                xContentRegistry,
-                AnomalyDetector.class
+        runContext
+            .runWithSystemAuth(
+                () -> resolveUserAndExecute(
+                    user,
+                    detectorId,
+                    filterByEnabled,
+                    listener,
+                    (anomalyDetector) -> executeDetector(
+                        listener,
+                        detectorId,
+                        rawPath,
+                        requestTimeout,
+                        user,
+                        detectionDateRange,
+                        historical
+                    ),
+                    xContentRegistry,
+                    nodeStateManager,
+                    anomalyDetectionIndices,
+                    null,
+                    AnomalyDetector.class
+                ),
+                exception -> {
+                    logger.error(exception);
+                    listener.onFailure(exception);
+                }
             );
-        } catch (Exception e) {
-            logger.error(e);
-            listener.onFailure(e);
-        }
     }
 
     private void executeDetector(
@@ -135,13 +148,14 @@ public class MockAnomalyDetectorJobTransportActionWithUser extends HandledTransp
             adTaskManager,
             recorder,
             nodeStateManager,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
         if (rawPath.endsWith(RestHandlerUtils.START_JOB)) {
-            handler.startConfig(detectorId, detectionDateRange, user, transportService, context, clock, listener);
+            handler.startConfig(detectorId, null, detectionDateRange, user, transportService, context, clock, listener);
         } else if (rawPath.endsWith(RestHandlerUtils.STOP_JOB)) {
             // Stop detector
-            handler.stopConfig(detectorId, historical, user, transportService, listener);
+            handler.stopConfig(detectorId, null, historical, user, transportService, listener);
         }
     }
 }

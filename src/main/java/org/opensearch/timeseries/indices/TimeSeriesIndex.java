@@ -11,6 +11,8 @@
 
 package org.opensearch.timeseries.indices;
 
+import java.util.Locale;
+
 import org.opensearch.timeseries.constant.CommonName;
 
 public interface TimeSeriesIndex {
@@ -24,11 +26,21 @@ public interface TimeSeriesIndex {
 
     public boolean isConfigIndex();
 
+    public boolean isResultIndex();
+
     public default boolean isJobIndex() {
         return CommonName.JOB_INDEX.equals(getIndexName());
     }
 
     public default boolean isCustomResultIndex() {
         return getIndexName() == CUSTOM_RESULT_INDEX;
+    }
+
+    static String getCustomResultIndexPattern(String customResultIndexAlias) {
+        return String.format(Locale.ROOT, "<%s-history-{now/d}-1>", customResultIndexAlias);
+    }
+
+    static String getAllCustomResultIndexPattern(String customResultIndexAlias) {
+        return String.format(Locale.ROOT, "%s*", customResultIndexAlias);
     }
 }

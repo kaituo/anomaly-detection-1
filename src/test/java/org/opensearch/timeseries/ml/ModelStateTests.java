@@ -16,6 +16,7 @@ import static org.hamcrest.Matchers.greaterThan;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneId;
+import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.test.OpenSearchTestCase;
@@ -25,7 +26,7 @@ public class ModelStateTests extends OpenSearchTestCase {
     public void testLastUsedTimeAdvancesOnMutations() {
         Instant base = Instant.parse("2024-01-01T00:00:00Z");
         IncrementingClock clock = new IncrementingClock(base);
-        ModelState<Object> state = new ModelState<>(new Object(), "model", "config", "type", clock);
+        ModelState<Object> state = new ModelState<>(new Object(), "model", "config", null, "type", clock);
 
         Instant initial = state.getLastUsedTime();
 
@@ -42,6 +43,26 @@ public class ModelStateTests extends OpenSearchTestCase {
         assertThat(afterSetModel, greaterThan(initial));
         assertThat(afterGetModel, greaterThan(afterSetModel));
         assertThat(afterSetPriority, greaterThan(afterGetModel));
+    }
+
+    public void testLastProcessedDataEndTimeIsMonotonicAndExported() {
+        Instant base = Instant.parse("2024-01-01T00:00:00Z");
+        ModelState<Object> state = new ModelState<>(new Object(), "model", "config", "tenant", "type", Clock.fixed(base, ZoneId.of("UTC")));
+        Instant processed = base.plusSeconds(60);
+        Instant older = base.plusSeconds(30);
+
+        assertFalse(state.hasProcessedDataEndTime(processed));
+
+        state.setLastProcessedDataEndTime(processed);
+        state.setLastProcessedDataEndTime(older);
+
+        assertEquals(processed, state.getLastProcessedDataEndTime());
+        assertTrue(state.hasProcessedDataEndTime(older));
+        assertTrue(state.hasProcessedDataEndTime(processed));
+        assertFalse(state.hasProcessedDataEndTime(processed.plusMillis(1)));
+
+        Map<String, Object> stats = state.getModelStateAsMap();
+        assertEquals(processed.toEpochMilli(), stats.get(ModelState.LAST_PROCESSED_DATA_END_TIME_KEY));
     }
 
     private static class IncrementingClock extends Clock {

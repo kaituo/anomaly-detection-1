@@ -30,8 +30,11 @@ import org.opensearch.ad.mock.transport.MockForwardADTaskRequest_1_0;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.common.io.stream.BytesStreamOutput;
+import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.common.io.stream.NamedWriteableAwareStreamInput;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
+import org.opensearch.core.xcontent.ToXContent;
+import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.test.InternalSettingsPlugin;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
@@ -91,6 +94,7 @@ public class ForwardADTaskRequestTests extends OpenSearchSingleNodeTestCase {
             null,
             Instant.now(),
             interval,
+            null,
             null
         );
         ForwardADTaskRequest request = new ForwardADTaskRequest(detector, null, null, null, null, Version.V_2_1_0);
@@ -113,6 +117,21 @@ public class ForwardADTaskRequestTests extends OpenSearchSingleNodeTestCase {
         NamedWriteableAwareStreamInput input = new NamedWriteableAwareStreamInput(output.bytes().streamInput(), writableRegistry());
         ForwardADTaskRequest parsedInput = new ForwardADTaskRequest(input);
         assertEquals(request, parsedInput);
+    }
+
+    public void testParseXContentUsesPathDetectorId() throws IOException {
+        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableList.of());
+        ForwardADTaskRequest request = new ForwardADTaskRequest(detector, null, randomUser(), START);
+
+        XContentBuilder builder = XContentFactory.jsonBuilder();
+        request.toXContent(builder, ToXContent.EMPTY_PARAMS);
+
+        ForwardADTaskRequest parsedRequest = ForwardADTaskRequest.parseWithDetectorId(createParser(builder), detector.getId());
+
+        assertNotNull(parsedRequest.getDetector());
+        assertEquals(detector.getId(), parsedRequest.getDetector().getId());
+        assertEquals(request.getAdTaskAction(), parsedRequest.getAdTaskAction());
+        assertEquals(request.getUser(), parsedRequest.getUser());
     }
 
     public void testParseRequestFromOldNodeWithNewCode() throws IOException {

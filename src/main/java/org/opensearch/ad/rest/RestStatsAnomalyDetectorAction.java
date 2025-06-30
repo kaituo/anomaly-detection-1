@@ -14,17 +14,24 @@ package org.opensearch.ad.rest;
 import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_BASE_URI;
 import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.LEGACY_AD_BASE;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.stats.ADStats;
 import org.opensearch.ad.transport.StatsAnomalyDetectorAction;
+import org.opensearch.common.settings.Settings;
+import org.opensearch.core.common.Strings;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.rest.RestStatsAction;
 import org.opensearch.timeseries.transport.StatsRequest;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -35,15 +42,18 @@ import com.google.common.collect.ImmutableList;
 public class RestStatsAnomalyDetectorAction extends RestStatsAction {
 
     private static final String STATS_ANOMALY_DETECTOR_ACTION = "stats_anomaly_detector";
+    private final Settings settings;
 
     /**
      * Constructor
      *
      * @param timeSeriesStats TimeSeriesStats object
      * @param nodeFilter util class to get eligible data nodes
+     * @param settings Settings object
      */
-    public RestStatsAnomalyDetectorAction(ADStats timeSeriesStats, DiscoveryNodeFilterer nodeFilter) {
+    public RestStatsAnomalyDetectorAction(ADStats timeSeriesStats, DiscoveryNodeSelector nodeFilter, Settings settings) {
         super(timeSeriesStats, nodeFilter);
+        this.settings = settings;
     }
 
     @Override
@@ -52,12 +62,39 @@ public class RestStatsAnomalyDetectorAction extends RestStatsAction {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
         }
-        StatsRequest adStatsRequest = getRequest(request);
+        boolean multiTenancyEnabled = AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings);
+        validatePublicMultiTenantNodeSelector(request, multiTenancyEnabled);
+        String tenantId = TenantAwareHelper.getTenantID(multiTenancyEnabled, request);
+        StatsRequest adStatsRequest = getRequest(request, tenantId);
         return channel -> client.execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest, new RestToXContentListener<>(channel));
+    }
+
+    private void validatePublicMultiTenantNodeSelector(RestRequest request, boolean multiTenancyEnabled) {
+        if (!multiTenancyEnabled) {
+            return;
+        }
+
+        String nodesIdsStr = request.param("nodeId");
+        if (Strings.isEmpty(nodesIdsStr)) {
+            return;
+        }
+
+        Set<String> requestedNodes = Arrays
+            .stream(nodesIdsStr.split(","))
+            .filter(node -> !Strings.isEmpty(node))
+            .collect(Collectors.toSet());
+        if (requestedNodes.size() == 1 && requestedNodes.contains(StatsRequest.ALL_STATS_KEY)) {
+            return;
+        }
+
+        throw new IllegalArgumentException(
+            "Node-specific stats requests are not supported in multi-tenant mode. Use the stats endpoint without a nodeId or with _all."
+        );
     }
 
     @Override

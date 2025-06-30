@@ -906,6 +906,21 @@ public class ADTaskCacheManager extends TaskCacheManager {
         return false;
     }
 
+    public void recordSuccessfulEntityTask(String detectorId) {
+        ADHCBatchTaskCache hcTaskCache = hcBatchTaskCaches.get(detectorId);
+        if (hcTaskCache != null) {
+            hcTaskCache.recordSuccessfulEntityTask();
+        }
+    }
+
+    public int getSuccessfulEntityTaskCount(String detectorId) {
+        ADHCBatchTaskCache hcTaskCache = hcBatchTaskCaches.get(detectorId);
+        if (hcTaskCache != null) {
+            return hcTaskCache.getSuccessfulEntityTaskCount();
+        }
+        return 0;
+    }
+
     /**
      * Try to get semaphore to update detector task.
      *

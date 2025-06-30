@@ -5,13 +5,16 @@
 
 package org.opensearch.ad.e2e;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 
 import org.opensearch.ad.AbstractADSyntheticDataTest;
-import org.opensearch.ad.rest.ADRestTestUtils;
+import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.client.Request;
+import org.opensearch.client.RestClient;
 import org.opensearch.timeseries.model.TaskState;
 
 import com.google.gson.JsonObject;
@@ -23,8 +26,7 @@ import com.google.gson.JsonObject;
 public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
 
     public void testGenerateResult() throws Exception {
-        String datasetName = "synthetic";
-        String dataFileName = String.format(Locale.ROOT, "data/%s.data", datasetName);
+        String dataFileName = String.format(Locale.ROOT, "data/%s.data", datasetFileName());
         int intervalsToWait = 3;
 
         List<JsonObject> data = getData(dataFileName);
@@ -33,7 +35,7 @@ public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
             + " \"Feature1\": { \"type\": \"double\" }, \"Feature2\": { \"type\": \"double\" } } } }";
         int trainTestSplit = 1500;
         // train data plus a few data points for real time inference
-        bulkIndexTrainData(datasetName, data, trainTestSplit + intervalsToWait + 3, client(), mapping);
+        bulkIndexTrainData(datasetName(), data, trainTestSplit + intervalsToWait + 3, ingestClient(), mapping);
 
         long windowDelayMinutes = getWindowDelayMinutes(data, trainTestSplit - 1, "timestamp");
         int intervalMinutes = 1;
@@ -48,10 +50,12 @@ public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
                     + ": \"feature 2\", \"feature_enabled\": \"true\", \"aggregation_query\": { \"Feature2\": { \"sum\": { \"field\": "
                     + "\"Feature2\" } } } }], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
                     + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
+                    + " %s"
                     + "\"schema_version\": 0 }",
-                datasetName,
+                datasetName(),
                 intervalMinutes,
-                windowDelayMinutes
+                windowDelayMinutes,
+                customResultIndexField()
             );
         String detectorId = createDetector(client(), detector);
 
@@ -84,8 +88,7 @@ public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
      *
      */
     public void testStartStopDetector() throws Exception {
-        String datasetName = "synthetic";
-        String dataFileName = String.format(Locale.ROOT, "data/%s.data", datasetName);
+        String dataFileName = String.format(Locale.ROOT, "data/%s.data", datasetFileName());
 
         List<JsonObject> data = getData(dataFileName);
 
@@ -93,7 +96,7 @@ public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
             + " \"Feature1\": { \"type\": \"double\" }, \"Feature2\": { \"type\": \"double\" } } } }";
         int trainTestSplit = 1500;
         // train data plus a few data points for real time inference
-        bulkIndexTrainData(datasetName, data, trainTestSplit + 5, client(), mapping);
+        bulkIndexTrainData(datasetName(), data, trainTestSplit + 5, ingestClient(), mapping);
 
         long windowDelayMinutes = getWindowDelayMinutes(data, trainTestSplit - 1, "timestamp");
         int intervalMinutes = 1;
@@ -108,10 +111,12 @@ public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
                     + ": \"feature 2\", \"feature_enabled\": \"true\", \"aggregation_query\": { \"Feature2\": { \"sum\": { \"field\": "
                     + "\"Feature2\" } } } }], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
                     + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
+                    + " %s"
                     + "\"schema_version\": 0 }",
-                datasetName,
+                datasetName(),
                 intervalMinutes,
-                windowDelayMinutes
+                windowDelayMinutes,
+                customResultIndexField()
             );
         String detectorId = createDetector(client(), detector);
 
@@ -119,7 +124,7 @@ public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
         startDetector(detectorId, client());
 
         // Step 2: Stop the detector
-        ADRestTestUtils.stopRealtimeJob(client(), detectorId);
+        stopDetector(detectorId, client());
 
         // Step 3: Wait for 1 minute
         Thread.sleep(Duration.ofMinutes(1).toMillis());
@@ -133,6 +138,35 @@ public class SingleStreamSmokeIT extends AbstractADSyntheticDataTest {
         String taskState = task.get("state").getAsString();
 
         assertEquals("Task state should be STOPPED", TaskState.STOPPED.name(), taskState);
+    }
+
+    protected RestClient ingestClient() throws IOException {
+        return client();
+    }
+
+    protected String datasetName() {
+        return "synthetic";
+    }
+
+    protected String datasetFileName() {
+        return "synthetic";
+    }
+
+    protected String customResultIndexField() {
+        String tenantId = tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            return "";
+        }
+        String resultIndex = ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + randomAlphaOfLength(10).toLowerCase(Locale.ROOT);
+        return String.format(Locale.ROOT, "\"result_index\": \"%s\",", resultIndex);
+    }
+
+    protected void stopDetector(String detectorId, RestClient client) throws Exception {
+        Request request = tenantAwareRequest(
+            "POST",
+            String.format(Locale.ROOT, "/_plugins/_anomaly_detection/detectors/%s/_stop", detectorId)
+        );
+        client.performRequest(request);
     }
 
 }

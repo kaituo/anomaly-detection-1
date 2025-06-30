@@ -14,6 +14,8 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * action.  Don't use interface because transport action handler constructor
  * requires a concrete class as input.
  *
+ * @param <RCFModelType> the RCF model type
+ * @param <CacheType> the cache implementation type
  */
 public class CacheProvider<RCFModelType extends ThresholdedRandomCutForest, CacheType extends TimeSeriesCache<RCFModelType>>
     implements

@@ -39,13 +39,14 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.FieldSortBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.util.ExceptionUtil;
 
 public class LatestTimeRetriever {
     public static final Logger logger = LogManager.getLogger(LatestTimeRetriever.class);
@@ -54,8 +55,7 @@ public class LatestTimeRetriever {
 
     private final Config config;
     private final AggregationPrep aggregationPrep;
-    private final SecurityClientUtil clientUtil;
-    private final Client client;
+    private final DataAccess dataAccess;
     private final User user;
     private final AnalysisType context;
     private final SearchFeatureDao searchFeatureDao;
@@ -65,8 +65,7 @@ public class LatestTimeRetriever {
     public LatestTimeRetriever(
         Config config,
         TimeValue requestTimeout,
-        SecurityClientUtil clientUtil,
-        Client client,
+        DataAccess dataAccess,
         User user,
         AnalysisType context,
         SearchFeatureDao searchFeatureDao,
@@ -74,8 +73,7 @@ public class LatestTimeRetriever {
     ) {
         this.config = config;
         this.aggregationPrep = new AggregationPrep(searchFeatureDao, requestTimeout, config);
-        this.clientUtil = clientUtil;
-        this.client = client;
+        this.dataAccess = dataAccess;
         this.user = user;
         this.context = context;
         this.searchFeatureDao = searchFeatureDao;
@@ -110,7 +108,7 @@ public class LatestTimeRetriever {
                 }
             }
         }, e -> {
-            if (e instanceof IndexNotFoundException) {
+            if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
                 listener.onResponse(Pair.of(Optional.empty(), Collections.emptyMap()));
             }
             listener.onFailure(e);
@@ -212,14 +210,6 @@ public class LatestTimeRetriever {
         }, topEntityListener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
         // checkpoint
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                user,
-                client,
-                context,
-                searchResponseListener
-            );
+        dataAccess.searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config), context, searchResponseListener);
     }
 }

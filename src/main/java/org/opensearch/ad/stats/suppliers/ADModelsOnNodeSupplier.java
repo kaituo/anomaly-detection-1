@@ -14,20 +14,18 @@ import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.stats.suppliers.TenantAwareStatSupplier;
 
-public class ADModelsOnNodeSupplier implements Supplier<List<Map<String, Object>>> {
-    private ADModelManager modelManager;
+public class ADModelsOnNodeSupplier implements TenantAwareStatSupplier<List<Map<String, Object>>> {
     private ADCacheProvider adCache;
     // the max number of models to return per node. Defaults to 100.
     private volatile int adNumModelsToReturn;
@@ -39,6 +37,8 @@ public class ADModelsOnNodeSupplier implements Supplier<List<Map<String, Object>
         Arrays
             .asList(
                 CommonName.MODEL_ID_FIELD,
+                CommonName.CONFIG_ID_KEY,
+                CommonName.TENANT_ID_FIELD,
                 ADCommonName.DETECTOR_ID_KEY,
                 MODEL_TYPE_KEY,
                 CommonName.ENTITY_KEY,
@@ -50,13 +50,11 @@ public class ADModelsOnNodeSupplier implements Supplier<List<Map<String, Object>
     /**
      * Constructor
      *
-     * @param modelManager object that manages the model partitions hosted on the node
-     * @param adCache object that manages multi-entity detectors' models
+     * @param adCache object that manages hosted realtime detector models
      * @param settings node settings accessor
      * @param clusterService Cluster service accessor
      */
-    public ADModelsOnNodeSupplier(ADModelManager modelManager, ADCacheProvider adCache, Settings settings, ClusterService clusterService) {
-        this.modelManager = modelManager;
+    public ADModelsOnNodeSupplier(ADCacheProvider adCache, Settings settings, ClusterService clusterService) {
         this.adCache = adCache;
         this.adNumModelsToReturn = AD_MAX_MODEL_SIZE_PER_NODE.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_MAX_MODEL_SIZE_PER_NODE, it -> this.adNumModelsToReturn = it);
@@ -64,9 +62,12 @@ public class ADModelsOnNodeSupplier implements Supplier<List<Map<String, Object>
     }
 
     @Override
-    public List<Map<String, Object>> get() {
-        Stream<Map<String, Object>> adStream = Stream
-            .concat(modelManager.getAllModels().stream(), adCache.get().getAllModels().stream())
+    public List<Map<String, Object>> getForTenant(String tenantId) {
+        return adCache
+            .get()
+            .getAllModels()
+            .stream()
+            .filter(modelState -> tenantId == null || Objects.equals(tenantId, modelState.getTenantId()))
             .limit(adNumModelsToReturn)
             .map(
                 modelState -> modelState
@@ -74,9 +75,9 @@ public class ADModelsOnNodeSupplier implements Supplier<List<Map<String, Object>
                     .entrySet()
                     .stream()
                     .filter(entry -> MODEL_STATE_STAT_KEYS.contains(entry.getKey()))
+                    .filter(entry -> entry.getValue() != null)
                     .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue))
-            );
-
-        return adStream.collect(Collectors.toList());
+            )
+            .collect(Collectors.toList());
     }
 }

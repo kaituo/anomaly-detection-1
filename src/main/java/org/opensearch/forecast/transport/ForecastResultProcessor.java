@@ -12,83 +12,80 @@ import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.forecast.client.ForecastNodeCommunicator;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.stats.ForecastStats;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.ResultProcessor;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ForecastResultProcessor extends
-    ResultProcessor<ForecastResultRequest, ForecastResult, ForecastResultResponse, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastIndexManagement, ForecastTaskManager> {
+    ResultProcessor<ForecastResultRequest, ForecastResult, ForecastResultResponse, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastDelegatingDataManagement, ForecastTaskManager> {
 
     private static final Logger LOG = LogManager.getLogger(ForecastResultProcessor.class);
 
     public ForecastResultProcessor(
         Setting<TimeValue> requestTimeoutSetting,
-        String entityResultAction,
         StatNames hcRequestCountStat,
         Settings settings,
         ClusterService clusterService,
         ThreadPool threadPool,
         HashRing hashRing,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         TransportService transportService,
         ForecastStats timeSeriesStats,
         ForecastTaskManager realTimeTaskManager,
         NamedXContentRegistry xContentRegistry,
-        Client client,
-        SecurityClientUtil clientUtil,
-        IndexNameExpressionResolver indexNameExpressionResolver,
+        DataAccess dataAccess,
         Class<ForecastResultResponse> transportResultResponseClazz,
         FeatureManager featureManager,
         AnalysisType analysisType,
-        boolean runOnce
+        boolean runOnce,
+        DiscoveryNodeSelector discoveryNodeSelector,
+        ForecastNodeCommunicator nodeCommunicator
     ) {
         super(
             requestTimeoutSetting,
-            entityResultAction,
             hcRequestCountStat,
             settings,
             clusterService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             hashRing,
             nodeStateManager,
             transportService,
             timeSeriesStats,
             realTimeTaskManager,
             xContentRegistry,
-            client,
-            clientUtil,
-            indexNameExpressionResolver,
+            dataAccess,
             transportResultResponseClazz,
             featureManager,
             FORECAST_MAX_ENTITIES_PER_INTERVAL,
             FORECAST_PAGE_SIZE,
             analysisType,
             runOnce,
-            ForecastSingleStreamResultAction.NAME
+            discoveryNodeSelector,
+            nodeCommunicator
         );
     }
 
@@ -105,7 +102,7 @@ public class ForecastResultProcessor extends
     }
 
     @Override
-    protected void imputeHC(long dataStartTime, long dataEndTime, String configID, String taskId) {
+    protected void imputeHC(long dataStartTime, long dataEndTime, String configID, String tenantId, String taskId) {
         // no imputation for forecasting as on the fly imputation and error estimation should not mix
     }
 }

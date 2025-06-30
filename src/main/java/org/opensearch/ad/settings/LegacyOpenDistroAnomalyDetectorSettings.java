@@ -35,7 +35,7 @@ public class LegacyOpenDistroAnomalyDetectorSettings {
     public static final Setting<Integer> MAX_MULTI_ENTITY_ANOMALY_DETECTORS = Setting
         .intSetting(
             "opendistro.anomaly_detection.max_multi_entity_anomaly_detectors",
-            10,
+            1000,
             0,
             10_000,
             Setting.Property.NodeScope,

@@ -40,6 +40,7 @@ public class SuggestConfigParamRequest extends ActionRequest implements DocReque
     private final Config config;
     private final String param;
     private final TimeValue requestTimeout;
+    private final String tenantId;
 
     public SuggestConfigParamRequest(StreamInput in) throws IOException {
         super(in);
@@ -54,13 +55,19 @@ public class SuggestConfigParamRequest extends ActionRequest implements DocReque
 
         param = in.readString();
         requestTimeout = in.readTimeValue();
+        tenantId = in.readOptionalString();
     }
 
     public SuggestConfigParamRequest(AnalysisType context, Config config, String param, TimeValue requestTimeout) {
+        this(context, config, param, requestTimeout, null);
+    }
+
+    public SuggestConfigParamRequest(AnalysisType context, Config config, String param, TimeValue requestTimeout, String tenantId) {
         this.context = context;
         this.config = config;
         this.param = param;
         this.requestTimeout = requestTimeout;
+        this.tenantId = tenantId;
     }
 
     @Override
@@ -70,6 +77,7 @@ public class SuggestConfigParamRequest extends ActionRequest implements DocReque
         config.writeTo(out);
         out.writeString(param);
         out.writeTimeValue(requestTimeout);
+        out.writeOptionalString(tenantId);
     }
 
     @Override
@@ -91,6 +99,10 @@ public class SuggestConfigParamRequest extends ActionRequest implements DocReque
 
     public AnalysisType getContext() {
         return context;
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 
     @Override

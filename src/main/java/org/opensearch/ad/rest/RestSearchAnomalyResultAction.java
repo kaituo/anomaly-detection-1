@@ -11,7 +11,6 @@
 
 package org.opensearch.ad.rest;
 
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.timeseries.util.RestHandlerUtils.RESULT_INDEX;
 import static org.opensearch.timeseries.util.RestHandlerUtils.getSourceContext;
 
@@ -22,12 +21,15 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.util.Strings;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.ad.transport.SearchAnomalyResultAction;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -40,13 +42,14 @@ public class RestSearchAnomalyResultAction extends AbstractADSearchAction<Anomal
     private static final String URL_PATH = TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI + "/results/_search";
     public static final String SEARCH_ANOMALY_RESULT_ACTION = "search_anomaly_result";
 
-    public RestSearchAnomalyResultAction() {
+    public RestSearchAnomalyResultAction(Settings settings) {
         super(
             ImmutableList.of(String.format(Locale.ROOT, "%s/{%s}", URL_PATH, RESULT_INDEX)),
             ImmutableList.of(Pair.of(URL_PATH, LEGACY_URL_PATH)),
-            ALL_AD_RESULTS_INDEX_PATTERN,
+            ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN,
             AnomalyResult.class,
-            SearchAnomalyResultAction.INSTANCE
+            SearchAnomalyResultAction.INSTANCE,
+            settings
         );
     }
 
@@ -56,7 +59,9 @@ public class RestSearchAnomalyResultAction extends AbstractADSearchAction<Anomal
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
+        // we don't have default result index in multi-tenant environment, users can still use this api to search custom result index.
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
         }
@@ -73,6 +78,9 @@ public class RestSearchAnomalyResultAction extends AbstractADSearchAction<Anomal
         searchSourceBuilder.fetchSource(getSourceContext(request, searchSourceBuilder));
         searchSourceBuilder.seqNoAndPrimaryTerm(true).version(true);
         SearchRequest searchRequest = new SearchRequest().source(searchSourceBuilder).indices(this.index);
+
+        String tenantId = TenantAwareHelper.getTenantID(isMultiTenancyEnabledSupplier.get(), request);
+        searchRequest.preference(tenantId);
 
         if (resultIndex != null) {
             if (onlyQueryCustomResultIndex) {

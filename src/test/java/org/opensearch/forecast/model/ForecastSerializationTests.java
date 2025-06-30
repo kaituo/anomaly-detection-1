@@ -82,4 +82,16 @@ public class ForecastSerializationTests extends OpenSearchSingleNodeTestCase {
         Forecaster parsedForecaster = new Forecaster(streamInput);
         assertTrue(parsedForecaster.equals(forecaster));
     }
+
+    public void testStreamConstructorWithApplicationId() throws IOException {
+        Forecaster forecaster = TestHelpers.randomForecaster();
+        forecaster.setApplicationId("app-1");
+
+        BytesStreamOutput output = new BytesStreamOutput();
+
+        forecaster.writeTo(output);
+        NamedWriteableAwareStreamInput streamInput = new NamedWriteableAwareStreamInput(output.bytes().streamInput(), writableRegistry());
+        Forecaster parsedForecaster = new Forecaster(streamInput);
+        assertTrue(parsedForecaster.equals(forecaster));
+    }
 }

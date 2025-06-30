@@ -75,13 +75,13 @@ public abstract class AbstractMissingSingleFeatureTestCase extends MissingIT {
                     );
                 break;
         }
-        // end
+        sb.append(customResultIndexField());
         sb.append("\"schema_version\": 0}");
 
         if (hc) {
-            return String.format(Locale.ROOT, sb.toString(), datasetName, intervalMinutes, trainTestSplit - 1, categoricalField);
+            return String.format(Locale.ROOT, sb.toString(), datasetName(), intervalMinutes, trainTestSplit - 1, categoricalField);
         } else {
-            return String.format(Locale.ROOT, sb.toString(), datasetName, intervalMinutes, trainTestSplit - 1);
+            return String.format(Locale.ROOT, sb.toString(), datasetName(), intervalMinutes, trainTestSplit - 1);
         }
 
     }

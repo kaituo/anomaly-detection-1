@@ -12,6 +12,8 @@
 package org.opensearch.timeseries.util;
 
 import java.util.EnumSet;
+import java.util.IdentityHashMap;
+import java.util.Map;
 import java.util.concurrent.RejectedExecutionException;
 
 import org.apache.commons.lang3.exception.ExceptionUtils;
@@ -21,7 +23,9 @@ import org.opensearch.OpenSearchException;
 import org.opensearch.action.NoShardAvailableActionException;
 import org.opensearch.action.UnavailableShardsException;
 import org.opensearch.action.index.IndexResponse;
+import org.opensearch.action.search.SearchPhaseExecutionException;
 import org.opensearch.action.support.replication.ReplicationResponse;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.NotSerializableExceptionWrapper;
 import org.opensearch.core.concurrency.OpenSearchRejectedExecutionException;
@@ -30,11 +34,25 @@ import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
 public class ExceptionUtil {
     // a positive cache of retriable error rest status
-    private static final EnumSet<RestStatus> RETRYABLE_STATUS = EnumSet
-        .of(RestStatus.REQUEST_TIMEOUT, RestStatus.CONFLICT, RestStatus.INTERNAL_SERVER_ERROR);
+    private static final EnumSet<RestStatus> RETRYABLE_STATUS = EnumSet.of(RestStatus.REQUEST_TIMEOUT, RestStatus.CONFLICT);
+    private static volatile OverloadExceptionMatcher overloadExceptionMatcher = DefaultOverloadExceptionMatcher.INSTANCE;
+
+    public static void configureOverloadExceptionMatcher(Settings settings, ClassLoader classLoader) {
+        overloadExceptionMatcher = ConfiguredFactoryLoader
+            .load(
+                settings,
+                TimeSeriesSettings.OVERLOAD_EXCEPTION_MATCHER_CLASS,
+                "overload exception matcher",
+                OverloadExceptionMatcher.class,
+                DefaultOverloadExceptionMatcher.class,
+                () -> DefaultOverloadExceptionMatcher.INSTANCE,
+                classLoader
+            );
+    }
 
     /**
      * OpenSearch restricts the kind of exceptions can be thrown over the wire
@@ -128,7 +146,8 @@ public class ExceptionUtil {
         return cause instanceof RejectedExecutionException
             || cause instanceof OpenSearchRejectedExecutionException
             || cause instanceof UnavailableShardsException
-            || cause instanceof LimitExceededException;
+            || cause instanceof LimitExceededException
+            || overloadExceptionMatcher.isOverloaded(exception);
     }
 
     public static boolean isRetryAble(Exception e) {
@@ -187,5 +206,66 @@ public class ExceptionUtil {
             return false;
         }
         return e instanceof IndexNotFoundException || e instanceof NoShardAvailableActionException;
+    }
+
+    public static boolean isIndexNotFound(Throwable throwable) {
+        if (throwable == null) {
+            return false;
+        }
+        Throwable cause = ExceptionsHelper.unwrapCause(throwable);
+        return cause instanceof IndexNotFoundException
+            || ExceptionsHelper.status(cause) == RestStatus.NOT_FOUND
+            || isIndexNotFoundInMessage(throwable);
+    }
+
+    public static boolean isIndexNotFoundInMessage(Throwable throwable) {
+        if (throwable == null) {
+            return false;
+        }
+        // We may not get IndexNotFoundException type when using the Java client + SDK.
+        // Fall back to checking messages along the cause chain (e.g. "[index_not_found_exception] no such index ...").
+        Map<Throwable, Boolean> visited = new IdentityHashMap<>();
+        for (Throwable cursor = throwable; cursor != null && visited.put(cursor, Boolean.TRUE) == null; cursor = cursor.getCause()) {
+            if (cursor instanceof IndexNotFoundException) {
+                return true;
+            }
+            String message = cursor.getMessage();
+            if (message != null && message.contains("index_not_found_exception")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean isSearchPhaseExecutionException(Throwable throwable) {
+        if (throwable == null) {
+            return false;
+        }
+        // We may not get SearchPhaseExecutionException type when using the Java client + SDK.
+        // Fall back to checking messages along the cause chain (e.g. "[search_phase_execution_exception] all shards failed").
+        Map<Throwable, Boolean> visited = new IdentityHashMap<>();
+        for (Throwable cursor = throwable; cursor != null && visited.put(cursor, Boolean.TRUE) == null; cursor = cursor.getCause()) {
+            if (cursor instanceof SearchPhaseExecutionException) {
+                return true;
+            }
+            String message = cursor.getMessage();
+            if (message != null && (message.contains("search_phase_execution_exception") || message.contains("all shards failed"))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Convert any {@link Throwable} into an {@link Exception}. This is helpful when passing errors
+     * to APIs (e.g., {@link org.opensearch.core.action.ActionListener}) that only accept checked exceptions.
+     * @param throwable throwable to convert
+     * @return the original throwable if it is already an Exception; otherwise a RuntimeException wrapping it
+     */
+    public static Exception asException(Throwable throwable) {
+        if (throwable instanceof Exception) {
+            return (Exception) throwable;
+        }
+        return new RuntimeException(throwable);
     }
 }

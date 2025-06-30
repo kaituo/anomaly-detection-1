@@ -30,7 +30,7 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.tasks.Task;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.TaskState;
@@ -53,7 +53,7 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
     // action for realtime task.
     // =========================================================
     // NodeStateManager caches anomaly detector's backpressure counter for realtime detection.
-    private final NodeStateManager stateManager;
+    private final StateManager stateManager;
     // FeatureManager caches anomaly detector's feature data points for shingling of realtime detection.
     private final FeatureManager featureManager;
 
@@ -64,7 +64,7 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
         ADTaskManager adTaskManager,
         ADTaskCacheManager adTaskCacheManager,
         FeatureManager featureManager,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         ADIndexJobActionHandler indexJobHander
     ) {
         super(ForwardADTaskAction.NAME, transportService, actionFilters, ForwardADTaskRequest::new);
@@ -118,7 +118,12 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
                 logger.debug("Received NEXT_ENTITY action for detector {}, task {}", detectorId, adTask.getTaskId());
                 // Run next entity for HC detector historical analysis.
                 if (detector.isHighCardinality()) { // AD task could be HC detector level task or entity task
-                    adTaskCacheManager.removeRunningEntity(detectorId, entityValue);
+                    boolean removedRunningEntity = adTaskCacheManager.removeRunningEntity(detectorId, entityValue);
+                    if (removedRunningEntity
+                        && adTask.isHistoricalEntityTask()
+                        && (adTask.getError() == null || adTask.getError().isEmpty())) {
+                        adTaskCacheManager.recordSuccessfulEntityTask(detectorId);
+                    }
                     if (!adTaskCacheManager.hasEntity(detectorId)) {
                         adTaskCacheManager.setDetectorTaskSlots(detectorId, 0);
                         logger.info("Historical HC detector done, will remove from cache, detector id:{}", detectorId);
@@ -142,7 +147,8 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
                                         adTaskManager.hcDetectorProgress(detectorId),
                                         TimeSeriesTask.ERROR_FIELD,
                                         adTask.getError() != null ? adTask.getError() : ""
-                                    )
+                                    ),
+                                adTask.getTenantId()
                             );
                     }
                 } else {
@@ -250,7 +256,7 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
                     adTaskCacheManager.removeRealtimeTaskCache(detectorId);
                     // If hash ring changed like new node added when scale out, the realtime job coordinating node may
                     // change, then we should clean up cache on old coordinating node.
-                    stateManager.clear(detectorId);
+                    stateManager.clear(detector.getTenantId(), detectorId);
                 }
                 listener.onResponse(new JobResponse(detector.getId()));
                 break;

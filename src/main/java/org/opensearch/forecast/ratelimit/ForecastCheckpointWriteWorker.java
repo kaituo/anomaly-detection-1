@@ -15,20 +15,21 @@ import java.util.Random;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.unit.TimeValue;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.CheckpointWriteWorker;
 
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 
 public class ForecastCheckpointWriteWorker extends
-    CheckpointWriteWorker<RCFCaster, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao> {
+    CheckpointWriteWorker<RCFCaster, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao> {
     public static final String WORKER_NAME = "forecast-checkpoint-write";
 
     public ForecastCheckpointWriteWorker(
@@ -48,8 +49,8 @@ public class ForecastCheckpointWriteWorker extends
         Duration executionTtl,
         ForecastCheckpointDao checkpoint,
         String indexName,
-        Duration checkpointInterval,
-        NodeStateManager timeSeriesNodeStateManager,
+        Setting<TimeValue> checkpointIntervalSetting,
+        StateManager timeSeriesNodeStateManager,
         Duration stateTtl
     ) {
         super(
@@ -61,7 +62,7 @@ public class ForecastCheckpointWriteWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,
@@ -75,7 +76,7 @@ public class ForecastCheckpointWriteWorker extends
             timeSeriesNodeStateManager,
             checkpoint,
             indexName,
-            checkpointInterval,
+            checkpointIntervalSetting,
             AnalysisType.FORECAST
         );
     }

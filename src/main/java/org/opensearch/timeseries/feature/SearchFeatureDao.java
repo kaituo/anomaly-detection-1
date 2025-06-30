@@ -39,6 +39,7 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.common.lease.Releasable;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
@@ -53,19 +54,19 @@ import org.opensearch.search.aggregations.AggregationBuilders;
 import org.opensearch.search.aggregations.Aggregations;
 import org.opensearch.search.aggregations.PipelineAggregatorBuilders;
 import org.opensearch.search.aggregations.bucket.composite.CompositeAggregation;
-import org.opensearch.search.aggregations.bucket.composite.InternalComposite;
 import org.opensearch.search.aggregations.bucket.composite.TermsValuesSourceBuilder;
 import org.opensearch.search.aggregations.bucket.histogram.Histogram;
-import org.opensearch.search.aggregations.bucket.range.InternalDateRange;
-import org.opensearch.search.aggregations.bucket.range.InternalDateRange.Bucket;
+import org.opensearch.search.aggregations.bucket.range.Range;
+import org.opensearch.search.aggregations.bucket.range.Range.Bucket;
 import org.opensearch.search.aggregations.bucket.terms.Terms;
-import org.opensearch.search.aggregations.metrics.InternalMax;
-import org.opensearch.search.aggregations.metrics.InternalMin;
+import org.opensearch.search.aggregations.metrics.Max;
 import org.opensearch.search.aggregations.metrics.Min;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.FieldSortBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
@@ -73,8 +74,7 @@ import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.util.ParseUtils;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.util.SecurityUtil;
 
 /**
  * DAO for features from search.
@@ -86,9 +86,9 @@ public class SearchFeatureDao extends AbstractRetriever {
     protected static final String AGG_NAME_MIN = "min_timefield";
 
     // Dependencies
-    private final Client client;
     private final NamedXContentRegistry xContent;
-    private final SecurityClientUtil clientUtil;
+    private final DataAccess dataAccess;
+    private final Settings settings;
     private volatile int maxEntitiesForPreview;
     private volatile int pageSize;
     private final int minimumDocCountForPreview;
@@ -97,9 +97,8 @@ public class SearchFeatureDao extends AbstractRetriever {
 
     // used for testing as we can mock clock
     public SearchFeatureDao(
-        Client client,
         NamedXContentRegistry xContent,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         ClusterService clusterService,
         int minimumDocCount,
         Clock clock,
@@ -107,9 +106,66 @@ public class SearchFeatureDao extends AbstractRetriever {
         int pageSize,
         long previewTimeoutInMilliseconds
     ) {
-        this.client = client;
+        this(
+            xContent,
+            dataAccess,
+            Settings.EMPTY,
+            clusterService,
+            minimumDocCount,
+            clock,
+            maxEntitiesForPreview,
+            pageSize,
+            previewTimeoutInMilliseconds
+        );
+    }
+
+    /**
+     * Constructor injection.
+     *
+     * @param xContent ES XContentRegistry
+     * @param dataAccess DataAccess
+     * @param settings Settings
+     * @param clusterService ES ClusterService
+     * @param minimumDocCount minimum doc count required for an entity; used to
+     *   make sure an entity has enough samples for preview
+     */
+    public SearchFeatureDao(
+        NamedXContentRegistry xContent,
+        DataAccess dataAccess,
+        Settings settings,
+        ClusterService clusterService,
+        int minimumDocCount
+    ) {
+        Settings resolvedSettings = settings == null ? Settings.EMPTY : settings;
         this.xContent = xContent;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
+        this.settings = resolvedSettings;
+        this.maxEntitiesForPreview = MAX_ENTITIES_FOR_PREVIEW.get(resolvedSettings);
+        this.pageSize = AD_PAGE_SIZE.get(resolvedSettings);
+
+        if (clusterService != null) {
+            clusterService.getClusterSettings().addSettingsUpdateConsumer(MAX_ENTITIES_FOR_PREVIEW, it -> this.maxEntitiesForPreview = it);
+            clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_PAGE_SIZE, it -> this.pageSize = it);
+        }
+        this.minimumDocCountForPreview = minimumDocCount;
+        this.previewTimeoutInMilliseconds = PREVIEW_TIMEOUT_IN_MILLIS;
+        this.clock = Clock.systemUTC();
+    }
+
+    private SearchFeatureDao(
+        NamedXContentRegistry xContent,
+        DataAccess dataAccess,
+        Settings settings,
+        ClusterService clusterService,
+        int minimumDocCount,
+        Clock clock,
+        int maxEntitiesForPreview,
+        int pageSize,
+        long previewTimeoutInMilliseconds
+    ) {
+        this.xContent = xContent;
+        this.dataAccess = dataAccess;
+        this.settings = settings == null ? Settings.EMPTY : settings;
         this.maxEntitiesForPreview = maxEntitiesForPreview;
 
         this.pageSize = pageSize;
@@ -123,35 +179,19 @@ public class SearchFeatureDao extends AbstractRetriever {
         this.clock = clock;
     }
 
-    /**
-     * Constructor injection.
-     *
-     * @param client ES client for queries
-     * @param xContent ES XContentRegistry
-     * @param clientUtil utility for ES client
-     * @param clusterService ES ClusterService
-     * @param minimumDocCount minimum doc count required for an entity; used to
-     *   make sure an entity has enough samples for preview
-     */
-    public SearchFeatureDao(
-        Client client,
-        NamedXContentRegistry xContent,
-        SecurityClientUtil clientUtil,
-        Settings settings,
-        ClusterService clusterService,
-        int minimumDocCount
+    public Releasable bindRouting(String tenantId, String dataSourceId) {
+        return dataAccess.bindRouting(tenantId, dataSourceId);
+    }
+
+    private void searchWithConfigSecurity(
+        SearchRequest request,
+        User user,
+        Config config,
+        AnalysisType context,
+        ActionListener<SearchResponse> listener
     ) {
-        this(
-            client,
-            xContent,
-            clientUtil,
-            clusterService,
-            minimumDocCount,
-            Clock.systemUTC(),
-            MAX_ENTITIES_FOR_PREVIEW.get(settings),
-            AD_PAGE_SIZE.get(settings),
-            PREVIEW_TIMEOUT_IN_MILLIS
-        );
+        User searchUser = user != null ? user : SecurityUtil.getUserFromConfig(config, settings);
+        dataAccess.searchWithInjectedSecurity(request, searchUser, TenantContext.user(config), context, listener);
     }
 
     /**
@@ -190,29 +230,9 @@ public class SearchFeatureDao extends AbstractRetriever {
         SearchRequest searchRequest = new SearchRequest().indices(config.getIndices().toArray(new String[0])).source(searchSourceBuilder);
         final ActionListener<SearchResponse> searchResponseListener = ActionListener
             .wrap(response -> listener.onResponse(ParseUtils.getLatestDataTime(response)), listener::onFailure);
-        // using the original context in listener as user roles have no permissions for internal operations like fetching a
-        // checkpoint
-        if (user != null) {
-            clientUtil
-                .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                    searchRequest,
-                    client::search,
-                    user,
-                    client,
-                    context,
-                    searchResponseListener
-                );
-        } else {
-            clientUtil
-                .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                    searchRequest,
-                    client::search,
-                    config.getId(),
-                    client,
-                    context,
-                    searchResponseListener
-                );
-        }
+        // using the provided config avoids a second config lookup on remote model nodes while preserving
+        // the stored user's security context (including null-user BWC handling).
+        searchWithConfigSecurity(searchRequest, user, config, context, searchResponseListener);
     }
 
     public void getDateRangeOfSourceData(
@@ -232,8 +252,8 @@ public class SearchFeatureDao extends AbstractRetriever {
 
         SearchRequest request = new SearchRequest().indices(config.getIndices().toArray(new String[0])).source(searchSourceBuilder);
         final ActionListener<SearchResponse> searchResponseListener = ActionListener.wrap(r -> {
-            InternalMin minAgg = r.getAggregations().get(CommonName.AGG_NAME_MIN_TIME);
-            InternalMax maxAgg = r.getAggregations().get(CommonName.AGG_NAME_MAX_TIME);
+            Min minAgg = r.getAggregations().get(CommonName.AGG_NAME_MIN_TIME);
+            Max maxAgg = r.getAggregations().get(CommonName.AGG_NAME_MAX_TIME);
             double minValue = minAgg.getValue();
             double maxValue = maxAgg.getValue();
             // If time field not exist or there is no value, will return infinity value
@@ -245,13 +265,12 @@ public class SearchFeatureDao extends AbstractRetriever {
         }, e -> { internalListener.onFailure(e); });
 
         // inject user role while searching.
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
+        dataAccess
+            .searchWithInjectedSecurity(
                 request,
-                client::search,
                 // user is the one who triggered the caller of this function
                 user,
-                client,
+                TenantContext.user(config),
                 config instanceof AnomalyDetector ? AnalysisType.AD : AnalysisType.FORECAST,
                 searchResponseListener
             );
@@ -426,12 +445,11 @@ public class SearchFeatureDao extends AbstractRetriever {
         );
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
         // checkpoint
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
+        dataAccess
+            .searchWithInjectedSecurity(
                 searchRequest,
-                client::search,
                 detector.getId(),
-                client,
+                TenantContext.user(detector),
                 AnalysisType.AD,
                 searchResponseListener
             );
@@ -519,12 +537,11 @@ public class SearchFeatureDao extends AbstractRetriever {
                         updateSourceAfterKey(afterKey, searchSourceBuilder);
                         // using the original context in listener as user roles have no permissions for internal operations like fetching a
                         // checkpoint
-                        clientUtil
-                            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
+                        dataAccess
+                            .searchWithInjectedSecurity(
                                 new SearchRequest().indices(detector.getIndices().toArray(new String[0])).source(searchSourceBuilder),
-                                client::search,
                                 detector.getId(),
-                                client,
+                                TenantContext.user(detector),
                                 AnalysisType.AD,
                                 this
                             );
@@ -549,6 +566,16 @@ public class SearchFeatureDao extends AbstractRetriever {
      * @param listener listener to return back the requested timestamps
      */
     public void getMinDataTime(Config config, Optional<Entity> entity, AnalysisType context, ActionListener<Optional<Long>> listener) {
+        getMinDataTime(null, config, entity, context, listener);
+    }
+
+    public void getMinDataTime(
+        User user,
+        Config config,
+        Optional<Entity> entity,
+        AnalysisType context,
+        ActionListener<Optional<Long>> listener
+    ) {
         BoolQueryBuilder internalFilterQuery = QueryBuilders.boolQuery();
 
         if (entity.isPresent()) {
@@ -566,16 +593,7 @@ public class SearchFeatureDao extends AbstractRetriever {
         final ActionListener<SearchResponse> searchResponseListener = ActionListener.wrap(response -> {
             listener.onResponse(parseMinDataTime(response));
         }, listener::onFailure);
-        // inject user role while searching.
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                config.getId(),
-                client,
-                context,
-                searchResponseListener
-            );
+        searchWithConfigSecurity(searchRequest, user, config, context, searchResponseListener);
     }
 
     private Optional<Long> parseMinDataTime(SearchResponse searchResponse) {
@@ -601,15 +619,7 @@ public class SearchFeatureDao extends AbstractRetriever {
             .wrap(response -> listener.onResponse(parseResponse(response, detector.getEnabledFeatureIds(), true)), listener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
         // checkpoint
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                detector.getId(),
-                client,
-                AnalysisType.AD,
-                searchResponseListener
-            );
+        searchWithConfigSecurity(searchRequest, null, detector, AnalysisType.AD, searchResponseListener);
     }
 
     public void getFeaturesForPeriodByBatch(
@@ -627,15 +637,7 @@ public class SearchFeatureDao extends AbstractRetriever {
             listener.onResponse(parseBucketAggregationResponse(response, detector.getEnabledFeatureIds(), true));
         }, listener::onFailure);
         // inject user role while searching.
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                detector.getId(),
-                client,
-                AnalysisType.AD,
-                searchResponseListener
-            );
+        searchWithConfigSecurity(searchRequest, null, detector, AnalysisType.AD, searchResponseListener);
     }
 
     private Map<Long, Optional<double[]>> parseBucketAggregationResponse(
@@ -647,17 +649,25 @@ public class SearchFeatureDao extends AbstractRetriever {
         List<Aggregation> aggregations = response.getAggregations().asList();
         logger.debug("Feature aggregation result size {}", aggregations.size());
         for (Aggregation agg : aggregations) {
-            List<InternalComposite.InternalBucket> buckets = ((InternalComposite) agg).getBuckets();
+            List<? extends CompositeAggregation.Bucket> buckets = ((CompositeAggregation) agg).getBuckets();
             buckets.forEach(bucket -> {
                 Optional<double[]> featureData = parseAggregations(
                     Optional.ofNullable(bucket.getAggregations()),
                     featureIds,
                     keepMissingValue
                 );
-                dataPoints.put((Long) bucket.getKey().get(CommonName.DATE_HISTOGRAM), featureData);
+                dataPoints.put(getDateHistogramKey(bucket), featureData);
             });
         }
         return dataPoints;
+    }
+
+    private long getDateHistogramKey(CompositeAggregation.Bucket bucket) {
+        Object key = bucket.getKey().get(CommonName.DATE_HISTOGRAM);
+        if (key instanceof Number) {
+            return ((Number) key).longValue();
+        }
+        throw new IllegalStateException("Missing numeric date histogram key [" + CommonName.DATE_HISTOGRAM + "]");
     }
 
     public Optional<double[]> parseResponse(SearchResponse response, List<String> featureIds, boolean keepMissingData) {
@@ -690,27 +700,22 @@ public class SearchFeatureDao extends AbstractRetriever {
                 listener.onResponse(Collections.emptyList());
                 return;
             }
+
             listener
                 .onResponse(
+                    // When search runs via SdkDataAccess (REST + SearchResponse.fromXContent), the agg is ParsedDateRange;
+                    // transport client returns InternalDateRange.
                     aggs
                         .asList()
                         .stream()
-                        .filter(InternalDateRange.class::isInstance)
-                        .flatMap(agg -> ((InternalDateRange) agg).getBuckets().stream())
+                        .filter(Range.class::isInstance)
+                        .map(Range.class::cast)
+                        .flatMap(range -> range.getBuckets().stream())
                         .map(bucket -> parseBucket(bucket, config.getEnabledFeatureIds(), keepMissingValues))
                         .collect(Collectors.toList())
                 );
         }, listener::onFailure);
-        // inject user role while searching
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                request,
-                client::search,
-                config.getId(),
-                client,
-                context,
-                searchResponseListener
-            );
+        searchWithConfigSecurity(request, null, config, context, searchResponseListener);
     }
 
     private SearchRequest createFeatureSearchRequest(AnomalyDetector detector, long startTime, long endTime, Optional<String> preference) {
@@ -772,21 +777,49 @@ public class SearchFeatureDao extends AbstractRetriever {
         AnalysisType context,
         ActionListener<List<Optional<double[]>>> listener
     ) {
+        getColdStartSamplesForPeriods(null, config, ranges, entity, includesEmptyBucket, context, listener);
+    }
+
+    public void getColdStartSamplesForPeriods(
+        Config config,
+        List<Entry<Long, Long>> ranges,
+        Optional<Entity> entity,
+        boolean includesEmptyBucket,
+        boolean emptyBucketAsMissing,
+        AnalysisType context,
+        ActionListener<List<Optional<double[]>>> listener
+    ) {
+        getColdStartSamplesForPeriods(null, config, ranges, entity, includesEmptyBucket, emptyBucketAsMissing, context, listener);
+    }
+
+    public void getColdStartSamplesForPeriods(
+        User user,
+        Config config,
+        List<Entry<Long, Long>> ranges,
+        Optional<Entity> entity,
+        boolean includesEmptyBucket,
+        AnalysisType context,
+        ActionListener<List<Optional<double[]>>> listener
+    ) {
+        getColdStartSamplesForPeriods(user, config, ranges, entity, includesEmptyBucket, false, context, listener);
+    }
+
+    public void getColdStartSamplesForPeriods(
+        User user,
+        Config config,
+        List<Entry<Long, Long>> ranges,
+        Optional<Entity> entity,
+        boolean includesEmptyBucket,
+        boolean emptyBucketAsMissing,
+        AnalysisType context,
+        ActionListener<List<Optional<double[]>>> listener
+    ) {
         SearchRequest request = createColdStartFeatureSearchRequest(config, ranges, entity);
         final ActionListener<SearchResponse> searchResponseListener = ActionListener.wrap(response -> {
-            listener.onResponse(parseColdStartSampleResp(response, includesEmptyBucket, config));
+            listener.onResponse(parseColdStartSampleResp(response, includesEmptyBucket, emptyBucketAsMissing, config));
         }, listener::onFailure);
 
-        // inject user role while searching.
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                request,
-                client::search,
-                config.getId(),
-                client,
-                context,
-                searchResponseListener
-            );
+        searchWithConfigSecurity(request, user, config, context, searchResponseListener);
     }
 
     /**
@@ -810,6 +843,15 @@ public class SearchFeatureDao extends AbstractRetriever {
      *         list if the aggregations are null or no valid buckets are found
      */
     public List<Optional<double[]>> parseColdStartSampleResp(SearchResponse response, boolean includesEmptyBucket, Config config) {
+        return parseColdStartSampleResp(response, includesEmptyBucket, false, config);
+    }
+
+    public List<Optional<double[]>> parseColdStartSampleResp(
+        SearchResponse response,
+        boolean includesEmptyBucket,
+        boolean emptyBucketAsMissing,
+        Config config
+    ) {
         Aggregations aggs = response.getAggregations();
         if (aggs == null) {
             logger.warn("Unexpected empty response");
@@ -831,12 +873,19 @@ public class SearchFeatureDao extends AbstractRetriever {
         return aggs
             .asList()
             .stream()
-            .filter(InternalDateRange.class::isInstance)
-            .flatMap(agg -> ((InternalDateRange) agg).getBuckets().stream())
+            // When search runs via SdkDataAccess (REST + SearchResponse.fromXContent), the agg is ParsedDateRange;
+            // transport client returns InternalDateRange.
+            .filter(Range.class::isInstance)
+            .map(Range.class::cast)
+            .flatMap(range -> range.getBuckets().stream())
             .filter(bucket -> bucket.getFrom() != null && bucket.getFrom() instanceof ZonedDateTime)
             .filter(bucket -> bucket.getDocCount() > docCountThreshold)
             .sorted(Comparator.comparing((Bucket bucket) -> (ZonedDateTime) bucket.getFrom()))
-            .map(bucket -> parseBucket(bucket, config.getEnabledFeatureIds(), false))
+            .map(
+                bucket -> emptyBucketAsMissing && bucket.getDocCount() == 0
+                    ? Optional.<double[]>empty()
+                    : parseBucket(bucket, config.getEnabledFeatureIds(), false)
+            )
             .collect(Collectors.toList());
     }
 
@@ -881,8 +930,11 @@ public class SearchFeatureDao extends AbstractRetriever {
         return aggs
             .asList()
             .stream()
-            .filter(InternalDateRange.class::isInstance)
-            .flatMap(agg -> ((InternalDateRange) agg).getBuckets().stream())
+            // When search runs via SdkDataAccess (REST + SearchResponse.fromXContent), the agg is ParsedDateRange;
+            // transport client returns InternalDateRange.
+            .filter(Range.class::isInstance)
+            .map(Range.class::cast)
+            .flatMap(range -> range.getBuckets().stream())
             .filter(bucket -> bucket.getFrom() != null && bucket.getFrom() instanceof ZonedDateTime)
             .filter(bucket -> bucket.getDocCount() > docCountThreshold)
             .filter(bucket -> parseBucket(bucket, config.getEnabledFeatureIds(), false).isPresent())
@@ -1009,8 +1061,11 @@ public class SearchFeatureDao extends AbstractRetriever {
         List<Bucket> orderedBuckets = aggs
             .asList()
             .stream()
-            .filter(InternalDateRange.class::isInstance)
-            .flatMap(agg -> ((InternalDateRange) agg).getBuckets().stream())
+            // When search runs via SdkDataAccess (REST + SearchResponse.fromXContent), the agg is ParsedDateRange;
+            // transport client returns InternalDateRange.
+            .filter(Range.class::isInstance)
+            .map(Range.class::cast)
+            .flatMap(range -> range.getBuckets().stream())
             .filter(bucket -> bucket.getFrom() != null && bucket.getFrom() instanceof ZonedDateTime)
             .sorted(Comparator.comparing(bucket -> (ZonedDateTime) bucket.getFrom()))
             .collect(Collectors.toList());

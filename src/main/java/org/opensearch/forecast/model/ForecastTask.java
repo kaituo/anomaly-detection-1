@@ -1,8 +1,4 @@
 /*
-<<<<<<< HEAD
- * Copyright OpenSearch Contributors
- * SPDX-License-Identifier: Apache-2.0
-=======
  * SPDX-License-Identifier: Apache-2.0
  *
  * The OpenSearch Contributors require contributions made to
@@ -11,12 +7,12 @@
  *
  * Modifications Copyright OpenSearch Contributors. See
  * GitHub history for details.
->>>>>>> f22eaa95 (test)
  */
 
 package org.opensearch.forecast.model;
 
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -84,6 +80,9 @@ public class ForecastTask extends TimeSeriesTask {
         }
         this.parentTaskId = input.readOptionalString();
         this.estimatedMinutesLeft = input.readOptionalInt();
+        if (input.available() > 0) {
+            this.tenantId = input.readOptionalString();
+        }
     }
 
     @Override
@@ -132,6 +131,7 @@ public class ForecastTask extends TimeSeriesTask {
         }
         out.writeOptionalString(parentTaskId);
         out.writeOptionalInt(estimatedMinutesLeft);
+        out.writeOptionalString(tenantId);
     }
 
     public static Builder builder() {
@@ -185,6 +185,7 @@ public class ForecastTask extends TimeSeriesTask {
             forecastTask.parentTaskId = this.parentTaskId;
             forecastTask.estimatedMinutesLeft = this.estimatedMinutesLeft;
             forecastTask.user = this.user;
+            forecastTask.tenantId = this.tenantId != null ? this.tenantId : this.forecaster == null ? null : this.forecaster.getTenantId();
 
             return forecastTask;
         }
@@ -234,6 +235,7 @@ public class ForecastTask extends TimeSeriesTask {
         String parentTaskId = null;
         Integer estimatedMinutesLeft = null;
         User user = null;
+        String tenantId = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -310,6 +312,9 @@ public class ForecastTask extends TimeSeriesTask {
                 case USER_FIELD:
                     user = User.parse(parser);
                     break;
+                case TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -346,8 +351,15 @@ public class ForecastTask extends TimeSeriesTask {
                 forecaster.getFlattenResultIndexMapping(),
                 forecaster.getLastBreakingUIChangeTime(),
                 forecaster.getFrequency(),
-                forecaster.getAutoCreated()
+                forecaster.getAutoCreated(),
+                forecaster.getTenantId()
             );
+        if (copyForecaster != null) {
+            copyForecaster.setApplicationId(forecaster.getApplicationId());
+            copyForecaster.setDataSourceId(forecaster.getDataSourceId());
+            copyForecaster.setWorkspaceId(forecaster.getWorkspaceId());
+            copyForecaster.setS3Reference(forecaster.getS3Reference());
+        }
         return new Builder()
             .taskId(parsedTaskId)
             .lastUpdateTime(lastUpdateTime)
@@ -372,6 +384,7 @@ public class ForecastTask extends TimeSeriesTask {
             .parentTaskId(parentTaskId)
             .estimatedMinutesLeft(estimatedMinutesLeft)
             .user(user)
+            .tenantId(tenantId)
             .build();
     }
 
@@ -409,5 +422,10 @@ public class ForecastTask extends TimeSeriesTask {
 
     public void setDateRange(DateRange dateRange) {
         this.dateRange = dateRange;
+    }
+
+    @Override
+    public String getTenantId() {
+        return forecaster != null && forecaster.getTenantId() != null ? forecaster.getTenantId() : tenantId;
     }
 }

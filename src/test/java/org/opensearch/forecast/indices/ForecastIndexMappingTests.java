@@ -64,6 +64,7 @@ public class ForecastIndexMappingTests extends OpenSearchTestCase {
         assertTrue("error field is missing", mappingJson.path("properties").has("error"));
         assertTrue("started_by field is missing", mappingJson.path("properties").has("started_by"));
         assertTrue("stopped_by field is missing", mappingJson.path("properties").has("stopped_by"));
+        assertTrue("tenant_id field is missing", mappingJson.path("properties").has("tenant_id"));
         assertTrue("forecaster_id field is missing", mappingJson.path("properties").has("forecaster_id"));
         assertTrue("state field is missing", mappingJson.path("properties").has("state"));
         assertTrue("task_progress field is missing", mappingJson.path("properties").has("task_progress"));

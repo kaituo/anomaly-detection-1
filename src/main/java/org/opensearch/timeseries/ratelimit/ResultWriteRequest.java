@@ -30,9 +30,23 @@ public abstract class ResultWriteRequest<ResultType extends IndexableResult> ext
         RequestPriority priority,
         ResultType result,
         String resultIndex,
-        String flattenResultIndex
+        String flattenResultIndex,
+        String tenantId
     ) {
-        super(expirationEpochMs, configId, priority);
+        this(expirationEpochMs, configId, priority, result, resultIndex, flattenResultIndex, tenantId, null);
+    }
+
+    public ResultWriteRequest(
+        long expirationEpochMs,
+        String configId,
+        RequestPriority priority,
+        ResultType result,
+        String resultIndex,
+        String flattenResultIndex,
+        String tenantId,
+        String dataSourceId
+    ) {
+        super(expirationEpochMs, configId, priority, tenantId, dataSourceId);
         this.result = result;
         this.resultIndex = resultIndex;
         this.flattenResultIndex = flattenResultIndex;
@@ -42,6 +56,9 @@ public abstract class ResultWriteRequest<ResultType extends IndexableResult> ext
         this.result = resultReader.read(in);
         this.resultIndex = in.readOptionalString();
         this.flattenResultIndex = in.readOptionalString();
+        // tenantId is obtained from result.getTenantId() in this case
+        this.tenantId = result.getTenantId();
+        this.dataSourceId = in.readOptionalString();
     }
 
     @Override
@@ -49,6 +66,7 @@ public abstract class ResultWriteRequest<ResultType extends IndexableResult> ext
         result.writeTo(out);
         out.writeOptionalString(resultIndex);
         out.writeOptionalString(flattenResultIndex);
+        out.writeOptionalString(dataSourceId);
     }
 
     public ResultType getResult() {
