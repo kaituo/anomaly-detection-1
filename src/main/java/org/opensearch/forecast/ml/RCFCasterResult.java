@@ -77,7 +77,8 @@ public class RCFCasterResult extends IntermediateResult<ForecastResult> {
                 forecast.values,
                 forecast.upper,
                 forecast.lower,
-                taskId
+                taskId,
+                forecaster.getTenantId()
             );
     }
 }

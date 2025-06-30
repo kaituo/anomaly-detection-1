@@ -25,7 +25,7 @@ public class ModelStateTests extends OpenSearchTestCase {
     public void testLastUsedTimeAdvancesOnMutations() {
         Instant base = Instant.parse("2024-01-01T00:00:00Z");
         IncrementingClock clock = new IncrementingClock(base);
-        ModelState<Object> state = new ModelState<>(new Object(), "model", "config", "type", clock);
+        ModelState<Object> state = new ModelState<>(new Object(), "model", "config", null, "type", clock);
 
         Instant initial = state.getLastUsedTime();
 

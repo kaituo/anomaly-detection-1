@@ -89,9 +89,9 @@ public class ColdEntityWorkerTests extends AbstractRateLimitingTest {
 
         // use Long.MAX_VALUE instead of Integer.MAX_VALUE. Integer.MAX_VALUE is only ~2.1 billion ms after the epoch (Jan 1970),
         // so it is far behind the stubbed current time (~1.7 trillion ms)
-        request = new FeatureRequest(Long.MAX_VALUE, detectorId, RequestPriority.LOW, new double[] { 0 }, 0, entity, null);
-        request2 = new FeatureRequest(Long.MAX_VALUE, detectorId, RequestPriority.LOW, new double[] { 0 }, 0, entity2, null);
-        mediumRequest = new FeatureRequest(Long.MAX_VALUE, detectorId, RequestPriority.MEDIUM, new double[] { 0 }, 0, entity2, null);
+        request = new FeatureRequest(Long.MAX_VALUE, detectorId, RequestPriority.LOW, new double[] { 0 }, 0, entity, null, null);
+        request2 = new FeatureRequest(Long.MAX_VALUE, detectorId, RequestPriority.LOW, new double[] { 0 }, 0, entity2, null, null);
+        mediumRequest = new FeatureRequest(Long.MAX_VALUE, detectorId, RequestPriority.MEDIUM, new double[] { 0 }, 0, entity2, null, null);
 
         requests = new ArrayList<>();
         requests.add(request);

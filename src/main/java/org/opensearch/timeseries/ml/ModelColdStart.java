@@ -33,7 +33,7 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.CleanState;
 import org.opensearch.timeseries.MaintenanceState;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.caching.DoorKeeper;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
@@ -41,23 +41,29 @@ import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.dataprocessor.ImputationOption;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.ratelimit.FeatureRequest;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ExceptionUtil;
+import org.opensearch.timeseries.util.StringUtil;
 
 import com.amazon.randomcutforest.config.ImputationMethod;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 /**
- * The class bootstraps a model by performing a cold start
+ * The class bootstraps a model by performing a cold start.
+ *
+ * @param <RCFModelType> the RCF model type
+ * @param <IndexType> the time series index enum type
+ * @param <DataManagementType> the data management implementation type
+ * @param <IndexableResultType> the indexable result type
  */
-public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, IndexableResultType extends IndexableResult>
+public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, IndexableResultType extends IndexableResult>
     implements
         MaintenanceState,
         CleanState {
@@ -83,7 +89,7 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
     protected final int rcfSampleSize;
     protected final double thresholdMinPvalue;
     protected final double initialAcceptFraction;
-    protected final NodeStateManager nodeStateManager;
+    protected final StateManager nodeStateManager;
     protected final int defaulStrideLength;
     protected final int defaultNumberOfSamples;
     protected final SearchFeatureDao searchFeatureDao;
@@ -103,7 +109,7 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
         int numberOfTrees,
         int rcfSampleSize,
         double thresholdMinPvalue,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         int defaultSampleStride,
         int defaultTrainSamples,
         SearchFeatureDao searchFeatureDao,
@@ -152,8 +158,8 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
     }
 
     @Override
-    public void clear(String id) {
-        doorKeepers.remove(id);
+    public void clear(String tenantId, String configId) {
+        doorKeepers.remove(StringUtil.getCompositeKey(tenantId, configId));
     }
 
     /**
@@ -172,29 +178,53 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
         ModelState<RCFModelType> modelState,
         ActionListener<List<IndexableResultType>> listener
     ) {
+        if (coldStartRequest.getConfig().isPresent()) {
+            trainModel(coldStartRequest, configId, modelState, listener, coldStartRequest.getConfig());
+            return;
+        }
+
         // run once does not need to cache
-        nodeStateManager.getConfig(configId, context, !coldStartRequest.isRunOnce(), ActionListener.wrap(configOptional -> {
-            if (false == configOptional.isPresent()) {
-                logger.warn(new ParameterizedMessage("Config [{}] is not available.", configId));
-                listener.onFailure(new TimeSeriesException(configId, "fail to find config"));
-                return;
+        nodeStateManager
+            .getConfig(
+                configId,
+                coldStartRequest.getTenantId(),
+                context,
+                !coldStartRequest.isRunOnce(),
+                ActionListener
+                    .wrap(
+                        configOptional -> trainModel(coldStartRequest, configId, modelState, listener, configOptional),
+                        listener::onFailure
+                    )
+            );
+    }
+
+    private void trainModel(
+        FeatureRequest coldStartRequest,
+        String configId,
+        ModelState<RCFModelType> modelState,
+        ActionListener<List<IndexableResultType>> listener,
+        Optional<? extends Config> configOptional
+    ) {
+        if (false == configOptional.isPresent()) {
+            logger.warn(new ParameterizedMessage("Config [{}] is not available.", configId));
+            listener.onFailure(new TimeSeriesException(configId, "fail to find config"));
+            return;
+        }
+
+        Config config = configOptional.get();
+
+        String modelId = modelState.getModelId();
+
+        if (modelState.getSamples().size() < this.numMinSamples) {
+            coldStart(modelId, coldStartRequest, modelState, config, listener);
+        } else {
+            try {
+                trainModelFromExistingSamples(modelState, config, coldStartRequest.getTaskId());
+                listener.onResponse(null);
+            } catch (Exception e) {
+                listener.onFailure(e);
             }
-
-            Config config = configOptional.get();
-
-            String modelId = modelState.getModelId();
-
-            if (modelState.getSamples().size() < this.numMinSamples) {
-                coldStart(modelId, coldStartRequest, modelState, config, listener);
-            } else {
-                try {
-                    trainModelFromExistingSamples(modelState, config, coldStartRequest.getTaskId());
-                    listener.onResponse(null);
-                } catch (Exception e) {
-                    listener.onFailure(e);
-                }
-            }
-        }, listener::onFailure));
+        }
     }
 
     public void trainModelFromExistingSamples(ModelState<RCFModelType> modelState, Config config, String taskId) {
@@ -221,7 +251,7 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
         Config config,
         ActionListener<List<IndexableResultType>> listener
     ) {
-        logger.debug("Trigger cold start for {}", modelId);
+        logger.info("Trigger cold start for {}", modelId);
 
         if (modelState == null) {
             listener.onFailure(new IllegalArgumentException(String.format(Locale.ROOT, "Cannot have empty model state")));
@@ -241,7 +271,7 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
                 // Won't retry real-time cold start within 60 intervals for an entity
                 // coldStartRequest.getTaskId() == null in real-time cold start
 
-                DoorKeeper doorKeeper = doorKeepers.computeIfAbsent(configId, id -> {
+                DoorKeeper doorKeeper = doorKeepers.computeIfAbsent(StringUtil.getCompositeKey(config.getTenantId(), configId), id -> {
                     // reset every 60 intervals
                     return new DoorKeeper(
                         TimeSeriesSettings.DOOR_KEEPER_FOR_COLD_STARTER_MAX_INSERTION,
@@ -358,6 +388,7 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
                 return;
             }
             Config config = configOp.get();
+            boolean useConfigUserForSearch = coldStartRequest.getConfig().isPresent();
 
             ActionListener<Optional<Long>> minTimeListener = ActionListener.wrap(earliest -> {
                 if (earliest.isPresent()) {
@@ -381,26 +412,44 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
                         coldStartRequest.getEntity(),
                         numberOfSamples,
                         startTimeMs,
-                        endTimeMs
+                        endTimeMs,
+                        useConfigUserForSearch
                     );
                 } else {
                     listener.onResponse(new ArrayList<>());
                 }
             }, listener::onFailure);
 
-            searchFeatureDao
-                .getMinDataTime(
-                    config,
-                    coldStartRequest.getEntity(),
-                    context,
-                    new ThreadedActionListener<>(logger, threadPool, threadPoolName, minTimeListener, false)
-                );
+            if (useConfigUserForSearch) {
+                searchFeatureDao
+                    .getMinDataTime(
+                        config.getUser(),
+                        config,
+                        coldStartRequest.getEntity(),
+                        context,
+                        new ThreadedActionListener<>(logger, threadPool, threadPoolName, minTimeListener, false)
+                    );
+            } else {
+                searchFeatureDao
+                    .getMinDataTime(
+                        config,
+                        coldStartRequest.getEntity(),
+                        context,
+                        new ThreadedActionListener<>(logger, threadPool, threadPoolName, minTimeListener, false)
+                    );
+            }
 
         }, listener::onFailure);
+
+        if (coldStartRequest.getConfig().isPresent()) {
+            getDetectorListener.onResponse(coldStartRequest.getConfig());
+            return;
+        }
 
         nodeStateManager
             .getConfig(
                 configId,
+                coldStartRequest.getTenantId(),
                 context,
                 // not run once means it is real time and we want to cache
                 !coldStartRequest.isRunOnce(),
@@ -426,7 +475,8 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
         Optional<Entity> entity,
         int numberOfSamples,
         long startTimeMs,
-        long endTimeMs
+        long endTimeMs,
+        boolean useConfigUserForSearch
     ) {
         if (startTimeMs >= endTimeMs || endTimeMs - startTimeMs < config.getIntervalInMilliseconds()) {
             listener.onResponse(lastRounddataSample);
@@ -508,26 +558,45 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
                     entity,
                     numberOfSamples,
                     startTimeMs,
-                    earliestSampleStartTime
+                    earliestSampleStartTime,
+                    useConfigUserForSearch
                 );
             }
         }, listener::onFailure);
 
         try {
-            searchFeatureDao
-                .getColdStartSamplesForPeriods(
-                    config,
-                    sampleRanges,
-                    entity,
-                    // Accept empty bucket.
-                    // 0, as returned by the engine should constitute a valid answer, “null” is a missing answer — it may be that 0
-                    // is meaningless in some case, but 0 is also meaningful in some cases. It may be that the query defining the
-                    // metric is ill-formed, but that cannot be solved by cold-start strategy of the AD plugin — if we attempt to do
-                    // that, we will have issues with legitimate interpretations of 0.
-                    true,
-                    context,
-                    new ThreadedActionListener<>(logger, threadPool, threadPoolName, getFeaturelistener, false)
-                );
+            if (useConfigUserForSearch) {
+                searchFeatureDao
+                    .getColdStartSamplesForPeriods(
+                        config.getUser(),
+                        config,
+                        sampleRanges,
+                        entity,
+                        // Accept empty bucket.
+                        // 0, as returned by the engine should constitute a valid answer, “null” is a missing answer — it may be that 0
+                        // is meaningless in some case, but 0 is also meaningful in some cases. It may be that the query defining the
+                        // metric is ill-formed, but that cannot be solved by cold-start strategy of the AD plugin — if we attempt to do
+                        // that, we will have issues with legitimate interpretations of 0.
+                        true,
+                        context,
+                        new ThreadedActionListener<>(logger, threadPool, threadPoolName, getFeaturelistener, false)
+                    );
+            } else {
+                searchFeatureDao
+                    .getColdStartSamplesForPeriods(
+                        config,
+                        sampleRanges,
+                        entity,
+                        // Accept empty bucket.
+                        // 0, as returned by the engine should constitute a valid answer, “null” is a missing answer — it may be that 0
+                        // is meaningless in some case, but 0 is also meaningful in some cases. It may be that the query defining the
+                        // metric is ill-formed, but that cannot be solved by cold-start strategy of the AD plugin — if we attempt to do
+                        // that, we will have issues with legitimate interpretations of 0.
+                        true,
+                        context,
+                        new ThreadedActionListener<>(logger, threadPool, threadPoolName, getFeaturelistener, false)
+                    );
+            }
         } catch (Exception e) {
             listener.onFailure(e);
         }

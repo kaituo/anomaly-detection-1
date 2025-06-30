@@ -16,6 +16,9 @@ import static org.opensearch.ad.model.AnomalyDetectorType.MULTI_ENTITY;
 import static org.opensearch.ad.model.AnomalyDetectorType.SINGLE_ENTITY;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
 import static org.opensearch.index.query.AbstractQueryBuilder.parseInnerQueryBuilder;
+import static org.opensearch.timeseries.constant.CommonName.APPLICATION_ID_FIELD;
+import static org.opensearch.timeseries.constant.CommonName.DATA_SOURCE_ID_FIELD;
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -157,6 +160,7 @@ public class AnomalyDetector extends Config {
      *  to display updates from the changed time
      * @param frequency frequency of the detector
      * @param autoCreated whether this detector was created automatically
+     * @param tenantId tenant id
      */
     public AnomalyDetector(
         String detectorId,
@@ -187,7 +191,8 @@ public class AnomalyDetector extends Config {
         Boolean flattenResultIndexMapping,
         Instant lastBreakingUIChangeTime,
         TimeConfiguration frequency,
-        Boolean autoCreated
+        Boolean autoCreated,
+        String tenantId
     ) {
         super(
             detectorId,
@@ -218,7 +223,8 @@ public class AnomalyDetector extends Config {
             flattenResultIndexMapping,
             lastBreakingUIChangeTime,
             frequency,
-            autoCreated
+            autoCreated,
+            tenantId
         );
 
         checkAndThrowValidationErrors(ValidationAspect.DETECTOR);
@@ -304,7 +310,18 @@ public class AnomalyDetector extends Config {
         } else {
             this.frequency = null;
         }
-        this.autoCreated = input.readOptionalBoolean();
+        if (input.available() > 0) {
+            this.autoCreated = input.readOptionalBoolean();
+        }
+        if (input.available() > 0) {
+            this.tenantId = input.readOptionalString();
+        }
+        if (input.available() > 0) {
+            this.applicationId = input.readOptionalString();
+        }
+        if (input.available() > 0) {
+            this.dataSourceId = input.readOptionalString();
+        }
     }
 
     public XContentBuilder toXContent(XContentBuilder builder) throws IOException {
@@ -379,6 +396,9 @@ public class AnomalyDetector extends Config {
             output.writeBoolean(false);
         }
         output.writeOptionalBoolean(autoCreated);
+        output.writeOptionalString(tenantId);
+        output.writeOptionalString(applicationId);
+        output.writeOptionalString(dataSourceId);
     }
 
     @Override
@@ -479,6 +499,9 @@ public class AnomalyDetector extends Config {
         // by default, frequency is the same as interval when not set
         TimeConfiguration frequency = null;
         Boolean autoCreated = null;
+        String tenantId = null;
+        String applicationId = null;
+        String dataSourceId = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -636,6 +659,15 @@ public class AnomalyDetector extends Config {
                 case AUTO_CREATED_FIELD:
                     autoCreated = onlyParseBooleanValue(parser);
                     break;
+                case TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
+                case APPLICATION_ID_FIELD:
+                    applicationId = parser.text();
+                    break;
+                case DATA_SOURCE_ID_FIELD:
+                    dataSourceId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -671,9 +703,12 @@ public class AnomalyDetector extends Config {
             flattenResultIndexMapping,
             lastBreakingUIChangeTime,
             frequency,
-            autoCreated
+            autoCreated,
+            tenantId
         );
         detector.setDetectionDateRange(detectionDateRange);
+        detector.setApplicationId(applicationId);
+        detector.setDataSourceId(dataSourceId);
         return detector;
     }
 

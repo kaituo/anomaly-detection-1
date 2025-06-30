@@ -38,6 +38,7 @@ public class GetConfigRequest extends ActionRequest implements DocRequest {
     private String rawPath;
     private boolean all;
     private Entity entity;
+    private String tenantId;
 
     public GetConfigRequest(StreamInput in) throws IOException {
         super(in);
@@ -52,6 +53,7 @@ public class GetConfigRequest extends ActionRequest implements DocRequest {
         if (in.readBoolean()) {
             entity = new Entity(in);
         }
+        tenantId = in.readOptionalString();
     }
 
     public GetConfigRequest(
@@ -63,7 +65,8 @@ public class GetConfigRequest extends ActionRequest implements DocRequest {
         String typeStr,
         String rawPath,
         boolean all,
-        Entity entity
+        Entity entity,
+        String tenantId
     ) {
         super();
         this.configID = configId;
@@ -75,6 +78,7 @@ public class GetConfigRequest extends ActionRequest implements DocRequest {
         this.rawPath = rawPath;
         this.all = all;
         this.entity = entity;
+        this.tenantId = tenantId;
     }
 
     public String getConfigID() {
@@ -109,6 +113,10 @@ public class GetConfigRequest extends ActionRequest implements DocRequest {
         return entity;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
@@ -126,6 +134,7 @@ public class GetConfigRequest extends ActionRequest implements DocRequest {
         } else {
             out.writeBoolean(false);
         }
+        out.writeOptionalString(tenantId);
     }
 
     @Override

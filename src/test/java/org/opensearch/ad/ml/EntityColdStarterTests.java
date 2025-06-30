@@ -116,6 +116,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -129,7 +130,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             samples.peek().getValueList(),
             samples.peek().getDataStartTime().toEpochMilli(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         assertTrue(modelState.getModel().isPresent());
@@ -167,6 +169,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -204,6 +207,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             startTime + coldStartSamples.size() * detector.getIntervalInMilliseconds(),
             entity,
             // only real time (task id == null) detection follows door keeper rule
+            null,
             null
         );
         resetListener();
@@ -256,6 +260,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -276,7 +281,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             samples.peek().getValueList(),
             samples.peek().getDataStartTime().toEpochMilli(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
 
@@ -395,6 +401,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -431,7 +438,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             new double[] { 0 },
             startTime + coldStartSamples.size() * detector.getIntervalInMilliseconds(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         checkSemaphoreRelease();
@@ -488,6 +496,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -523,7 +532,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             samples.peek().getValueList(),
             startTime + coldStartSamples.size() * detector.getIntervalInMilliseconds(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         checkSemaphoreRelease();
@@ -557,6 +567,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -577,7 +588,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             samples.peek().getValueList(),
             samples.peek().getDataStartTime().toEpochMilli(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
 
@@ -594,6 +606,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -614,7 +627,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             samples.peek().getValueList(),
             samples.peek().getDataStartTime().toEpochMilli(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
 
@@ -629,6 +643,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -638,11 +653,11 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
         doAnswer(invocation -> {
             GetRequest request = invocation.getArgument(0);
-            ActionListener<GetResponse> listener = invocation.getArgument(2);
+            ActionListener<GetResponse> listener = invocation.getArgument(1);
 
             listener.onResponse(TestHelpers.createGetResponse(detector, detectorId, ADCommonName.CONFIG_INDEX));
             return null;
-        }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
+        }).when(client).get(any(GetRequest.class), any(ActionListener.class));
 
         long startTime = 1602269260000L;
         doAnswer(invocation -> {
@@ -667,7 +682,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             samples.peek().getValueList(),
             startTime + coldStartSamples.size() * detector.getIntervalInMilliseconds(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         checkSemaphoreRelease();
@@ -718,6 +734,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -728,11 +745,11 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
         // when(clock.millis()).thenReturn(894057860000L);
 
         doAnswer(invocation -> {
-            ActionListener<GetResponse> listener = invocation.getArgument(2);
+            ActionListener<GetResponse> listener = invocation.getArgument(1);
 
             listener.onResponse(TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX));
             return null;
-        }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
+        }).when(client).get(any(GetRequest.class), any(ActionListener.class));
 
         long startTime = 894056973000L;
         doAnswer(invocation -> {
@@ -765,7 +782,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             samples.peek().getValueList(),
             startTime + coldStartSamples.size() * detector.getIntervalInMilliseconds(),
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         checkSemaphoreRelease();
@@ -822,7 +840,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             mock(FeatureManager.class),
             mock(MemoryTracker.class),
             settings,
-            clusterService
+            clusterService,
+            stateManager
         );
 
         ThresholdedRandomCutForest.Builder rcfConfig = ThresholdedRandomCutForest
@@ -862,6 +881,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -890,6 +910,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -949,11 +970,11 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
 
             // training data ranges from timestamps[0] ~ timestamps[trainTestSplit-1]
             doAnswer(invocation -> {
-                ActionListener<GetResponse> listener = invocation.getArgument(2);
+                ActionListener<GetResponse> listener = invocation.getArgument(1);
 
                 listener.onResponse(TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX));
                 return null;
-            }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
+            }).when(client).get(any(GetRequest.class), any(ActionListener.class));
 
             doAnswer(invocation -> {
                 ActionListener<Optional<Long>> listener = invocation.getArgument(3);
@@ -987,6 +1008,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
                 null,
                 modelId,
                 detectorId,
+                null,
                 ModelManager.ModelType.TRCF.getName(),
                 clock,
                 priority,
@@ -1009,7 +1031,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
                 new double[] { 1.3 },
                 Instant.now().toEpochMilli(),
                 entity,
-                "123"
+                "123",
+                null
             );
             entityColdStarter.trainModel(featureRequest, detector.getId(), modelState, listener);
 
@@ -1084,6 +1107,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,
@@ -1127,7 +1151,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             // detectorInterval is of minutes, need to convert to milliseconds
             minTime + coldStartSamples.size() * detectorInterval * 60000,
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         checkSemaphoreRelease();
@@ -1152,6 +1177,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             // detectorInterval is of minutes, need to convert to milliseconds
             minTime + coldStartSamples.size() * detectorInterval * 60000,
             entity,
+            null,
             null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
@@ -1185,7 +1211,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             // We have to match the start and end time of training data
             minTime + coldStartSamples.size() * detectorInterval * 60000,
             entity,
-            "123"
+            "123",
+            null
         );
         resetListener();
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
@@ -1225,14 +1252,15 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             new double[] { 1.3 },
             startTime + coldStartSamples.size() * detector.getIntervalInMilliseconds(),
             entity,
-            "123"
+            "123",
+            null
         );
 
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         checkSemaphoreRelease();
         assertTrue(modelState.getModel().isPresent());
 
-        entityColdStarter.clear(detectorId);
+        entityColdStarter.clear(detectorId, null);
 
         modelState = createStateForCacheRelease();
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
@@ -1296,7 +1324,8 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             // detectorInterval is of minutes, need to convert to milliseconds
             minTime + coldStartSamples.size() * detectorInterval * 60000,
             entity,
-            "123"
+            "123",
+            null
         );
         entityColdStarter.trainModel(featureRequest, detectorId, modelState, listener);
         checkSemaphoreRelease();
@@ -1314,6 +1343,7 @@ public class EntityColdStarterTests extends AbstractCosineDataTest {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             priority,

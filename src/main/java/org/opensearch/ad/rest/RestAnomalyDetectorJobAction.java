@@ -23,6 +23,7 @@ import java.util.Locale;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.AnomalyDetectorJobAction;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -33,6 +34,7 @@ import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.rest.RestJobAction;
 import org.opensearch.timeseries.transport.JobRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -44,10 +46,12 @@ public class RestAnomalyDetectorJobAction extends RestJobAction {
 
     public static final String AD_JOB_ACTION = "anomaly_detector_job_action";
     private volatile TimeValue requestTimeout;
+    private final Settings settings;
 
     public RestAnomalyDetectorJobAction(Settings settings, ClusterService clusterService) {
         this.requestTimeout = AD_REQUEST_TIMEOUT.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_REQUEST_TIMEOUT, it -> requestTimeout = it);
+        this.settings = settings;
     }
 
     @Override
@@ -56,6 +60,7 @@ public class RestAnomalyDetectorJobAction extends RestJobAction {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
@@ -66,12 +71,15 @@ public class RestAnomalyDetectorJobAction extends RestJobAction {
         String rawPath = request.rawPath();
         DateRange detectionDateRange = parseInputDateRange(request);
 
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
+
         JobRequest anomalyDetectorJobRequest = new JobRequest(
             detectorId,
             ADIndex.CONFIG.getIndexName(),
             detectionDateRange,
             historical,
-            rawPath
+            rawPath,
+            tenantId
         );
 
         return channel -> client

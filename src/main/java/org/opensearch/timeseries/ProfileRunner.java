@@ -7,9 +7,7 @@ package org.opensearch.timeseries;
 
 import static org.opensearch.core.rest.RestStatus.BAD_REQUEST;
 import static org.opensearch.core.rest.RestStatus.NOT_FOUND;
-import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,15 +17,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.ActionType;
-import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.cluster.node.DiscoveryNode;
-import org.opensearch.common.xcontent.LoggingDeprecationHandler;
-import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.search.SearchHits;
 import org.opensearch.search.aggregations.Aggregation;
 import org.opensearch.search.aggregations.AggregationBuilder;
@@ -38,10 +32,11 @@ import org.opensearch.search.aggregations.bucket.composite.TermsValuesSourceBuil
 import org.opensearch.search.aggregations.metrics.CardinalityAggregationBuilder;
 import org.opensearch.search.aggregations.metrics.InternalCardinality;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
-import org.opensearch.timeseries.function.BiCheckedFunction;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.ConfigProfile;
@@ -53,26 +48,26 @@ import org.opensearch.timeseries.model.ModelProfileOnNode;
 import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.ProfileRequest;
 import org.opensearch.timeseries.transport.ProfileResponse;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
-public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskProfileType extends TaskProfile<TaskClass>, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ConfigProfileType extends ConfigProfile<TaskClass, TaskProfileType>, ProfileActionType extends ActionType<ProfileResponse>, TaskProfileRunnerType extends TaskProfileRunner<TaskClass, TaskProfileType>>
+public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, TaskProfileType extends TaskProfile<TaskClass>, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, ConfigProfileType extends ConfigProfile<TaskClass, TaskProfileType>, ProfileActionType extends ActionType<ProfileResponse>, TaskProfileRunnerType extends TaskProfileRunner<TaskClass, TaskProfileType>>
     extends AbstractProfileRunner {
 
     private final Logger logger = LogManager.getLogger(ProfileRunner.class);
-    protected Client client;
-    protected SecurityClientUtil clientUtil;
+    protected NodeCommunicator nodeCommunicator;
+    protected DataAccess dataAccess;
+    protected StateManager stateManager;
     protected NamedXContentRegistry xContentRegistry;
-    protected DiscoveryNodeFilterer nodeFilter;
+    protected DiscoveryNodeSelector nodeFilter;
     protected final TransportService transportService;
     protected final TaskManagerType taskManager;
     protected final int maxTotalEntitiesToTrack;
@@ -83,14 +78,12 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
     protected ProfileName taskProfile;
     protected TaskProfileRunnerType taskProfileRunner;
     protected ProfileActionType profileAction;
-    protected BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser;
-    protected String configIndexName;
 
     public ProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
         NamedXContentRegistry xContentRegistry,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         long requiredSamples,
         TransportService transportService,
         TaskManagerType taskManager,
@@ -100,13 +93,12 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
         int maxCategoricalFields,
         ProfileName taskProfile,
         ProfileActionType profileAction,
-        BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser,
-        TaskProfileRunnerType taskProfileRunner,
-        String configIndexName
+        TaskProfileRunnerType taskProfileRunner
     ) {
         super(requiredSamples);
-        this.client = client;
-        this.clientUtil = clientUtil;
+        this.nodeCommunicator = nodeCommunicator;
+        this.dataAccess = dataAccess;
+        this.stateManager = taskManager.getStateManager();
         this.xContentRegistry = xContentRegistry;
         this.nodeFilter = nodeFilter;
         if (requiredSamples <= 0) {
@@ -121,34 +113,27 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
         this.maxCategoricalFields = maxCategoricalFields;
         this.taskProfile = taskProfile;
         this.profileAction = profileAction;
-        this.configParser = configParser;
         this.taskProfileRunner = taskProfileRunner;
-        this.configIndexName = configIndexName;
     }
 
-    public void profile(String configId, ActionListener<ConfigProfileType> listener, Set<ProfileName> profilesToCollect) {
+    public void profile(String configId, String tenantId, ActionListener<ConfigProfileType> listener, Set<ProfileName> profilesToCollect) {
         if (profilesToCollect.isEmpty()) {
             listener.onFailure(new IllegalArgumentException(CommonMessages.EMPTY_PROFILES_COLLECT));
             return;
         }
-        calculateTotalResponsesToWait(configId, profilesToCollect, listener);
+        calculateTotalResponsesToWait(configId, tenantId, profilesToCollect, listener);
     }
 
     private void calculateTotalResponsesToWait(
         String configId,
+        String tenantId,
         Set<ProfileName> profilesToCollect,
         ActionListener<ConfigProfileType> listener
     ) {
-        GetRequest getConfigRequest = new GetRequest(configIndexName, configId);
-        client.get(getConfigRequest, ActionListener.wrap(getConfigResponse -> {
-            if (getConfigResponse != null && getConfigResponse.isExists()) {
-                try (
-                    XContentParser xContentParser = XContentType.JSON
-                        .xContent()
-                        .createParser(xContentRegistry, LoggingDeprecationHandler.INSTANCE, getConfigResponse.getSourceAsString())
-                ) {
-                    ensureExpectedToken(XContentParser.Token.START_OBJECT, xContentParser.nextToken(), xContentParser);
-                    Config config = configParser.apply(xContentParser, configId);
+        stateManager.getConfig(configId, tenantId, analysisType, false, ActionListener.wrap(configOptional -> {
+            if (configOptional.isPresent()) {
+                try {
+                    Config config = configOptional.get();
                     prepareProfile(config, listener, profilesToCollect);
                 } catch (Exception e) {
                     logger.error(CommonMessages.FAIL_TO_PARSE_CONFIG_MSG + configId, e);
@@ -165,16 +150,10 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
 
     protected void prepareProfile(Config config, ActionListener<ConfigProfileType> listener, Set<ProfileName> profilesToCollect) {
         String configId = config.getId();
-        GetRequest getRequest = new GetRequest(CommonName.JOB_INDEX, configId);
-        client.get(getRequest, ActionListener.wrap(getResponse -> {
-            if (getResponse != null && getResponse.isExists()) {
-                try (
-                    XContentParser parser = XContentType.JSON
-                        .xContent()
-                        .createParser(xContentRegistry, LoggingDeprecationHandler.INSTANCE, getResponse.getSourceAsString())
-                ) {
-                    ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                    Job job = Job.parse(parser);
+        stateManager.getJob(configId, config.getTenantId(), false, ActionListener.wrap(jobOptional -> {
+            if (jobOptional.isPresent()) {
+                try {
+                    Job job = jobOptional.get();
                     long enabledTimeMs = job.getEnabledTime().toEpochMilli();
 
                     int totalResponsesToWait = 0;
@@ -207,7 +186,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                             false
                         );
                     if (profilesToCollect.contains(ProfileName.ERROR)) {
-                        taskManager.getAndExecuteOnLatestConfigLevelTask(configId, realTimeTaskTypes, task -> {
+                        taskManager.getAndExecuteOnLatestConfigLevelTask(configId, config.getTenantId(), realTimeTaskTypes, task -> {
                             ConfigProfileType.Builder<TaskClass, TaskProfileType> profileBuilder = createProfileBuilder();
                             if (task.isPresent()) {
                                 long lastUpdateTimeMs = task.get().getLastUpdateTime().toEpochMilli();
@@ -241,7 +220,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                         profileModels(config, profilesToCollect, job, delegateListener);
                     }
                     if (profilesToCollect.contains(taskProfile)) {
-                        getLatestHistoricalTaskProfile(configId, transportService, null, delegateListener);
+                        getLatestHistoricalTaskProfile(configId, config.getTenantId(), transportService, null, delegateListener);
                     }
 
                 } catch (Exception e) {
@@ -249,12 +228,12 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                     listener.onFailure(e);
                 }
             } else {
-                onGetDetectorForPrepare(configId, listener, profilesToCollect);
+                onGetDetectorForPrepare(configId, config.getTenantId(), listener, profilesToCollect);
             }
         }, exception -> {
             if (ExceptionUtil.isIndexNotAvailable(exception)) {
                 logger.info(exception.getMessage());
-                onGetDetectorForPrepare(configId, listener, profilesToCollect);
+                onGetDetectorForPrepare(configId, config.getTenantId(), listener, profilesToCollect);
             } else {
                 logger.error(CommonMessages.FAIL_TO_GET_PROFILE_MSG + configId);
                 listener.onFailure(exception);
@@ -288,12 +267,11 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                 });
                 // using the original context in listener as user roles have no permissions for internal operations like fetching a
                 // checkpoint
-                clientUtil
-                    .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
+                dataAccess
+                    .searchWithInjectedSecurity(
                         request,
-                        client::search,
                         config.getId(),
-                        client,
+                        TenantContext.user(config.getTenantId()),
                         analysisType,
                         searchResponseListener
                     );
@@ -338,12 +316,11 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                 });
                 // using the original context in listener as user roles have no permissions for internal operations like fetching a
                 // checkpoint
-                clientUtil
-                    .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
+                dataAccess
+                    .searchWithInjectedSecurity(
                         searchRequest,
-                        client::search,
                         config.getId(),
-                        client,
+                        TenantContext.user(config.getTenantId()),
                         analysisType,
                         searchResponseListener
                     );
@@ -352,13 +329,18 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
         }
     }
 
-    protected void onGetDetectorForPrepare(String configId, ActionListener<ConfigProfileType> listener, Set<ProfileName> profiles) {
+    protected void onGetDetectorForPrepare(
+        String configId,
+        String tenantId,
+        ActionListener<ConfigProfileType> listener,
+        Set<ProfileName> profiles
+    ) {
         ConfigProfileType.Builder<TaskClass, TaskProfileType> profileBuilder = createProfileBuilder();
         if (profiles.contains(ProfileName.STATE)) {
             profileBuilder.state(ConfigState.DISABLED);
         }
         if (profiles.contains(taskProfile)) {
-            getLatestHistoricalTaskProfile(configId, transportService, profileBuilder.build(), listener);
+            getLatestHistoricalTaskProfile(configId, tenantId, transportService, profileBuilder.build(), listener);
         } else {
             listener.onResponse(profileBuilder.build());
         }
@@ -380,6 +362,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
     ) {
         DiscoveryNode[] dataNodes = nodeFilter.getEligibleDataNodes();
         ProfileRequest profileRequest = new ProfileRequest(config.getId(), profiles, dataNodes);
+        profileRequest.setTenantId(config.getTenantId());
         if (config.isLongFrequency()) {
             ConfigProfileType.Builder<TaskClass, TaskProfileType> profile = createProfileBuilder();
             if (profiles.contains(ProfileName.COORDINATING_NODE)) {
@@ -403,7 +386,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                 listener.onResponse(profile.build());
             }
         } else {
-            client.execute(profileAction, profileRequest, onModelResponse(config, profiles, job, listener));
+            nodeCommunicator.profile(profileRequest, onModelResponse(config, profiles, job, listener));
         }
     }
 
@@ -457,7 +440,7 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
                     .confirmRealtimeResultStatus(
                         config,
                         enabledTime,
-                        client,
+                        dataAccess,
                         analysisType,
                         onInittedEver(enabledTime, profileBuilder, profilesToCollect, config, totalUpdates, listener)
                     );
@@ -555,11 +538,12 @@ public abstract class ProfileRunner<TaskCacheManagerType extends TaskCacheManage
      */
     public void getLatestHistoricalTaskProfile(
         String configId,
+        String tenantId,
         TransportService transportService,
         ConfigProfileType profile,
         ActionListener<ConfigProfileType> listener
     ) {
-        taskManager.getAndExecuteOnLatestConfigTask(configId, null, null, batchConfigTaskTypes, task -> {
+        taskManager.getAndExecuteOnLatestConfigTask(configId, null, null, tenantId, batchConfigTaskTypes, task -> {
             if (task.isPresent()) {
                 taskProfileRunner.getTaskProfile(task.get(), ActionListener.wrap(taskProfile -> {
                     ConfigProfileType.Builder<TaskClass, TaskProfileType> profileBuilder = createProfileBuilder();

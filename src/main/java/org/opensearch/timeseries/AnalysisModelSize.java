@@ -17,8 +17,9 @@ public interface AnalysisModelSize {
     /**
      * Gets all of a detector's model sizes hosted on a node
      *
-     * @param id Analysis Id
+     * @param tenantId Tenant Id
+     * @param configId Config Id
      * @return a map of model id to its memory size
      */
-    Map<String, Long> getModelSize(String id);
+    Map<String, Long> getModelSize(String tenantId, String configId);
 }

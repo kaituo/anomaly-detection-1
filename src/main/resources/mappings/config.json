@@ -1,7 +1,7 @@
 {
     "dynamic": false,
     "_meta": {
-        "schema_version": 9
+        "schema_version": 10
     },
     "properties": {
         "schema_version": {
@@ -242,6 +242,18 @@
         "last_ui_breaking_change_time" : {
             "type": "date",
             "format": "strict_date_time||epoch_millis"
+        },
+        "tenant_id": {
+            "type": "keyword"
+        },
+        "applicationId": {
+            "type": "keyword"
+        },
+        "dataSourceId": {
+            "type": "keyword"
+        },
+        "auto_created": {
+            "type": "boolean"
         }
     }
 }

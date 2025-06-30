@@ -14,8 +14,11 @@ package org.opensearch.timeseries.ratelimit;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -26,14 +29,15 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 
 /**
+ * Batch worker that groups queued requests into a single batch execution.
  *
- * @param <RequestType> Individual request type that is a subtype of ADRequest
- * @param <BatchRequestType> Batch request type like BulkRequest
- * @param <BatchResponseType> Response type like BulkResponse
+ * @param <RequestType>       individual queued request type
+ * @param <BatchRequestType>  batch request type
+ * @param <BatchResponseType> batch response type
  */
 public abstract class BatchWorker<RequestType extends QueuedRequest, BatchRequestType, BatchResponseType> extends
     ConcurrentWorker<RequestType> {
@@ -60,7 +64,7 @@ public abstract class BatchWorker<RequestType extends QueuedRequest, BatchReques
         Duration executionTtl,
         Setting<Integer> batchSizeSetting,
         Duration stateTtl,
-        NodeStateManager timeSeriesNodeStateManager,
+        StateManager timeSeriesNodeStateManager,
         AnalysisType context
     ) {
         super(
@@ -92,17 +96,21 @@ public abstract class BatchWorker<RequestType extends QueuedRequest, BatchReques
     /**
      * Used by subclasses to creates customized logic to send batch requests.
      * After everything finishes, the method should call listener.
-     * @param request Batch request to execute
+     * 
+     * @param request  Batch request to execute
      * @param listener customized listener
      */
     protected abstract void executeBatchRequest(BatchRequestType request, ActionListener<BatchResponseType> listener);
 
     /**
-     * We convert from queued requests understood by AD to batchRequest understood by OpenSearch.
+     * We convert from queued requests understood by AD to batchRequest understood
+     * by OpenSearch.
+     * 
      * @param toProcess Queued requests
+     * @param tenantId  tenant id
      * @return batch requests
      */
-    protected abstract BatchRequestType toBatchRequest(List<RequestType> toProcess);
+    protected abstract BatchRequestType toBatchRequest(List<RequestType> toProcess, String tenantId);
 
     @Override
     protected void execute(Runnable afterProcessCallback, Runnable emptyQueueCallback) {
@@ -121,22 +129,36 @@ public abstract class BatchWorker<RequestType extends QueuedRequest, BatchReques
                 }
             }
 
-            BatchRequestType batchRequest = toBatchRequest(toProcess);
+            Map<String, List<RequestType>> requestsByTenant = new HashMap<>();
+            for (RequestType request : toProcess) {
+                requestsByTenant.computeIfAbsent(request.getTenantId(), k -> new ArrayList<>()).add(request);
+            }
 
-            ThreadedActionListener<BatchResponseType> listener = new ThreadedActionListener<>(
-                LOG,
-                threadPool,
-                threadPoolName,
-                getResponseListener(toProcess, batchRequest),
-                false
-            );
-
-            final ActionListener<BatchResponseType> listenerWithRelease = ActionListener.runAfter(listener, afterProcessCallback);
-            executeBatchRequest(batchRequest, ActionListener.runAfter(listenerWithRelease, () -> {
-                if (!inflights.isEmpty()) {
-                    inflightConfigs.removeAll(inflights);
+            AtomicInteger pendingBatches = new AtomicInteger(requestsByTenant.size());
+            Runnable onBatchCompleted = () -> {
+                if (pendingBatches.decrementAndGet() == 0) {
+                    afterProcessCallback.run();
+                    if (!inflights.isEmpty()) {
+                        inflightConfigs.removeAll(inflights);
+                    }
                 }
-            }));
+            };
+
+            for (Map.Entry<String, List<RequestType>> entry : requestsByTenant.entrySet()) {
+                String tenantId = entry.getKey();
+                List<RequestType> partition = entry.getValue();
+                BatchRequestType batchRequest = toBatchRequest(partition, tenantId);
+
+                ThreadedActionListener<BatchResponseType> listener = new ThreadedActionListener<>(
+                    LOG,
+                    threadPool,
+                    threadPoolName,
+                    getResponseListener(partition, batchRequest),
+                    false
+                );
+
+                executeBatchRequest(batchRequest, ActionListener.runAfter(listener, onBatchCompleted));
+            }
         } else {
             emptyQueueCallback.run();
         }
@@ -145,9 +167,12 @@ public abstract class BatchWorker<RequestType extends QueuedRequest, BatchReques
     /**
      * Used by subclasses to creates customized logic to handle batch responses
      * or errors.
-     * @param toProcess Queued request used to retrieve information of retrying requests
+     * 
+     * @param toProcess    Queued request used to retrieve information of retrying
+     *                     requests
      * @param batchRequest Batch request corresponding to toProcess. We convert
-     *  from toProcess understood by AD to batchRequest understood by ES.
+     *                     from toProcess understood by AD to batchRequest
+     *                     understood by ES.
      * @return Listener to BatchResponse
      */
     protected abstract ActionListener<BatchResponseType> getResponseListener(List<RequestType> toProcess, BatchRequestType batchRequest);

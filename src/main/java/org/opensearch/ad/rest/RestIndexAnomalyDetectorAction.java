@@ -27,6 +27,7 @@ import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.IndexAnomalyDetectorAction;
 import org.opensearch.ad.transport.IndexAnomalyDetectorRequest;
 import org.opensearch.ad.transport.IndexAnomalyDetectorResponse;
@@ -42,6 +43,7 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestResponse;
 import org.opensearch.rest.action.RestResponseListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -53,9 +55,11 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
 
     private static final String INDEX_ANOMALY_DETECTOR_ACTION = "index_anomaly_detector_action";
     private final Logger logger = LogManager.getLogger(RestIndexAnomalyDetectorAction.class);
+    private final Settings settings;
 
     public RestIndexAnomalyDetectorAction(Settings settings, ClusterService clusterService) {
         super(settings, clusterService);
+        this.settings = settings;
     }
 
     @Override
@@ -64,6 +68,7 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
@@ -89,6 +94,8 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
             detectorId = AnomalyDetector.NO_ID;
         }
 
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
+
         IndexAnomalyDetectorRequest indexAnomalyDetectorRequest = new IndexAnomalyDetectorRequest(
             detectorId,
             seqNo,
@@ -100,7 +107,8 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
             maxSingleEntityDetectors,
             maxMultiEntityDetectors,
             maxAnomalyFeatures,
-            maxCategoricalFields
+            maxCategoricalFields,
+            tenantId
         );
 
         return channel -> client

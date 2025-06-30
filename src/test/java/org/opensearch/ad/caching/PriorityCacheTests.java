@@ -49,7 +49,7 @@ import org.apache.logging.log4j.Logger;
 import org.junit.Before;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.ADEnabledSetting;
@@ -57,13 +57,16 @@ import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.unit.ByteSizeValue;
 import org.opensearch.monitor.jvm.JvmInfo;
 import org.opensearch.monitor.jvm.JvmInfo.Mem;
 import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.threadpool.Scheduler.ScheduledCancellable;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
@@ -71,6 +74,7 @@ import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.Sample;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
@@ -81,10 +85,12 @@ import test.org.opensearch.ad.util.MLUtil;
 
 public class PriorityCacheTests extends AbstractCacheTest {
     private static final Logger LOG = LogManager.getLogger(PriorityCacheTests.class);
+    private static final String TENANT_ID = null;
 
     ADPriorityCache entityCache;
-    ADCheckpointDao checkpoint;
+    ADCheckpointStore checkpoint;
     ADModelManager modelManager;
+    StateManager stateManager;
 
     ClusterService clusterService;
     Settings settings;
@@ -98,9 +104,15 @@ public class PriorityCacheTests extends AbstractCacheTest {
     public void setUp() throws Exception {
         super.setUp();
 
-        checkpoint = mock(ADCheckpointDao.class);
+        checkpoint = mock(ADCheckpointStore.class);
 
         modelManager = mock(ADModelManager.class);
+        stateManager = mock(StateManager.class);
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends Config>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(detector));
+            return null;
+        }).when(stateManager).getConfig(any(String.class), any(), eq(AnalysisType.AD), anyBoolean(), any(ActionListener.class));
 
         clusterService = mock(ClusterService.class);
         ClusterSettings settings = new ClusterSettings(
@@ -141,7 +153,8 @@ public class PriorityCacheTests extends AbstractCacheTest {
             Settings.EMPTY,
             AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             checkpointWriteQueue,
-            checkpointMaintainQueue
+            checkpointMaintainQueue,
+            stateManager
         );
 
         ADCacheProvider cacheProvider = new ADCacheProvider();
@@ -189,7 +202,8 @@ public class PriorityCacheTests extends AbstractCacheTest {
             Settings.EMPTY,
             AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             checkpointWriteQueue,
-            checkpointMaintainQueue
+            checkpointMaintainQueue,
+            stateManager
         );
 
         ADCacheProvider cacheProvider = new ADCacheProvider();
@@ -230,7 +244,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             entityCache.get(modelId1, detector);
         }
         assertTrue(entityCache.hostIfPossible(detector, modelState1));
-        assertEquals(1, entityCache.getActiveEntities(detectorId));
+        assertEquals(1, entityCache.getActiveEntities(TENANT_ID, detectorId));
         when(memoryTracker.canAllocate(anyLong())).thenReturn(false);
         for (int i = 0; i < 2; i++) {
             assertEquals(null, entityCache.get(modelId2, detector));
@@ -238,7 +252,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         assertTrue(false == entityCache.hostIfPossible(detector, modelState2));
         // modelId2 gets put to inactive cache due to nothing in shared cache
         // and it cannot replace modelId1
-        assertEquals(1, entityCache.getActiveEntities(detectorId));
+        assertEquals(1, entityCache.getActiveEntities(TENANT_ID, detectorId));
     }
 
     public void testSharedCache() {
@@ -247,14 +261,14 @@ public class PriorityCacheTests extends AbstractCacheTest {
             entityCache.get(modelId1, detector);
         }
         entityCache.hostIfPossible(detector, modelState1);
-        assertEquals(1, entityCache.getActiveEntities(detectorId));
+        assertEquals(1, entityCache.getActiveEntities(TENANT_ID, detectorId));
         when(memoryTracker.canAllocate(anyLong())).thenReturn(true);
         for (int i = 0; i < 2; i++) {
             entityCache.get(modelId2, detector);
         }
         entityCache.hostIfPossible(detector, modelState2);
         // modelId2 should be in shared cache
-        assertEquals(2, entityCache.getActiveEntities(detectorId));
+        assertEquals(2, entityCache.getActiveEntities(TENANT_ID, detectorId));
 
         for (int i = 0; i < 10; i++) {
             entityCache.get(modelId3, detector2);
@@ -263,6 +277,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             null,
             modelId3,
             detectorId2,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -270,7 +285,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             new ArrayDeque<>()
         );
         entityCache.hostIfPossible(detector2, modelState3);
-        assertEquals(1, entityCache.getActiveEntities(detectorId2));
+        assertEquals(1, entityCache.getActiveEntities(TENANT_ID, detectorId2));
         when(memoryTracker.canAllocate(anyLong())).thenReturn(false);
         for (int i = 0; i < 4; i++) {
             // replace modelId2 in shared cache
@@ -280,6 +295,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             null,
             modelId4,
             detectorId2,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -287,7 +303,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             new ArrayDeque<>()
         );
         entityCache.hostIfPossible(detector2, modelState4);
-        assertEquals(2, entityCache.getActiveEntities(detectorId2));
+        assertEquals(2, entityCache.getActiveEntities(TENANT_ID, detectorId2));
         assertEquals(3, entityCache.getTotalActiveEntities());
         assertEquals(3, entityCache.getAllModels().size());
 
@@ -295,7 +311,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         entityCache.maintenance();
         assertEquals(2, entityCache.getTotalActiveEntities());
         assertEquals(2, entityCache.getAllModels().size());
-        assertEquals(1, entityCache.getActiveEntities(detectorId2));
+        assertEquals(1, entityCache.getActiveEntities(TENANT_ID, detectorId2));
     }
 
     public void testReplace() {
@@ -304,7 +320,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         }
 
         entityCache.hostIfPossible(detector, modelState1);
-        assertEquals(1, entityCache.getActiveEntities(detectorId));
+        assertEquals(1, entityCache.getActiveEntities(TENANT_ID, detectorId));
         when(memoryTracker.canAllocate(anyLong())).thenReturn(false);
         ModelState<ThresholdedRandomCutForest> state = null;
 
@@ -317,7 +333,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
         state = entityCache.get(modelId2, detector);
 
         assertEquals(modelId2, state.getModelId());
-        assertEquals(1, entityCache.getActiveEntities(detectorId));
+        assertEquals(1, entityCache.getActiveEntities(TENANT_ID, detectorId));
     }
 
     public void testCannotAllocateBuffer() {
@@ -367,15 +383,15 @@ public class PriorityCacheTests extends AbstractCacheTest {
         entityCache.hostIfPossible(detector, modelState2);
 
         assertEquals(2, entityCache.getTotalActiveEntities());
-        assertTrue(entityCache.isActive(detectorId, modelId1));
+        assertTrue(entityCache.isActive(TENANT_ID, detectorId, modelId1));
         long model1TotalUpdates = modelState1.getModel().get().getForest().getTotalUpdates();
         // use model1TotalUpdates as modelId1 has highest frequency and we use it to represent
         // the detector's total updates
-        assertEquals(model1TotalUpdates, entityCache.getTotalUpdates(detectorId));
+        assertEquals(model1TotalUpdates, entityCache.getTotalUpdates(TENANT_ID, detectorId));
         modelState1.addSample(new Sample(point, Instant.now(), Instant.now()));
-        assertEquals(model1TotalUpdates, entityCache.getTotalUpdates(detectorId));
-        assertEquals(model1TotalUpdates, entityCache.getTotalUpdates(detectorId, modelId1));
-        entityCache.clear(detectorId);
+        assertEquals(model1TotalUpdates, entityCache.getTotalUpdates(TENANT_ID, detectorId));
+        assertEquals(model1TotalUpdates, entityCache.getTotalUpdates(TENANT_ID, detectorId, modelId1));
+        entityCache.clear(TENANT_ID, detectorId);
         assertEquals(0, entityCache.getTotalActiveEntities());
 
         for (int i = 0; i < 2; i++) {
@@ -499,7 +515,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
     private void selectTestCommon(int entityFreq) {
         for (int i = 0; i < entityFreq; i++) {
             // bypass doorkeeper
-            entityCache.get(entity1.getModelId(detectorId).get(), detector);
+            entityCache.get(entity1.getModelId(null, detectorId).get(), detector);
         }
         Collection<Entity> cacheMissEntities = new ArrayList<>();
         cacheMissEntities.add(entity1);
@@ -517,7 +533,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
     public void testSelectToSharedCache() {
         for (int i = 0; i < 2; i++) {
             // bypass doorkeeper
-            entityCache.get(entity2.getModelId(detectorId).get(), detector);
+            entityCache.get(entity2.getModelId(null, detectorId).get(), detector);
         }
         when(memoryTracker.canAllocate(anyLong())).thenReturn(true);
 
@@ -530,7 +546,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
     public void testSelectToReplaceInCache() {
         for (int i = 0; i < 2; i++) {
             // bypass doorkeeper
-            entityCache.get(entity2.getModelId(detectorId).get(), detector);
+            entityCache.get(entity2.getModelId(null, detectorId).get(), detector);
         }
         when(memoryTracker.canAllocate(anyLong())).thenReturn(false);
 
@@ -546,8 +562,9 @@ public class PriorityCacheTests extends AbstractCacheTest {
         Entity entity6 = Entity.createSingleAttributeEntity("attributeName1", "attributeVal6");
         ModelState<ThresholdedRandomCutForest> modelState5 = new ModelState<>(
             MLUtil.createNonEmptyModel(detectorId2, 0, entity5).getLeft(),
-            entity5.getModelId(detectorId2).get(),
+            entity5.getModelId(null, detectorId2).get(),
             detectorId2,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -556,8 +573,9 @@ public class PriorityCacheTests extends AbstractCacheTest {
         );
         ModelState<ThresholdedRandomCutForest> modelState6 = new ModelState<>(
             MLUtil.createNonEmptyModel(detectorId2, 0, entity6).getLeft(),
-            entity6.getModelId(detectorId2).get(),
+            entity6.getModelId(null, detectorId2).get(),
             detectorId2,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -567,12 +585,12 @@ public class PriorityCacheTests extends AbstractCacheTest {
 
         for (int i = 0; i < 3; i++) {
             // bypass doorkeeper and leave room for lower frequency entity in testSelectToCold
-            entityCache.get(entity5.getModelId(detectorId2).get(), detector2);
-            entityCache.get(entity6.getModelId(detectorId2).get(), detector2);
+            entityCache.get(entity5.getModelId(null, detectorId2).get(), detector2);
+            entityCache.get(entity6.getModelId(null, detectorId2).get(), detector2);
         }
         for (int i = 0; i < 10; i++) {
             // entity1 cannot replace entity2 due to frequency
-            entityCache.get(entity2.getModelId(detectorId).get(), detector);
+            entityCache.get(entity2.getModelId(null, detectorId).get(), detector);
         }
         // put modelState5 in dedicated and modelState6 in shared cache
         when(memoryTracker.canAllocate(anyLong())).thenReturn(true);
@@ -601,7 +619,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
 
         for (int i = 0; i < 2; i++) {
             // bypass doorkeeper
-            entityCache.get(entity1.getModelId(detectorId).get(), detector);
+            entityCache.get(entity1.getModelId(null, detectorId).get(), detector);
         }
         Collection<Entity> cacheMissEntities = new ArrayList<>();
         cacheMissEntities.add(entity1);
@@ -622,12 +640,12 @@ public class PriorityCacheTests extends AbstractCacheTest {
     public void testClearMemory() {
         for (int i = 0; i < 2; i++) {
             // bypass doorkeeper
-            entityCache.get(entity2.getModelId(detectorId).get(), detector);
+            entityCache.get(entity2.getModelId(null, detectorId).get(), detector);
         }
 
         for (int i = 0; i < 10; i++) {
             // bypass doorkeeper and make entity1 have higher frequency
-            entityCache.get(entity1.getModelId(detectorId).get(), detector);
+            entityCache.get(entity1.getModelId(null, detectorId).get(), detector);
         }
 
         // put modelState1 in dedicated and modelState2 in shared cache
@@ -636,19 +654,20 @@ public class PriorityCacheTests extends AbstractCacheTest {
         entityCache.hostIfPossible(detector, modelState2);
 
         // two entities get inserted to cache
-        assertTrue(null != entityCache.get(entity1.getModelId(detectorId).get(), detector));
-        assertTrue(null != entityCache.get(entity2.getModelId(detectorId).get(), detector));
+        assertTrue(null != entityCache.get(entity1.getModelId(null, detectorId).get(), detector));
+        assertTrue(null != entityCache.get(entity2.getModelId(null, detectorId).get(), detector));
 
         Entity entity5 = Entity.createSingleAttributeEntity("attributeName1", "attributeVal5");
         when(memoryTracker.memoryToShed()).thenReturn(memoryPerEntity);
         for (int i = 0; i < 2; i++) {
             // bypass doorkeeper, CacheBuffer created, and trigger clearMemory
-            entityCache.get(entity5.getModelId(detectorId2).get(), detector2);
+            entityCache.get(entity5.getModelId(null, detectorId2).get(), detector2);
         }
         ModelState<ThresholdedRandomCutForest> modelState5 = new ModelState<ThresholdedRandomCutForest>(
             MLUtil.createNonEmptyModel(detectorId, 0, entity5).getLeft(),
-            entity5.getModelId(detectorId2).get(),
+            entity5.getModelId(null, detectorId2).get(),
             detectorId2,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -657,10 +676,10 @@ public class PriorityCacheTests extends AbstractCacheTest {
         );
         entityCache.hostIfPossible(detector2, modelState5);
 
-        assertTrue(null != entityCache.get(entity1.getModelId(detectorId).get(), detector));
+        assertTrue(null != entityCache.get(entity1.getModelId(null, detectorId).get(), detector));
         // entity 2 removed
-        assertTrue(null == entityCache.get(entity2.getModelId(detectorId).get(), detector));
-        assertTrue(null == entityCache.get(entity5.getModelId(detectorId2).get(), detector));
+        assertTrue(null == entityCache.get(entity2.getModelId(null, detectorId).get(), detector));
+        assertTrue(null == entityCache.get(entity5.getModelId(null, detectorId2).get(), detector));
     }
 
     public void testSelectEmpty() {
@@ -681,10 +700,10 @@ public class PriorityCacheTests extends AbstractCacheTest {
             ADEnabledSetting.getInstance().setSettingValue(ADEnabledSetting.DOOR_KEEPER_IN_CACHE_ENABLED, true);
             when(clock.instant()).thenReturn(Instant.ofEpochSecond(1000));
             when(detector.getIntervalDuration()).thenReturn(Duration.ofHours(12));
-            String modelId = entity1.getModelId(detectorId).get();
+            String modelId = entity1.getModelId(null, detectorId).get();
             // record last access time 1000
             assertTrue(null == entityCache.get(modelId, detector));
-            assertEquals(-1, entityCache.getLastActiveTime(detectorId, modelId));
+            assertEquals(-1, entityCache.getLastActiveTime(TENANT_ID, detectorId, modelId));
             // 2 hour = 7200 seconds have passed
             long currentTimeEpoch = 8200;
             when(clock.instant()).thenReturn(Instant.ofEpochSecond(currentTimeEpoch));
@@ -693,7 +712,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
             // door keeper still has the record and won't blocks entity state being created
             entityCache.get(modelId, detector);
             // * 1000 to convert to milliseconds
-            assertEquals(currentTimeEpoch * 1000, entityCache.getLastActiveTime(detectorId, modelId));
+            assertEquals(currentTimeEpoch * 1000, entityCache.getLastActiveTime(TENANT_ID, detectorId, modelId));
         } finally {
             ADEnabledSetting.getInstance().setSettingValue(ADEnabledSetting.DOOR_KEEPER_IN_CACHE_ENABLED, false);
         }
@@ -702,7 +721,7 @@ public class PriorityCacheTests extends AbstractCacheTest {
     public void testGetNoPriorityUpdate() {
         for (int i = 0; i < 3; i++) {
             // bypass doorkeeper
-            entityCache.get(entity2.getModelId(detectorId).get(), detector);
+            entityCache.get(entity2.getModelId(null, detectorId).get(), detector);
         }
 
         // fill in dedicated cache
@@ -713,48 +732,48 @@ public class PriorityCacheTests extends AbstractCacheTest {
 
         for (int i = 0; i < 2; i++) {
             // bypass doorkeeper
-            entityCache.get(entity1.getModelId(detectorId).get(), detector);
+            entityCache.get(entity1.getModelId(null, detectorId).get(), detector);
         }
         for (int i = 0; i < 10; i++) {
             // won't increase frequency
-            entityCache.getForMaintainance(detectorId, entity1.getModelId(detectorId).get());
+            entityCache.getForMaintainance(TENANT_ID, detectorId, entity1.getModelId(null, detectorId).get());
         }
 
         entityCache.hostIfPossible(detector, modelState1);
 
         // entity1 does not replace entity2
-        assertTrue(null == entityCache.get(entity1.getModelId(detectorId).get(), detector));
-        assertTrue(null != entityCache.get(entity2.getModelId(detectorId).get(), detector));
+        assertTrue(null == entityCache.get(entity1.getModelId(null, detectorId).get(), detector));
+        assertTrue(null != entityCache.get(entity2.getModelId(null, detectorId).get(), detector));
 
         for (int i = 0; i < 10; i++) {
             // increase frequency
-            entityCache.get(entity1.getModelId(detectorId).get(), detector);
+            entityCache.get(entity1.getModelId(null, detectorId).get(), detector);
         }
 
         entityCache.hostIfPossible(detector, modelState1);
 
         // entity1 replace entity2
-        assertTrue(null != entityCache.get(entity1.getModelId(detectorId).get(), detector));
-        assertTrue(null == entityCache.get(entity2.getModelId(detectorId).get(), detector));
+        assertTrue(null != entityCache.get(entity1.getModelId(null, detectorId).get(), detector));
+        assertTrue(null == entityCache.get(entity2.getModelId(null, detectorId).get(), detector));
     }
 
     public void testRemoveEntityModel() {
         for (int i = 0; i < 3; i++) {
             // bypass doorkeeper
-            entityCache.get(entity2.getModelId(detectorId).get(), detector);
+            entityCache.get(entity2.getModelId(null, detectorId).get(), detector);
         }
 
         // fill in dedicated cache
         entityCache.hostIfPossible(detector, modelState2);
 
-        assertTrue(null != entityCache.get(entity2.getModelId(detectorId).get(), detector));
+        assertTrue(null != entityCache.get(entity2.getModelId(null, detectorId).get(), detector));
 
-        entityCache.removeModel(detectorId, entity2.getModelId(detectorId).get());
+        entityCache.removeModel(TENANT_ID, detectorId, entity2.getModelId(null, detectorId).get());
 
-        assertTrue(null == entityCache.get(entity2.getModelId(detectorId).get(), detector));
+        assertTrue(null == entityCache.get(entity2.getModelId(null, detectorId).get(), detector));
 
-        verify(checkpoint, times(1)).deleteModelCheckpoint(eq(entity2.getModelId(detectorId).get()), any());
-        verify(checkpointWriteQueue, never()).write(any(), anyBoolean(), any());
+        verify(checkpoint, times(1)).deleteModelCheckpoint(eq(detector), eq(entity2.getModelId(null, detectorId).get()), any());
+        verify(checkpointWriteQueue, never()).write(any(), any(), anyBoolean(), any());
     }
 
     public void testGetTotalUpdates_orElseGetBranch() {
@@ -823,7 +842,8 @@ public class PriorityCacheTests extends AbstractCacheTest {
             Settings.EMPTY,
             AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             checkpointWriteQueue,
-            checkpointMaintainQueue
+            checkpointMaintainQueue,
+            stateManager
         );
 
         List<String> categoryFields = Arrays.asList("category_field_1", "category_field_2");

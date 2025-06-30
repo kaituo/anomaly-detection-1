@@ -17,7 +17,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
-import java.util.TreeSet;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -107,12 +107,12 @@ public class ForecastRealTimeInferencerTests extends OpenSearchTestCase {
         String modelId = "testModelId";
 
         // Add entries to sampleQueues and modelLocks
-        Map<String, ExpiringValue<TreeSet<Sample>>> sampleQueues = inferencer.getSampleQueues();
+        Map<String, ExpiringValue<ConcurrentSkipListSet<Sample>>> sampleQueues = inferencer.getSampleQueues();
         Map<String, ExpiringValue<Lock>> modelLocks = inferencer.getModelLocks();
 
         // Create a sample queue and add to sampleQueues
-        TreeSet<Sample> sampleQueue = new TreeSet<>();
-        ExpiringValue<TreeSet<Sample>> expiringSampleQueue = new ExpiringValue<>(sampleQueue, expirationTimeInMillis, clock);
+        ConcurrentSkipListSet<Sample> sampleQueue = new ConcurrentSkipListSet<>();
+        ExpiringValue<ConcurrentSkipListSet<Sample>> expiringSampleQueue = new ExpiringValue<>(sampleQueue, expirationTimeInMillis, clock);
 
         sampleQueues.put(modelId, expiringSampleQueue);
 
@@ -143,12 +143,12 @@ public class ForecastRealTimeInferencerTests extends OpenSearchTestCase {
         String modelId = "testModelId";
 
         // Add entries to sampleQueues and modelLocks
-        Map<String, ExpiringValue<TreeSet<Sample>>> sampleQueues = inferencer.getSampleQueues();
+        Map<String, ExpiringValue<ConcurrentSkipListSet<Sample>>> sampleQueues = inferencer.getSampleQueues();
         Map<String, ExpiringValue<Lock>> modelLocks = inferencer.getModelLocks();
 
         // Create a sample queue and add to sampleQueues
-        TreeSet<Sample> sampleQueue = new TreeSet<>();
-        ExpiringValue<TreeSet<Sample>> expiringSampleQueue = new ExpiringValue<>(sampleQueue, expirationTimeInMillis, clock);
+        ConcurrentSkipListSet<Sample> sampleQueue = new ConcurrentSkipListSet<>();
+        ExpiringValue<ConcurrentSkipListSet<Sample>> expiringSampleQueue = new ExpiringValue<>(sampleQueue, expirationTimeInMillis, clock);
 
         sampleQueues.put(modelId, expiringSampleQueue);
 

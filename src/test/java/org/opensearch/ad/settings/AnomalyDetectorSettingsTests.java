@@ -125,6 +125,18 @@ public class AnomalyDetectorSettingsTests extends OpenSearchTestCase {
         );
     }
 
+    public void testConfigDocumentStoreFactorySettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.CONFIG_DOCUMENT_STORE_FACTORY_CLASS));
+    }
+
+    public void testCheckpointStoreFactorySettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.CHECKPOINT_STORE_FACTORY_CLASS));
+    }
+
+    public void testDataSourceEndpointResolverFactorySettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.DATA_SOURCE_ENDPOINT_RESOLVER_FACTORY_CLASS));
+    }
+
     public void testAllLegacyOpenDistroSettingsFallback() {
         assertEquals(
             AnomalyDetectorSettings.AD_MAX_SINGLE_ENTITY_ANOMALY_DETECTORS.get(Settings.EMPTY),
@@ -223,7 +235,7 @@ public class AnomalyDetectorSettingsTests extends OpenSearchTestCase {
 
         settings = Settings.builder().put("plugins.anomaly_detection.max_multi_entity_anomaly_detectors", 98).build();
         assertEquals(AnomalyDetectorSettings.AD_MAX_HC_ANOMALY_DETECTORS.get(settings), Integer.valueOf(98));
-        assertEquals(LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS.get(settings), Integer.valueOf(10));
+        assertEquals(LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS.get(settings), Integer.valueOf(1000));
 
         settings = Settings.builder().put("plugins.anomaly_detection.max_anomaly_features", 7).build();
         assertEquals(AnomalyDetectorSettings.MAX_ANOMALY_FEATURES.get(settings), Integer.valueOf(7));

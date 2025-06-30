@@ -40,11 +40,13 @@ import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.core.xcontent.XContentParserUtils;
 import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.model.Forecaster;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.ConfigDocumentStore;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.BiCheckedFunction;
-import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.transport.BackPressureRouting;
@@ -53,7 +55,8 @@ import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.client.Client;
 
-public class NodeStateManager implements MaintenanceState, CleanState, ExceptionRecorder {
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
+public class NodeStateManager implements StateManager {
     private static final Logger LOG = LogManager.getLogger(NodeStateManager.class);
 
     public static final String NO_ERROR = "no_error";
@@ -62,6 +65,7 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
     protected Client client;
     protected NamedXContentRegistry xContentRegistry;
     protected ClientUtil clientUtil;
+    protected ConfigDocumentStore configDocumentStore;
     protected final Clock clock;
     protected final Duration stateTtl;
     // map from detector id to the map of ES node id to the node's backpressureMuter
@@ -69,34 +73,24 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
     private int maxRetryForUnresponsiveNode;
     private TimeValue mutePeriod;
 
-    /**
-     * Constructor
-     *
-     * @param client Client to make calls to OpenSearch
-     * @param xContentRegistry ES named content registry
-     * @param settings ES settings
-     * @param clientUtil AD Client utility
-     * @param clock A UTC clock
-     * @param stateTtl Max time to keep state in memory
-     * @param clusterService Cluster service accessor
-     * @param maxRetryForUnresponsiveNodeSetting max retry number for unresponsive node
-     * @param backoffMinutesSetting back off minutes setting
-     */
     public NodeStateManager(
         Client client,
         NamedXContentRegistry xContentRegistry,
         Settings settings,
         ClientUtil clientUtil,
+        ConfigDocumentStore configDocumentStore,
         Clock clock,
         Duration stateTtl,
         ClusterService clusterService,
         Setting<Integer> maxRetryForUnresponsiveNodeSetting,
-        Setting<TimeValue> backoffMinutesSetting
+        Setting<TimeValue> backoffMinutesSetting,
+        org.opensearch.timeseries.rest.handler.EventBridgeHandler eventBridgeHandler
     ) {
         this.states = new ConcurrentHashMap<>();
         this.client = client;
         this.xContentRegistry = xContentRegistry;
         this.clientUtil = clientUtil;
+        this.configDocumentStore = configDocumentStore;
         this.clock = clock;
         this.stateTtl = stateTtl;
         this.backpressureMuter = new ConcurrentHashMap<>();
@@ -138,8 +132,9 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
      *
      * @param configId config ID
      */
+    // TODO: use composite key for multiple tenants
     @Override
-    public void clear(String configId) {
+    public void clear(String tenantId, String configId) {
         Map<String, BackPressureRouting> routingMap = backpressureMuter.get(configId);
         if (routingMap != null) {
             routingMap.clear();
@@ -184,7 +179,11 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
 
     /**
      * Get config and execute consumer function.
-     * [Important!] Make sure listener returns in function
+     * [Important!] Make sure listener returns in function.
+     *
+     * Compared with the overload below, this variant is for plain retrieval paths such as GET config APIs:
+     * it always reads from storage, returns the persisted config even when all features are disabled,
+     * preserves the document version during parsing, and reports parse/get failures via {@code listener.onFailure(...)}.
      *
      * @param configId config id
      * @param analysisType analysis type
@@ -194,15 +193,13 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
      */
     public <T> void getConfig(
         String configId,
+        String tenantId,
         AnalysisType analysisType,
         Consumer<Optional<? extends Config>> function,
         ActionListener<T> listener
     ) {
-        GetRequest getRequest = new GetRequest(
-            analysisType == AnalysisType.AD ? ADCommonName.CONFIG_INDEX : ForecastCommonName.CONFIG_INDEX,
-            configId
-        );
-        client.get(getRequest, ActionListener.wrap(response -> {
+        GetRequest getRequest = new GetRequest(resolveConfigIndexName(analysisType), configId);
+        configDocumentStore.get(getRequest, toTenantContext(tenantId), ActionListener.wrap(response -> {
             if (!response.isExists()) {
                 function.accept(Optional.empty());
                 return;
@@ -227,26 +224,56 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
                 listener.onFailure(new OpenSearchStatusException(message, RestStatus.INTERNAL_SERVER_ERROR));
             }
         }, exception -> {
+            if (ExceptionUtil.isIndexNotFoundInMessage(exception)) {
+                function.accept(Optional.empty());
+                return;
+            }
             LOG.error("Failed to get config " + configId, exception);
             listener.onFailure(exception);
         }));
     }
 
-    public void getConfig(String configID, AnalysisType context, boolean cache, ActionListener<Optional<? extends Config>> listener) {
+    /**
+     * Get config with optional caching. If cache is true and the config is already cached, return the cached config.
+     * Otherwise, fetch the config from OpenSearch and cache it.
+     *
+     * Compared with the consumer overload above, this variant is used by execution-oriented paths.
+     * {@code cache} only controls whether the in-memory NodeState cache is read/written; setting
+     * {@code cache=false} does not make the two overloads equivalent. Even with {@code cache=false},
+     * this path still applies execution-time feature validation and may fail when all features are disabled.
+     * This path also parses by id only and maps parse failures to {@code Optional.empty()}.
+     *
+     * @param configID config id
+     * @param tenantId tenant id
+     * @param context analysis type
+     * @param cache whether to cache the config
+     * @param listener action listener
+     */
+    public void getConfig(
+        String configID,
+        String tenantId,
+        AnalysisType context,
+        boolean cache,
+        ActionListener<Optional<? extends Config>> listener
+    ) {
         NodeState state = states.get(configID);
-        if (state != null && state.getConfigDef() != null) {
+        if (cache && state != null && state.getConfigDef() != null) {
             listener.onResponse(Optional.of(state.getConfigDef()));
         } else {
-            GetRequest request = new GetRequest(
-                context == AnalysisType.AD ? ADCommonName.CONFIG_INDEX : ForecastCommonName.CONFIG_INDEX,
-                configID
-            );
+            GetRequest request = new GetRequest(resolveConfigIndexName(context), configID);
             BiCheckedFunction<XContentParser, String, ? extends Config, IOException> configParser = context.isAD()
                 ? AnomalyDetector::parse
                 : Forecaster::parse;
-            clientUtil
-                .<GetRequest, GetResponse>asyncRequest(request, client::get, onGetConfigResponse(configID, configParser, cache, listener));
+            configDocumentStore.get(request, toTenantContext(tenantId), onGetConfigResponse(configID, configParser, cache, listener));
         }
+    }
+
+    private TenantContext toTenantContext(String tenantId) {
+        return tenantId == null ? TenantContext.systemWide() : TenantContext.user(tenantId);
+    }
+
+    private String resolveConfigIndexName(AnalysisType analysisType) {
+        return analysisType == AnalysisType.AD ? ADCommonName.CONFIG_INDEX : ForecastCommonName.CONFIG_INDEX;
     }
 
     private ActionListener<GetResponse> onGetConfigResponse(
@@ -288,7 +315,13 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
                 LOG.error("Stack trace:", t);
                 listener.onResponse(Optional.empty());
             }
-        }, listener::onFailure);
+        }, exception -> {
+            if (ExceptionUtil.isIndexNotFoundInMessage(exception)) {
+                listener.onResponse(Optional.empty());
+                return;
+            }
+            listener.onFailure(exception);
+        });
     }
 
     /**
@@ -347,35 +380,6 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
     }
 
     /**
-     * Get a detector's checkpoint and save a flag if we find any so that next time we don't need to do it again
-     * @param adID  the detector's ID
-     * @param listener listener to handle get request
-     */
-    public void getDetectorCheckpoint(String adID, ActionListener<Boolean> listener) {
-        NodeState state = states.get(adID);
-        if (state != null && state.doesCheckpointExists()) {
-            listener.onResponse(Boolean.TRUE);
-            return;
-        }
-
-        GetRequest request = new GetRequest(ADCommonName.CHECKPOINT_INDEX_NAME, SingleStreamModelIdMapper.getRcfModelId(adID, 0));
-
-        clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetCheckpointResponse(adID, listener));
-    }
-
-    private ActionListener<GetResponse> onGetCheckpointResponse(String adID, ActionListener<Boolean> listener) {
-        return ActionListener.wrap(response -> {
-            if (response == null || !response.isExists()) {
-                listener.onResponse(Boolean.FALSE);
-            } else {
-                NodeState state = states.computeIfAbsent(adID, id -> new NodeState(id, clock));
-                state.setCheckpointExists(true);
-                listener.onResponse(Boolean.TRUE);
-            }
-        }, listener::onFailure);
-    }
-
-    /**
      * Whether last cold start for the detector is running
      * @param adID detector ID
      * @return running or not
@@ -405,17 +409,29 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
         };
     }
 
-    public void getJob(String configID, ActionListener<Optional<Job>> listener) {
+    /**
+     * Get job with optional caching. If cache is true and the job is already cached, return the cached job.
+     * Otherwise, fetch the job from OpenSearch and cache it.
+     *
+     * @param configID config id
+     * @param tenantId tenant id
+     * @param cache whether to cache the job
+     * @param listener action listener
+     */
+    @Override
+    public void getJob(String configID, String tenantId, boolean cache, ActionListener<Optional<Job>> listener) {
         NodeState state = states.get(configID);
-        if (state != null && state.getJob() != null) {
+        if (cache && state != null && state.getJob() != null) {
             listener.onResponse(Optional.of(state.getJob()));
-        } else {
-            GetRequest request = new GetRequest(CommonName.JOB_INDEX, configID);
-            clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetJobResponse(configID, listener));
+            return;
         }
+
+        // Directly fetch from OpenSearch index
+        GetRequest request = new GetRequest(CommonName.JOB_INDEX, configID);
+        clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetJobResponse(configID, cache, listener));
     }
 
-    private ActionListener<GetResponse> onGetJobResponse(String configID, ActionListener<Optional<Job>> listener) {
+    private ActionListener<GetResponse> onGetJobResponse(String configID, boolean cache, ActionListener<Optional<Job>> listener) {
         return ActionListener.wrap(response -> {
             if (response == null || !response.isExists()) {
                 listener.onResponse(Optional.empty());
@@ -432,8 +448,10 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
             ) {
                 ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
                 Job job = Job.parse(parser);
-                NodeState state = states.computeIfAbsent(configID, id -> new NodeState(id, clock));
-                state.setJob(job);
+                if (cache) {
+                    NodeState state = states.computeIfAbsent(configID, id -> new NodeState(id, clock));
+                    state.setJob(job);
+                }
 
                 listener.onResponse(Optional.of(job));
             } catch (Exception t) {

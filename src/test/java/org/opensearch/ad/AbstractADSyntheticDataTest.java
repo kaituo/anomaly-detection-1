@@ -24,6 +24,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -34,9 +35,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Logger;
 import org.junit.Before;
 import org.opensearch.client.Request;
+import org.opensearch.client.RequestOptions;
 import org.opensearch.client.Response;
 import org.opensearch.client.RestClient;
 import org.opensearch.timeseries.AbstractSyntheticDataTest;
+import org.opensearch.timeseries.constant.CommonName;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -44,6 +47,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
+    private static final long INIT_DETECTOR_TIMEOUT_MILLIS = 300_000L;
+
     protected static class TrainResult {
         public String detectorId;
         public List<JsonObject> data;
@@ -80,6 +85,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
     public static final Logger LOG = (Logger) LogManager.getLogger(AbstractADSyntheticDataTest.class);
 
     protected static final double EPSILON = 1e-3;
+    private final Map<String, String> detectorResultIndices = new HashMap<>();
 
     @Override
     @Before
@@ -90,10 +96,33 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
         updateClusterSettings(AD_MODEL_MAX_SIZE_PERCENTAGE.getKey(), 0.5);
     }
 
+    protected String tenantId() {
+        return null;
+    }
+
+    protected Request tenantAwareRequest(String method, String endpoint) {
+        return tenantAwareRequest(new Request(method, endpoint));
+    }
+
+    protected Request tenantAwareRequest(Request request) {
+        String tenantId = tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            return request;
+        }
+
+        RequestOptions.Builder optionsBuilder = request.getOptions().toBuilder();
+        optionsBuilder.addHeader(CommonName.TENANT_ID_HEADER, tenantId);
+        request.setOptions(optionsBuilder.build());
+        return request;
+    }
+
     protected void runDetectionResult(String detectorId, Instant begin, Instant end, RestClient client, int entitySize) throws IOException,
         InterruptedException {
         // trigger run in current interval
-        Request request = new Request("POST", String.format(Locale.ROOT, "/_opendistro/_anomaly_detection/detectors/%s/_run", detectorId));
+        Request request = tenantAwareRequest(
+            "POST",
+            String.format(Locale.ROOT, "/_opendistro/_anomaly_detection/detectors/%s/_run", detectorId)
+        );
         request
             .setJsonEntity(
                 String.format(Locale.ROOT, "{ \"period_start\": %d, \"period_end\": %d }", begin.toEpochMilli(), end.toEpochMilli())
@@ -108,7 +137,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
     protected void startHistorical(String detectorId, Instant begin, Instant end, RestClient client, int entitySize) throws IOException,
         InterruptedException {
         // trigger run in current interval
-        Request request = new Request(
+        Request request = tenantAwareRequest(
             "POST",
             String.format(Locale.ROOT, "/_opendistro/_anomaly_detection/detectors/%s/_start", detectorId)
         );
@@ -127,7 +156,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
         InterruptedException {
         LOG.info("preview detector {}", detector);
         // trigger run in current interval
-        Request request = new Request("POST", "/_plugins/_anomaly_detection/detectors/_preview");
+        Request request = tenantAwareRequest("POST", "/_plugins/_anomaly_detection/detectors/_preview");
         request
             .setJsonEntity(
                 String
@@ -149,7 +178,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
     protected Map<String, Object> previewWithFailure(String detector, Instant begin, Instant end, RestClient client) throws IOException,
         InterruptedException {
         // trigger run in current interval
-        Request request = new Request("POST", "/_plugins/_anomaly_detection/detectors/_preview");
+        Request request = tenantAwareRequest("POST", "/_plugins/_anomaly_detection/detectors/_preview");
         request
             .setJsonEntity(
                 String
@@ -224,7 +253,10 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
         int expectedResultSize
     ) throws InterruptedException {
         LOG.debug("approximateEndTime: {}", approximateEndTime);
-        Request request = new Request("POST", "/_plugins/_anomaly_detection/detectors/results/_search");
+        RestClient resultClient = anomalyResultClient(detectorId, client);
+        String resultSearchEndpoint = anomalyResultSearchEndpoint(detectorId);
+        String resultRefreshEndpoint = anomalyResultRefreshEndpoint(detectorId);
+        Request request = tenantAwareRequest("POST", resultSearchEndpoint);
 
         String jsonTemplatePrefix = "{\n"
             + "    \"query\": {\n"
@@ -287,7 +319,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
         int maxWaitCycles = 30;
         do {
             try {
-                JsonArray hits = getHits(client, request);
+                JsonArray hits = getHits(resultClient, request);
                 if (hits != null && checker.checkCondition(hits, entitySize)) {
                     List<JsonObject> res = new ArrayList<>();
                     for (int i = 0; i < hits.size(); i++) {
@@ -298,7 +330,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
                     return res;
                 } else {
                     LOG.info("wait for result, data end time: {}, previous result: {}, size: {}", dateEndTime, hits, hits.size());
-                    client.performRequest(new Request("POST", String.format(Locale.ROOT, "/%s/_refresh", ".opendistro-anomaly-results*")));
+                    resultClient.performRequest(new Request("POST", resultRefreshEndpoint));
                 }
                 // Do not scale sleep with entity size; that can make tests run >20 minutes.
                 Thread.sleep(2_000);
@@ -312,7 +344,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
         try {
             String matchAll = "{\n" + "  \"size\": 1000,\n" + "  \"query\": {\n" + "    \"match_all\": {}\n" + "  }\n" + "}";
             request.setJsonEntity(matchAll);
-            JsonArray hits = getHits(client, request);
+            JsonArray hits = getHits(resultClient, request);
             LOG.info("Query: {}", formattedJson);
             LOG.info("match all result: {}", hits);
         } catch (Exception e) {
@@ -393,17 +425,45 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
     }
 
     protected String createDetector(RestClient client, String detectorJson) throws Exception {
-        Request request = new Request("POST", "/_plugins/_anomaly_detection/detectors/");
+        Request request = tenantAwareRequest("POST", "/_plugins/_anomaly_detection/detectors/");
 
         request.setJsonEntity(detectorJson);
         Map<String, Object> response = entityAsMap(client.performRequest(request));
         String detectorId = (String) response.get("_id");
+        JsonObject detector = JsonParser.parseString(detectorJson).getAsJsonObject();
+        JsonElement resultIndex = detector.get("result_index");
+        if (resultIndex != null && resultIndex.isJsonNull() == false) {
+            detectorResultIndices.put(detectorId, resultIndex.getAsString());
+        }
         Thread.sleep(1_000);
         return detectorId;
     }
 
+    protected RestClient anomalyResultClient(String detectorId, RestClient client) {
+        return client;
+    }
+
+    protected String anomalyResultSearchEndpoint(String detectorId) {
+        String resultIndex = detectorResultIndices.get(detectorId);
+        if (resultIndex == null || resultIndex.isBlank()) {
+            return "/_plugins/_anomaly_detection/detectors/results/_search";
+        }
+        return String.format(Locale.ROOT, "/%s/_search", resultIndex);
+    }
+
+    protected String anomalyResultRefreshEndpoint(String detectorId) {
+        String resultIndex = detectorResultIndices.get(detectorId);
+        if (resultIndex == null || resultIndex.isBlank()) {
+            return String.format(Locale.ROOT, "/%s/_refresh", ".opendistro-anomaly-results*");
+        }
+        return String.format(Locale.ROOT, "/%s/_refresh", resultIndex);
+    }
+
     protected void startDetector(String detectorId, RestClient client) throws Exception {
-        Request request = new Request("POST", String.format(Locale.ROOT, "/_plugins/_anomaly_detection/detectors/%s/_start", detectorId));
+        Request request = tenantAwareRequest(
+            "POST",
+            String.format(Locale.ROOT, "/_plugins/_anomaly_detection/detectors/%s/_start", detectorId)
+        );
 
         Map<String, Object> response = entityAsMap(client.performRequest(request));
         String responseDetectorId = (String) response.get("_id");
@@ -411,7 +471,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
     }
 
     protected String profileDetectorInitProgress(String detectorId, RestClient client) throws Exception {
-        Request request = new Request(
+        Request request = tenantAwareRequest(
             "GET",
             String.format(Locale.ROOT, "/_plugins/_anomaly_detection/detectors/%s/_profile/init_progress", detectorId)
         );
@@ -459,7 +519,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
             }
 
             duration = System.currentTimeMillis() - startTime;
-        } while (duration <= 60_000);
+        } while (duration <= INIT_DETECTOR_TIMEOUT_MILLIS);
     }
 
     /**
@@ -734,7 +794,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
 
     protected List<JsonObject> getTasks(String detectorId, int size, ConditionChecker checker, RestClient client)
         throws InterruptedException {
-        Request request = new Request("POST", "/_plugins/_anomaly_detection/detectors/tasks/_search");
+        Request request = tenantAwareRequest("POST", "/_plugins/_anomaly_detection/detectors/tasks/_search");
 
         String jsonTemplate = "{\n"
             + "  \"size\": %d,\n"
@@ -799,7 +859,8 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
     }
 
     protected long countResults(String detectorId, long executionStartLowerBound, boolean historical) throws Exception {
-        Request req = new Request("POST", "/_plugins/_anomaly_detection/detectors/results/_search");
+        RestClient resultClient = anomalyResultClient(detectorId, client());
+        Request req = tenantAwareRequest("POST", anomalyResultSearchEndpoint(detectorId));
         StringBuilder sb = new StringBuilder();
         sb
             .append("{\n")
@@ -819,7 +880,7 @@ public class AbstractADSyntheticDataTest extends AbstractSyntheticDataTest {
             .append("}");
 
         req.setJsonEntity(sb.toString());
-        Response resp = client().performRequest(req);
+        Response resp = resultClient.performRequest(req);
         Map<String, Object> m = entityAsMap(resp);
         @SuppressWarnings("unchecked")
         Map<String, Object> hits = (Map<String, Object>) m.get("hits");

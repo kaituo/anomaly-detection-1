@@ -16,61 +16,68 @@ import java.util.Optional;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.forecast.ForecastEntityProfileRunner;
 import org.opensearch.forecast.ForecastProfileRunner;
 import org.opensearch.forecast.ForecastTaskProfileRunner;
+import org.opensearch.forecast.client.ForecastNodeCommunicator;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskProfile;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.model.ForecasterProfile;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.task.ForecastTaskManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.model.EntityProfile;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.BaseGetConfigTransportAction;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class GetForecasterTransportAction extends
-    BaseGetConfigTransportAction<GetForecasterResponse, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastIndexManagement, ForecastTaskManager, Forecaster, ForecastEntityProfileAction, ForecastEntityProfileRunner, ForecastTaskProfile, ForecasterProfile, ForecastProfileAction, ForecastTaskProfileRunner, ForecastProfileRunner> {
+    BaseGetConfigTransportAction<GetForecasterResponse, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastDelegatingDataManagement, ForecastTaskManager, Forecaster, ForecastEntityProfileRunner, ForecastTaskProfile, ForecasterProfile, ForecastProfileAction, ForecastTaskProfileRunner, ForecastProfileRunner> {
 
     @Inject
     public GetForecasterTransportAction(
         TransportService transportService,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         ActionFilters actionFilters,
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
+        StateManager stateManager,
+        ForecastNodeCommunicator nodeCommunicator,
         Settings settings,
         NamedXContentRegistry xContentRegistry,
         ForecastTaskManager forecastTaskManager,
-        ForecastTaskProfileRunner taskProfileRunner
+        ForecastTaskProfileRunner taskProfileRunner,
+        ForecastDelegatingDataManagement dataManagement,
+        RunContext runContext
     ) {
         super(
             transportService,
             nodeFilter,
             actionFilters,
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
+            stateManager,
+            nodeCommunicator,
             settings,
             xContentRegistry,
             forecastTaskManager,
             GetForecasterAction.NAME,
             Forecaster.class,
-            Forecaster.FORECAST_PARSE_FIELD_NAME,
             ForecastTaskType.ALL_FORECAST_TASK_TYPES,
             ForecastTaskType.REALTIME_FORECAST_HC_FORECASTER.name(),
             ForecastTaskType.REALTIME_FORECAST_SINGLE_STREAM.name(),
@@ -78,7 +85,9 @@ public class GetForecasterTransportAction extends
             ForecastTaskType.RUN_ONCE_FORECAST_SINGLE_STREAM.name(),
             ForecastSettings.FORECAST_FILTER_BY_BACKEND_ROLES,
             taskProfileRunner,
-            ForecastIndex.CONFIG.getIndexName()
+            ForecastIndex.CONFIG.getIndexName(),
+            dataManagement,
+            runContext
         );
     }
 
@@ -119,34 +128,33 @@ public class GetForecasterTransportAction extends
 
     @Override
     protected ForecastEntityProfileRunner createEntityProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
-        NamedXContentRegistry xContentRegistry,
-        long requiredSamples
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager stateManager,
+        NamedXContentRegistry xContentRegistry
     ) {
-        return new ForecastEntityProfileRunner(client, clientUtil, xContentRegistry, TimeSeriesSettings.NUM_MIN_SAMPLES);
+        return new ForecastEntityProfileRunner(nodeCommunicator, dataAccess, stateManager, TimeSeriesSettings.NUM_MIN_SAMPLES);
     }
 
     @Override
     protected ForecastProfileRunner createProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
         NamedXContentRegistry xContentRegistry,
-        DiscoveryNodeFilterer nodeFilter,
-        long requiredSamples,
+        DiscoveryNodeSelector nodeFilter,
         TransportService transportService,
         ForecastTaskManager taskManager,
         ForecastTaskProfileRunner taskProfileRunner
     ) {
         return new ForecastProfileRunner(
-            client,
-            clientUtil,
+            nodeCommunicator,
             xContentRegistry,
             nodeFilter,
             TimeSeriesSettings.NUM_MIN_SAMPLES,
             transportService,
             taskManager,
-            taskProfileRunner
+            taskProfileRunner,
+            dataAccess
         );
     }
 
@@ -163,5 +171,10 @@ public class GetForecasterTransportAction extends
                 }
             }
         }
+    }
+
+    @Override
+    protected Setting<Boolean> getMultiTenancyEnabledSetting() {
+        return ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED;
     }
 }

@@ -17,6 +17,7 @@ import org.opensearch.timeseries.transport.StopConfigResponse;
 
 public class StopDetectorAction extends ActionType<StopConfigResponse> {
     // Internal Action which is not used for public facing RestAPIs.
+    // Only needed for single-tenant mode. Multi-tenant mode stores job data in event bridge.
     public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "detector/stop";
     public static final StopDetectorAction INSTANCE = new StopDetectorAction();
 

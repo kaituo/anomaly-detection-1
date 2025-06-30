@@ -19,14 +19,17 @@ import java.util.List;
 import java.util.Locale;
 
 import org.joda.time.Instant;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.constant.ForecastCommonMessages;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
+import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.transport.ForecastResultRequest;
 import org.opensearch.forecast.transport.ForecastRunOnceAction;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -38,8 +41,11 @@ import com.google.common.collect.ImmutableList;
 public class RestRunOnceForecasterAction extends BaseRestHandler {
 
     public static final String FORECASTER_ACTION = "run_forecaster_once";
+    private final Settings settings;
 
-    public RestRunOnceForecasterAction() {}
+    public RestRunOnceForecasterAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -59,6 +65,7 @@ public class RestRunOnceForecasterAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ForecastEnabledSetting.isForecastEnabled()) {
             throw new IllegalStateException(ForecastCommonMessages.DISABLED_ERR_MSG);
@@ -66,11 +73,13 @@ public class RestRunOnceForecasterAction extends BaseRestHandler {
 
         try {
             String forecasterId = request.param(FORECASTER_ID);
+            String tenantId = TenantAwareHelper.getTenantID(ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED.get(this.settings), request);
 
             ForecastResultRequest getRequest = new ForecastResultRequest(
                 forecasterId,
                 -1L, // will set it in ResultProcessor.onGetConfig
-                Instant.now().getMillis()
+                Instant.now().getMillis(),
+                tenantId
             );
 
             return channel -> client.execute(ForecastRunOnceAction.INSTANCE, getRequest, new RestToXContentListener<>(channel));

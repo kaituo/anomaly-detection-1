@@ -40,10 +40,12 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.mockito.ArgumentCaptor;
 import org.opensearch.Version;
 import org.opensearch.action.LatchedActionListener;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
+import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.transport.AnomalyResultTests;
@@ -61,6 +63,9 @@ import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.search.SearchModule;
 import org.opensearch.test.ClusterServiceUtils;
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.client.ConfigDocumentStore;
+import org.opensearch.timeseries.client.TenantContext;
+import org.opensearch.timeseries.client.TransportConfigDocumentStore;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Job;
@@ -135,11 +140,13 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
             xContentRegistry(),
             settings,
             clientUtil,
+            new TransportConfigDocumentStore(client),
             clock,
             duration,
             clusterService,
             TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            TimeSeriesSettings.BACKOFF_MINUTES
+            TimeSeriesSettings.BACKOFF_MINUTES,
+            null
         );
 
         checkpointResponse = mock(GetResponse.class);
@@ -240,7 +247,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         String detectorId = setupDetector();
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        stateManager.getConfig(detectorId, AnalysisType.AD, true, ActionListener.wrap(asDetector -> {
+        stateManager.getConfig(detectorId, null, AnalysisType.AD, true, ActionListener.wrap(asDetector -> {
             assertEquals(detectorToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -248,6 +255,45 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
             inProgressLatch.countDown();
         }));
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
+    }
+
+    public void testGetAnomalyDetectorUsesInjectedConfigStore() throws Exception {
+        ConfigDocumentStore configDocumentStore = mock(ConfigDocumentStore.class);
+        NodeStateManager configStoreBackedStateManager = new NodeStateManager(
+            client,
+            xContentRegistry(),
+            settings,
+            clientUtil,
+            configDocumentStore,
+            clock,
+            duration,
+            clusterService,
+            TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+            TimeSeriesSettings.BACKOFF_MINUTES,
+            null
+        );
+        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), null, true);
+        GetResponse getResponse = TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX);
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            ActionListener<GetResponse> listener = invocation.getArgument(2);
+            listener.onResponse(getResponse);
+            return null;
+        }).when(configDocumentStore).get(any(GetRequest.class), any(TenantContext.class), any());
+
+        PlainActionFuture<Optional<? extends Config>> future = PlainActionFuture.newFuture();
+        configStoreBackedStateManager.getConfig(detector.getId(), "tenant-1", AnalysisType.AD, true, future);
+
+        Optional<? extends Config> response = future.actionGet();
+        assertTrue(response.isPresent());
+        assertEquals(detector, response.get());
+
+        ArgumentCaptor<GetRequest> requestCaptor = ArgumentCaptor.forClass(GetRequest.class);
+        ArgumentCaptor<TenantContext> tenantCaptor = ArgumentCaptor.forClass(TenantContext.class);
+        verify(configDocumentStore).get(requestCaptor.capture(), tenantCaptor.capture(), any());
+        assertEquals(ADCommonName.CONFIG_INDEX, requestCaptor.getValue().index());
+        assertEquals(detector.getId(), requestCaptor.getValue().id());
+        assertEquals("tenant-1", tenantCaptor.getValue().getTenantId());
     }
 
     /**
@@ -260,7 +306,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         String detectorId = setupDetector();
         final CountDownLatch inProgressLatch = new CountDownLatch(2);
 
-        stateManager.getConfig(detectorId, AnalysisType.AD, true, ActionListener.wrap(asDetector -> {
+        stateManager.getConfig(detectorId, null, AnalysisType.AD, true, ActionListener.wrap(asDetector -> {
             assertEquals(detectorToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -268,7 +314,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
             inProgressLatch.countDown();
         }));
 
-        stateManager.getConfig(detectorId, AnalysisType.AD, true, ActionListener.wrap(asDetector -> {
+        stateManager.getConfig(detectorId, null, AnalysisType.AD, true, ActionListener.wrap(asDetector -> {
             assertEquals(detectorToCheck, asDetector.get());
             inProgressLatch.countDown();
         }, exception -> {
@@ -282,15 +328,12 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
     }
 
     public void getCheckpointTestTemplate(boolean exists) throws IOException {
-        setupCheckpoint(exists);
         when(clock.instant()).thenReturn(Instant.MIN);
-        stateManager
-            .getDetectorCheckpoint(adId, ActionListener.wrap(checkpointExists -> { assertEquals(exists, checkpointExists); }, exception -> {
-                for (StackTraceElement ste : exception.getStackTrace()) {
-                    logger.info(ste);
-                }
-                assertTrue(false);
-            }));
+        NodeState state = new NodeState(adId, clock);
+        state.setCheckpointExists(exists);
+        stateManager.states.put(adId, state);
+
+        assertEquals(exists, stateManager.states.get(adId).doesCheckpointExists());
     }
 
     public void testCheckpointExists() throws IOException {
@@ -302,36 +345,28 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
     }
 
     public void testMaintenanceNotRemove() throws IOException {
-        setupCheckpoint(true);
         when(clock.instant()).thenReturn(Instant.ofEpochMilli(1));
-        stateManager
-            .getDetectorCheckpoint(
-                adId,
-                ActionListener.wrap(gotCheckpoint -> { assertTrue(gotCheckpoint); }, exception -> assertTrue(false))
-            );
+        NodeState state = new NodeState(adId, clock);
+        state.setCheckpointExists(true);
+        stateManager.states.put(adId, state);
         when(clock.instant()).thenReturn(Instant.ofEpochMilli(1));
         stateManager.maintenance();
-        stateManager
-            .getDetectorCheckpoint(adId, ActionListener.wrap(gotCheckpoint -> assertTrue(gotCheckpoint), exception -> assertTrue(false)));
-        verify(client, times(1)).get(any(), any());
+
+        assertTrue(stateManager.states.containsKey(adId));
+        assertTrue(stateManager.states.get(adId).doesCheckpointExists());
+        verifyNoInteractions(client);
     }
 
     public void testMaintenanceRemove() throws IOException {
-        setupCheckpoint(true);
         when(clock.instant()).thenReturn(Instant.ofEpochMilli(1));
-        stateManager
-            .getDetectorCheckpoint(
-                adId,
-                ActionListener.wrap(gotCheckpoint -> { assertTrue(gotCheckpoint); }, exception -> assertTrue(false))
-            );
+        NodeState state = new NodeState(adId, clock);
+        state.setCheckpointExists(true);
+        stateManager.states.put(adId, state);
         when(clock.instant()).thenReturn(Instant.ofEpochSecond(7200L));
         stateManager.maintenance();
-        stateManager
-            .getDetectorCheckpoint(
-                adId,
-                ActionListener.wrap(gotCheckpoint -> { assertTrue(gotCheckpoint); }, exception -> assertTrue(false))
-            );
-        verify(client, times(2)).get(any(), any());
+
+        assertFalse(stateManager.states.containsKey(adId));
+        verifyNoInteractions(client);
     }
 
     public void testColdStartRunning() {
@@ -395,8 +430,8 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
     public void testGetAnomalyJob() throws IOException, InterruptedException {
         String detectorId = setupJob();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        stateManager.getJob(detectorId, ActionListener.wrap(asDetector -> {
-            assertEquals(jobToCheck, asDetector.get());
+        stateManager.getJob(detectorId, null, true, ActionListener.wrap(asJob -> {
+            assertEquals(jobToCheck, asJob.get());
             inProgressLatch.countDown();
         }, exception -> {
             assertTrue(false);
@@ -415,16 +450,16 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
         String detectorId = setupJob();
         final CountDownLatch inProgressLatch = new CountDownLatch(2);
 
-        stateManager.getJob(detectorId, ActionListener.wrap(asDetector -> {
-            assertEquals(jobToCheck, asDetector.get());
+        stateManager.getJob(detectorId, null, true, ActionListener.wrap(asJob -> {
+            assertEquals(jobToCheck, asJob.get());
             inProgressLatch.countDown();
         }, exception -> {
             assertTrue(false);
             inProgressLatch.countDown();
         }));
 
-        stateManager.getJob(detectorId, ActionListener.wrap(asDetector -> {
-            assertEquals(jobToCheck, asDetector.get());
+        stateManager.getJob(detectorId, null, true, ActionListener.wrap(asJob -> {
+            assertEquals(jobToCheck, asJob.get());
             inProgressLatch.countDown();
         }, exception -> {
             assertTrue(false);
@@ -469,7 +504,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(function).accept(any(Optional.class));
 
-        stateManager.getConfig(configId, AnalysisType.AD, function, latchListener);
+        stateManager.getConfig(configId, null, AnalysisType.AD, function, latchListener);
         assertTrue(latch.await(30L, TimeUnit.SECONDS));
         assertNotNull(actualResponse.get());
         assertNull(exception.get());
@@ -509,7 +544,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(function).accept(any(Optional.class));
 
-        stateManager.getConfig(configId, AnalysisType.FORECAST, function, latchListener);
+        stateManager.getConfig(configId, null, AnalysisType.FORECAST, function, latchListener);
         assertTrue(latch.await(30L, TimeUnit.SECONDS));
         assertNotNull(actualResponse.get());
         assertNull(exception.get());
@@ -543,7 +578,7 @@ public class NodeStateManagerTests extends AbstractTimeSeriesTest {
 
         Consumer<Optional<? extends Config>> function = mock(Consumer.class);
 
-        stateManager.getConfig(configId, AnalysisType.FORECAST, function, latchListener);
+        stateManager.getConfig(configId, null, AnalysisType.FORECAST, function, latchListener);
         assertTrue(latch.await(30L, TimeUnit.SECONDS));
         assertNull(actualResponse.get());
         assertNotNull(exception.get());

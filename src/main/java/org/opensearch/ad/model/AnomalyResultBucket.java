@@ -21,7 +21,7 @@ import org.opensearch.core.common.io.stream.Writeable;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.search.aggregations.bucket.composite.CompositeAggregation.Bucket;
-import org.opensearch.search.aggregations.metrics.InternalMax;
+import org.opensearch.search.aggregations.metrics.Max;
 import org.opensearch.timeseries.annotation.Generated;
 
 import com.google.common.base.Objects;
@@ -55,7 +55,7 @@ public class AnomalyResultBucket implements ToXContentObject, Writeable {
         return new AnomalyResultBucket(
             bucket.getKey(),
             (int) bucket.getDocCount(),
-            ((InternalMax) bucket.getAggregations().get(MAX_ANOMALY_GRADE_FIELD)).getValue()
+            ((Max) bucket.getAggregations().get(MAX_ANOMALY_GRADE_FIELD)).getValue()
         );
     }
 

@@ -11,12 +11,10 @@
 
 package org.opensearch.ad.transport;
 
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.TOP_ANOMALY_RESULT_TIMEOUT_IN_MILLIS;
 
 import java.time.Clock;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -51,16 +49,13 @@ import org.opensearch.search.aggregations.Aggregation;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.AggregationBuilders;
 import org.opensearch.search.aggregations.Aggregations;
-import org.opensearch.search.aggregations.PipelineAggregatorBuilders;
 import org.opensearch.search.aggregations.bucket.composite.CompositeAggregation;
 import org.opensearch.search.aggregations.bucket.composite.CompositeAggregationBuilder;
 import org.opensearch.search.aggregations.bucket.composite.CompositeValuesSourceBuilder;
 import org.opensearch.search.aggregations.bucket.composite.TermsValuesSourceBuilder;
-import org.opensearch.search.aggregations.pipeline.BucketSortPipelineAggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
-import org.opensearch.search.sort.FieldSortBuilder;
-import org.opensearch.search.sort.SortOrder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
@@ -74,8 +69,29 @@ import org.opensearch.transport.client.Client;
  * query based on user input to fetch aggregated entity results.
  */
 
-// Example of a generated query aggregating over the "Carrier" category field, and sorting on max anomaly grade, using
-// a historical task ID:
+/*
+ * Example generated query for a historical task, grouping by the "Carrier" category field.
+ *
+ * Query intent:
+ * 1. Filter documents to the requested time range. In this example, only anomaly results whose
+ *    data_end_time is between September 10 and September 30, 2021, inclusive, are considered.
+ * 2. Exclude non-anomalous documents by requiring anomaly_grade > 0.
+ * 3. Restrict the search to one historical run by requiring an exact task_id match.
+ *
+ * These constraints are placed under bool.filter because they are yes/no conditions and should
+ * not affect relevance scoring.
+ *
+ * Aggregation intent:
+ * 1. Group the filtered results by entity value for the "Carrier" category field.
+ * 2. The grouping key is derived from the document's entity array rather than a flat field:
+ *    the script scans the array, finds the object whose name matches "Carrier", and uses its
+ *    value as the bucket key.
+ * 3. The composite aggregation returns up to 100 buckets per page, ordered by key.
+ * 4. Inside each bucket, max_anomaly_grade records the highest anomaly_grade seen for that entity.
+ *
+ * Conceptually, this means: "find anomaly results for this historical task and time window,
+ * group them by Carrier, and compute the highest anomaly grade for each Carrier bucket."
+ */
 //
 // {
 // "query": {
@@ -131,7 +147,7 @@ import org.opensearch.transport.client.Client;
 // }
 // for (item in params._source.entity) {
 // if (item["name"] == params["categoryField"]) {
-// value = item['value'];
+// value = item["value"];
 // break;
 // }
 // }
@@ -154,25 +170,13 @@ import org.opensearch.transport.client.Client;
 // "max": {
 // "field": "anomaly_grade"
 // }
-// },
-// "bucket_sort": {
-// "bucket_sort": {
-// "sort": [
-// {
-// "max_anomaly_grade": {
-// "order": "desc"
-// }
-// }
-// ],
-// "from": 0,
-// "gap_policy": "SKIP"
-// }
 // }
 // }
 // }
 // }
 // }
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Local host call only. Safe in multitenant.")
 public class SearchTopAnomalyResultTransportAction extends
     HandledTransportAction<SearchTopAnomalyResultRequest, SearchTopAnomalyResultResponse> {
     private ADSearchHandler searchHandler;
@@ -181,9 +185,7 @@ public class SearchTopAnomalyResultTransportAction extends
     private static final OrderType DEFAULT_ORDER_TYPE = OrderType.SEVERITY;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 1000;
-    private static final String defaultIndex = ALL_AD_RESULTS_INDEX_PATTERN;
-    private static final String COUNT_FIELD = "_count";
-    private static final String BUCKET_SORT_FIELD = "bucket_sort";
+    private static final String defaultIndex = ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN;
     public static final String MULTI_BUCKETS_FIELD = "multi_buckets";
     private static final Logger logger = LogManager.getLogger(SearchTopAnomalyResultTransportAction.class);
     private final Client client;
@@ -230,7 +232,8 @@ public class SearchTopAnomalyResultTransportAction extends
             "",
             "",
             false,
-            null
+            null,
+            request.getTenantId()
         );
         client.execute(GetAnomalyDetectorAction.INSTANCE, getAdRequest, ActionListener.wrap(getAdResponse -> {
             // Make sure detector exists
@@ -301,14 +304,10 @@ public class SearchTopAnomalyResultTransportAction extends
             }
 
             // Generating the search request which will contain the generated query
-            SearchRequest searchRequest = generateSearchRequest(request);
-
-            // Adding search over any custom result indices
             String rawCustomResultIndexPattern = getAdResponse.getDetector().getCustomResultIndexPattern();
             String customResultIndexPattern = rawCustomResultIndexPattern == null ? null : rawCustomResultIndexPattern.trim();
-            if (!Strings.isNullOrEmpty(customResultIndexPattern)) {
-                searchRequest.indices(defaultIndex, customResultIndexPattern);
-            }
+            SearchRequest searchRequest = generateSearchRequest(request, customResultIndexPattern);
+            searchRequest.preference(request.getTenantId());
 
             // Utilizing the existing search() from SearchHandler to handle security permissions. Both user role
             // and backend role filtering is handled in there, and any error will be propagated up and
@@ -325,7 +324,8 @@ public class SearchTopAnomalyResultTransportAction extends
                         clock.millis() + TOP_ANOMALY_RESULT_TIMEOUT_IN_MILLIS,
                         request.getSize(),
                         orderType,
-                        customResultIndexPattern
+                        customResultIndexPattern,
+                        request.getTenantId()
                     )
                 );
 
@@ -352,6 +352,7 @@ public class SearchTopAnomalyResultTransportAction extends
         private int maxResults;
         private PriorityQueue<AnomalyResultBucket> topResultsHeap;
         private String customResultIndex;
+        private String tenantId;
 
         TopAnomalyResultListener(
             ActionListener<SearchTopAnomalyResultResponse> listener,
@@ -359,7 +360,8 @@ public class SearchTopAnomalyResultTransportAction extends
             long expirationEpochMs,
             int maxResults,
             OrderType orderType,
-            String customResultIndex
+            String customResultIndex,
+            String tenantId
         ) {
             this.listener = listener;
             this.searchSourceBuilder = searchSourceBuilder;
@@ -377,6 +379,7 @@ public class SearchTopAnomalyResultTransportAction extends
                 }
             });
             this.customResultIndex = customResultIndex;
+            this.tenantId = tenantId;
         }
 
         @Override
@@ -433,9 +436,8 @@ public class SearchTopAnomalyResultTransportAction extends
                     aggBuilder.aggregateAfter(afterKey);
 
                     // Searching more, using an updated source with an after_key
-                    SearchRequest searchRequest = Strings.isNullOrEmpty(customResultIndex)
-                        ? new SearchRequest().indices(defaultIndex)
-                        : new SearchRequest().indices(defaultIndex, customResultIndex);
+                    SearchRequest searchRequest = createResultSearchRequest(customResultIndex, tenantId);
+                    searchRequest.preference(tenantId);
                     searchHandler.search(searchRequest.source(searchSourceBuilder), ADCommonName.AD_RESOURCE_TYPE, this);
                 }
 
@@ -457,12 +459,32 @@ public class SearchTopAnomalyResultTransportAction extends
      * @param request the request containing the all of the user-specified parameters needed to generate the request
      * @return the SearchRequest to pass to the SearchHandler
      */
-    private SearchRequest generateSearchRequest(SearchTopAnomalyResultRequest request) {
-        SearchRequest searchRequest = new SearchRequest().indices(defaultIndex);
+    private SearchRequest generateSearchRequest(SearchTopAnomalyResultRequest request, String customResultIndex) {
+        SearchRequest searchRequest = createResultSearchRequest(customResultIndex, request.getTenantId());
         QueryBuilder query = generateQuery(request);
         AggregationBuilder aggregation = generateAggregation(request);
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(query).aggregation(aggregation);
         searchRequest.source(searchSourceBuilder);
+        return searchRequest;
+    }
+
+    /**
+     * Creates a SearchRequest with the appropriate result indices based on
+     * whether a custom result index exists and whether we are in multitenant mode.
+     * In multitenant mode there is no default result index, so defaultIndex is excluded.
+     */
+    static SearchRequest createResultSearchRequest(String customResultIndex, String tenantId) {
+        boolean isMultiTenant = !Strings.isNullOrEmpty(tenantId);
+        boolean hasCustomIndex = !Strings.isNullOrEmpty(customResultIndex);
+
+        SearchRequest searchRequest = new SearchRequest();
+        if (hasCustomIndex && isMultiTenant) {
+            searchRequest.indices(customResultIndex);
+        } else if (hasCustomIndex) {
+            searchRequest.indices(defaultIndex, customResultIndex);
+        } else if (!isMultiTenant) {
+            searchRequest.indices(defaultIndex);
+        }
         return searchRequest;
     }
 
@@ -518,18 +540,7 @@ public class SearchTopAnomalyResultTransportAction extends
             .max(AnomalyResultBucket.MAX_ANOMALY_GRADE_FIELD)
             .field(AnomalyResult.ANOMALY_GRADE_FIELD);
 
-        // Generate the bucket sort aggregation (depends on order type)
-        String sortField = request.getOrder().equals(OrderType.SEVERITY.getName())
-            ? AnomalyResultBucket.MAX_ANOMALY_GRADE_FIELD
-            : COUNT_FIELD;
-        BucketSortPipelineAggregationBuilder bucketSort = PipelineAggregatorBuilders
-            .bucketSort(BUCKET_SORT_FIELD, new ArrayList<>(Arrays.asList(new FieldSortBuilder(sortField).order(SortOrder.DESC))));
-
-        return AggregationBuilders
-            .composite(MULTI_BUCKETS_FIELD, sources)
-            .size(PAGE_SIZE)
-            .subAggregation(maxAnomalyGradeAggregation)
-            .subAggregation(bucketSort);
+        return AggregationBuilders.composite(MULTI_BUCKETS_FIELD, sources).size(PAGE_SIZE).subAggregation(maxAnomalyGradeAggregation);
     }
 
     /**

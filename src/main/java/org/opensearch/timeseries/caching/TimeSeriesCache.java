@@ -33,11 +33,12 @@ public interface TimeSeriesCache<RCFModelType extends ThresholdedRandomCutForest
 
     /**
      * Get a model state without incurring priority update or load from state from disk. Used in maintenance.
+     * @param tenantId Tenant Id
      * @param configId Config Id
      * @param modelId Model Id
      * @return Model state
      */
-    Optional<ModelState<RCFModelType>> getForMaintainance(String configId, String modelId);
+    Optional<ModelState<RCFModelType>> getForMaintainance(String tenantId, String configId, String modelId);
 
     /**
      * Get the ModelState associated with the modelId.  May or may not load the
@@ -52,28 +53,31 @@ public interface TimeSeriesCache<RCFModelType extends ThresholdedRandomCutForest
 
     /**
      * Whether an entity is active or not
+     * @param tenantId Tenant Id
      * @param configId The Id of the config that an entity belongs to
      * @param entityModelId Entity model Id
      * @return Whether an entity is active or not
      */
-    boolean isActive(String configId, String entityModelId);
+    boolean isActive(String tenantId, String configId, String entityModelId);
 
     /**
      * Get total updates of the config's most active entity's RCF model.
      *
+     * @param tenantId Tenant Id
      * @param configId detector id
      * @return RCF model total updates of most active entity.
      */
-    long getTotalUpdates(String configId);
+    long getTotalUpdates(String tenantId, String configId);
 
     /**
      * Get RCF model total updates of specific entity
      *
+     * @param tenantId Tenant Id
      * @param configId config id
      * @param entityModelId  entity model id
      * @return RCF model total updates of specific entity.
      */
-    long getTotalUpdates(String configId, String entityModelId);
+    long getTotalUpdates(String tenantId, String configId, String entityModelId);
 
     /**
      * Gets modelStates of all model hosted on a node
@@ -85,16 +89,19 @@ public interface TimeSeriesCache<RCFModelType extends ThresholdedRandomCutForest
     /**
      * Gets a config's modelStates hosted on a node
      *
+     * @param tenantId Tenant Id
+     * @param configId config id
      * @return list of modelStates
      */
-    List<ModelState<RCFModelType>> getAllModels(String configId);
+    List<ModelState<RCFModelType>> getAllModels(String tenantId, String configId);
 
     /**
      * Get the number of active entities of a config
+     * @param tenantId Tenant Id
      * @param configId Config Id
      * @return The number of active entities
      */
-    int getActiveEntities(String configId);
+    int getActiveEntities(String tenantId, String configId);
 
     /**
     *
@@ -110,12 +117,13 @@ public interface TimeSeriesCache<RCFModelType extends ThresholdedRandomCutForest
      * the value indicates when the cache state is created or when the entity is evicted
      * from active entity cache.
      *
+     * @param tenantId Tenant Id
      * @param configId The Id of the config that an entity belongs to
      * @param entityModelId Entity's Model Id
      * @return if the entity is in the cache, return the timestamp in epoch
      * milliseconds when the entity's state is lastly used.  Otherwise, return -1.
      */
-    long getLastActiveTime(String configId, String entityModelId);
+    long getLastActiveTime(String tenantId, String configId, String entityModelId);
 
     /**
      * Release memory when memory circuit breaker is open
@@ -134,26 +142,40 @@ public interface TimeSeriesCache<RCFModelType extends ThresholdedRandomCutForest
 
     /**
      *
+     * @param tenantId Tenant Id
      * @param configId Detector Id
      * @return a detector's model information
      */
-    List<ModelProfile> getAllModelProfile(String configId);
+    List<ModelProfile> getAllModelProfile(String tenantId, String configId);
 
     /**
      * Gets an entity's model sizes
      *
+     * @param tenantId Tenant Id
      * @param configId Detector Id
      * @param entityModelId Entity's model Id
      * @return the entity's memory size
      */
-    Optional<ModelProfile> getModelProfile(String configId, String entityModelId);
+    Optional<ModelProfile> getModelProfile(String tenantId, String configId, String entityModelId);
 
     /**
-     * Remove entity model from active entity buffer and delete checkpoint. Used to clean corrupted model.
+     * Stop hosting a model while keeping its checkpoint so another node can restore it.
+     *
+     * @param tenantId Tenant Id
      * @param configId config Id
      * @param entityModelId Model Id
      */
-    void removeModel(String configId, String entityModelId);
+    default void stopModel(String tenantId, String configId, String entityModelId) {
+        throw new UnsupportedOperationException("stopModel is not implemented");
+    }
+
+    /**
+     * Remove entity model from active entity buffer and delete checkpoint. Used to clean corrupted model.
+     * @param tenantId Tenant Id
+     * @param configId config Id
+     * @param entityModelId Model Id
+     */
+    void removeModel(String tenantId, String configId, String entityModelId);
 
     /**
     *

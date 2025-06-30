@@ -7,6 +7,7 @@ package org.opensearch.timeseries.ratelimit;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -23,26 +24,28 @@ import org.opensearch.action.update.UpdateRequest;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.Strings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
+import org.opensearch.timeseries.util.DateUtils;
 import org.opensearch.timeseries.util.ExceptionUtil;
 
-public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>>
+public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>>
     extends BatchWorker<CheckpointWriteRequest, BulkRequest, BulkResponse> {
     private static final Logger LOG = LogManager.getLogger(CheckpointWriteWorker.class);
 
     protected final CheckpointDaoType checkpoint;
     protected final String indexName;
-    protected final Duration checkpointInterval;
+    protected volatile Duration checkpointInterval;
 
     public CheckpointWriteWorker(
         String queueName,
@@ -64,10 +67,10 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
         Duration executionTtl,
         Setting<Integer> batchSizeSetting,
         Duration stateTtl,
-        NodeStateManager timeSeriesNodeStateManager,
+        StateManager timeSeriesNodeStateManager,
         CheckpointDaoType checkpoint,
         String indexName,
-        Duration checkpointInterval,
+        Setting<TimeValue> checkpointIntervalSetting,
         AnalysisType context
     ) {
         super(
@@ -95,7 +98,10 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
         );
         this.checkpoint = checkpoint;
         this.indexName = indexName;
-        this.checkpointInterval = checkpointInterval;
+        this.checkpointInterval = DateUtils.toDuration(checkpointIntervalSetting.get(settings));
+        clusterService
+            .getClusterSettings()
+            .addSettingsUpdateConsumer(checkpointIntervalSetting, it -> this.checkpointInterval = DateUtils.toDuration(it));
     }
 
     @Override
@@ -104,7 +110,7 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
     }
 
     @Override
-    protected BulkRequest toBatchRequest(List<CheckpointWriteRequest> toProcess) {
+    protected BulkRequest toBatchRequest(List<CheckpointWriteRequest> toProcess, String tenantId) {
         final BulkRequest bulkRequest = new BulkRequest();
         for (CheckpointWriteRequest request : toProcess) {
             bulkRequest.add(request.getUpdateRequest());
@@ -149,17 +155,38 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
      * @param forceWrite whether we should write no matter what
      * @param priority how urgent the write is
      */
-    public void write(ModelState<RCFModelType> modelState, boolean forceWrite, RequestPriority priority) {
-        if (checkpoint.shouldSave(modelState, forceWrite, checkpointInterval, clock)) {
-            String configId = modelState.getConfigId();
-            String modelId = modelState.getModelId();
-            if (modelId == null || configId == null) {
-                return;
-            }
-
-            // run once won't write checkpoint. Safe to cache config
-            nodeStateManager.getConfig(configId, context, true, onGetConfig(configId, modelId, modelState, priority));
+    public void write(ModelState<RCFModelType> modelState, String tenantId, boolean forceWrite, RequestPriority priority) {
+        if (!checkpoint.shouldSave(modelState, forceWrite, checkpointInterval, clock)) {
+            logSkipCheckpointWrite(modelState, tenantId, forceWrite, priority);
+            return;
         }
+
+        String configId = modelState.getConfigId();
+        String modelId = modelState.getModelId();
+        if (modelId == null || configId == null) {
+            LOG.warn(
+                "Cannot stage checkpoint write because configId [{}] or modelId [{}] is null. tenantId [{}], priority [{}], checkpointStore [{}]",
+                configId,
+                modelId,
+                tenantId,
+                priority,
+                checkpoint.getClass().getName()
+            );
+            return;
+        }
+
+        LOG.debug(
+            "Checkpoint write eligible for config [{}], model [{}], tenant [{}], forceWrite [{}], priority [{}], checkpointStore [{}]",
+            configId,
+            modelId,
+            tenantId,
+            forceWrite,
+            priority,
+            checkpoint.getClass().getName()
+        );
+
+        // run once won't write checkpoint. Safe to cache config
+        nodeStateManager.getConfig(configId, tenantId, context, true, onGetConfig(configId, modelId, modelState, priority));
     }
 
     private ActionListener<Optional<? extends Config>> onGetConfig(
@@ -180,10 +207,27 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
 
                 // the model state is bloated or we have bugs, skip
                 if (source == null || source.isEmpty()) {
+                    LOG.warn(
+                        "Checkpoint serialization returned empty source for config [{}], model [{}], tenant [{}], checkpointStore [{}]",
+                        configId,
+                        modelId,
+                        config.getTenantId(),
+                        checkpoint.getClass().getName()
+                    );
                     return;
                 }
 
                 modelState.setLastCheckpointTime(clock.instant());
+                String targetIndex = checkpoint.resolveCheckpointIndexName(config.getTenantId(), config.getId(), modelId, indexName);
+                LOG.info(
+                    "Staging checkpoint write for config [{}], model [{}], tenant [{}], target [{}], fields [{}], checkpointStore [{}]",
+                    configId,
+                    modelId,
+                    config.getTenantId(),
+                    targetIndex,
+                    source.keySet(),
+                    checkpoint.getClass().getName()
+                );
                 CheckpointWriteRequest request = new CheckpointWriteRequest(
                     System.currentTimeMillis() + config.getInferredFrequencyInMilliseconds(),
                     configId,
@@ -191,7 +235,8 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
                     // If the document does not already exist, the contents of the upsert element
                     // are inserted as a new document.
                     // If the document exists, update fields in the map
-                    new UpdateRequest(indexName, modelId).docAsUpsert(true).doc(source)
+                    new UpdateRequest(targetIndex, modelId).docAsUpsert(true).doc(source),
+                    config.getTenantId()
                 );
 
                 put(request);
@@ -210,7 +255,56 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
         }, exception -> { LOG.error(new ParameterizedMessage("fail to get config [{}]", configId), exception); });
     }
 
-    public void writeAll(List<ModelState<RCFModelType>> modelStates, String configId, boolean forceWrite, RequestPriority priority) {
+    private void logSkipCheckpointWrite(
+        ModelState<RCFModelType> modelState,
+        String tenantId,
+        boolean forceWrite,
+        RequestPriority priority
+    ) {
+        if (!LOG.isDebugEnabled()) {
+            return;
+        }
+
+        if (modelState == null) {
+            LOG.debug(
+                "Skip checkpoint write because model state is null. tenantId [{}], forceWrite [{}], priority [{}], checkpointStore [{}]",
+                tenantId,
+                forceWrite,
+                priority,
+                checkpoint.getClass().getName()
+            );
+            return;
+        }
+
+        Instant lastCheckpointTime = modelState.getLastCheckpointTime();
+        boolean hasModel = modelState.getModel().isPresent();
+        int sampleCount = modelState.getSamples() == null ? 0 : modelState.getSamples().size();
+        boolean dueByTime = lastCheckpointTime != null
+            && !lastCheckpointTime.equals(Instant.MIN)
+            && lastCheckpointTime.plus(checkpointInterval).isBefore(clock.instant());
+        LOG.debug(
+            "Skip checkpoint write for config [{}], model [{}], tenant [{}]: hasModel [{}], sampleCount [{}], lastCheckpointTime [{}], checkpointInterval [{}], dueByTime [{}], forceWrite [{}], priority [{}], checkpointStore [{}]",
+            modelState.getConfigId(),
+            modelState.getModelId(),
+            tenantId,
+            hasModel,
+            sampleCount,
+            lastCheckpointTime,
+            checkpointInterval,
+            dueByTime,
+            forceWrite,
+            priority,
+            checkpoint.getClass().getName()
+        );
+    }
+
+    public void writeAll(
+        List<ModelState<RCFModelType>> modelStates,
+        String configId,
+        String tenantId,
+        boolean forceWrite,
+        RequestPriority priority
+    ) {
         ActionListener<Optional<? extends Config>> onGetForAll = ActionListener.wrap(configOptional -> {
             if (false == configOptional.isPresent()) {
                 LOG.warn(new ParameterizedMessage("Config [{}] is not available.", configId));
@@ -234,6 +328,7 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
                     }
 
                     state.setLastCheckpointTime(clock.instant());
+                    String targetIndex = checkpoint.resolveCheckpointIndexName(config.getTenantId(), config.getId(), modelId, indexName);
                     allRequests
                         .add(
                             new CheckpointWriteRequest(
@@ -243,7 +338,8 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
                                 // If the document does not already exist, the contents of the upsert element
                                 // are inserted as a new document.
                                 // If the document exists, update fields in the map
-                                new UpdateRequest(indexName, modelId).docAsUpsert(true).doc(source)
+                                new UpdateRequest(targetIndex, modelId).docAsUpsert(true).doc(source),
+                                config.getTenantId()
                             )
                         );
                 }
@@ -264,6 +360,6 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
         }, exception -> { LOG.error(new ParameterizedMessage("fail to get config [{}]", configId), exception); });
 
         // run once won't write checkpoint. Safe to cache config
-        nodeStateManager.getConfig(configId, context, true, onGetForAll);
+        nodeStateManager.getConfig(configId, tenantId, context, true, onGetForAll);
     }
 }

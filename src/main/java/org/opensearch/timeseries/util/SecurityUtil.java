@@ -21,6 +21,14 @@ import org.opensearch.timeseries.model.Job;
 
 import com.google.common.collect.ImmutableList;
 
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.AwsCredentialsProviderChain;
+import software.amazon.awssdk.auth.credentials.ContainerCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.EnvironmentVariableCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.InstanceProfileCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.ProfileCredentialsProvider;
+import software.amazon.awssdk.auth.credentials.SystemPropertyCredentialsProvider;
+
 public class SecurityUtil {
     /**
      * @param userObj the last user who edited the detector config
@@ -73,5 +81,16 @@ public class SecurityUtil {
      */
     public static User getUserFromJob(Job detectorJob, Settings settings) {
         return getAdjustedUserBWC(detectorJob.getUser(), settings);
+    }
+
+    public static AwsCredentialsProvider createCredentialsProvider() {
+        return AwsCredentialsProviderChain
+            .builder()
+            .addCredentialsProvider(EnvironmentVariableCredentialsProvider.create())
+            .addCredentialsProvider(SystemPropertyCredentialsProvider.create())
+            .addCredentialsProvider(ProfileCredentialsProvider.create())
+            .addCredentialsProvider(ContainerCredentialsProvider.builder().build())
+            .addCredentialsProvider(InstanceProfileCredentialsProvider.create())
+            .build();
     }
 }

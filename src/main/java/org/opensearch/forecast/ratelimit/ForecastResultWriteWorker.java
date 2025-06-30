@@ -23,21 +23,21 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.transport.ForecastResultBulkRequest;
 import org.opensearch.forecast.transport.handler.ForecastIndexMemoryPressureAwareResultHandler;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.ratelimit.ResultWriteWorker;
 
 public class ForecastResultWriteWorker extends
-    ResultWriteWorker<ForecastResult, ForecastResultWriteRequest, ForecastResultBulkRequest, ForecastIndex, ForecastIndexManagement, ForecastIndexMemoryPressureAwareResultHandler> {
+    ResultWriteWorker<ForecastResult, ForecastResultWriteRequest, ForecastResultBulkRequest, ForecastIndex, ForecastDelegatingDataManagement, ForecastIndexMemoryPressureAwareResultHandler> {
     public static final String WORKER_NAME = "forecast-result-write";
 
     public ForecastResultWriteWorker(
@@ -57,7 +57,7 @@ public class ForecastResultWriteWorker extends
         Duration executionTtl,
         ForecastIndexMemoryPressureAwareResultHandler resultHandler,
         NamedXContentRegistry xContentRegistry,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         Duration stateTtl
     ) {
         super(
@@ -69,7 +69,7 @@ public class ForecastResultWriteWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,
@@ -89,8 +89,8 @@ public class ForecastResultWriteWorker extends
     }
 
     @Override
-    protected ForecastResultBulkRequest toBatchRequest(List<ForecastResultWriteRequest> toProcess) {
-        final ForecastResultBulkRequest bulkRequest = new ForecastResultBulkRequest();
+    protected ForecastResultBulkRequest toBatchRequest(List<ForecastResultWriteRequest> toProcess, String tenantId) {
+        final ForecastResultBulkRequest bulkRequest = new ForecastResultBulkRequest(tenantId);
         for (ForecastResultWriteRequest request : toProcess) {
             bulkRequest.add(request);
         }

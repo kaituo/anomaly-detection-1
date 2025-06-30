@@ -20,7 +20,6 @@ import java.util.Random;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.action.bulk.BulkAction;
 import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.support.ActionFilters;
@@ -33,13 +32,14 @@ import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.IndexingPressure;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.ratelimit.ResultWriteRequest;
 import org.opensearch.timeseries.util.BulkUtil;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 @SuppressWarnings("rawtypes")
 public abstract class ResultBulkTransportAction<ResultType extends IndexableResult, ADResultWriteRequestType extends ResultWriteRequest<ResultType>, ResultBulkRequestType extends ResultBulkRequest<ResultType, ADResultWriteRequestType>>
@@ -50,9 +50,9 @@ public abstract class ResultBulkTransportAction<ResultType extends IndexableResu
     protected float softLimit;
     protected float hardLimit;
     protected String indexName;
-    private Client client;
+    private final DataAccess dataAccess;
     protected Random random;
-    protected NodeStateManager nodeStateManager;
+    protected StateManager nodeStateManager;
 
     public ResultBulkTransportAction(
         String actionName,
@@ -60,7 +60,7 @@ public abstract class ResultBulkTransportAction<ResultType extends IndexableResu
         ActionFilters actionFilters,
         IndexingPressure indexingPressure,
         Settings settings,
-        Client client,
+        DataAccess dataAccess,
         float softLimit,
         float hardLimit,
         String indexName,
@@ -69,7 +69,7 @@ public abstract class ResultBulkTransportAction<ResultType extends IndexableResu
         super(actionName, transportService, actionFilters, requestReader, ThreadPool.Names.SAME);
         this.indexingPressure = indexingPressure;
         this.primaryAndCoordinatingLimits = MAX_INDEXING_BYTES.get(settings).getBytes();
-        this.client = client;
+        this.dataAccess = dataAccess;
 
         this.softLimit = softLimit;
         this.hardLimit = hardLimit;
@@ -96,7 +96,7 @@ public abstract class ResultBulkTransportAction<ResultType extends IndexableResu
         BulkRequest bulkRequest = prepareBulkRequest(indexingPressurePercent, request);
 
         if (bulkRequest.numberOfActions() > 0) {
-            client.execute(BulkAction.INSTANCE, bulkRequest, ActionListener.wrap(bulkResponse -> {
+            dataAccess.bulk(bulkRequest, TenantContext.user(request.getTenantId()), ActionListener.wrap(bulkResponse -> {
                 List<IndexRequest> failedRequests = BulkUtil.getFailedIndexRequest(bulkRequest, bulkResponse);
                 listener.onResponse(new ResultBulkResponse(failedRequests));
             }, e -> {

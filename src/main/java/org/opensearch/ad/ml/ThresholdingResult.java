@@ -368,7 +368,8 @@ public class ThresholdingResult extends IntermediateResult<AnomalyResult> {
                         threshold,
                         currentData,
                         featureImputed,
-                        rules
+                        rules,
+                        detector.getTenantId()
                     )
             );
     }

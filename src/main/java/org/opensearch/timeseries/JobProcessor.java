@@ -27,15 +27,16 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.commons.InjectSecurity;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.jobscheduler.spi.JobExecutionContext;
 import org.opensearch.jobscheduler.spi.LockModel;
 import org.opensearch.jobscheduler.spi.utils.LockService;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.InternalFailure;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.function.ExecutorFunction;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
@@ -44,21 +45,33 @@ import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
 import org.opensearch.timeseries.rest.handler.IndexJobActionHandler;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.JobResponse;
-import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.timeseries.transport.ResultRequest;
 import org.opensearch.timeseries.transport.ResultResponse;
+import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.SecurityUtil;
 import org.opensearch.transport.client.Client;
 
 import com.google.common.base.Throwables;
 
 /**
- * JobScheduler will call job runner to get time series analysis result periodically
+ * JobScheduler will call job runner to get time series analysis result periodically.
+ *
+ * @param <IndexType> the time series index enum type
+ * @param <DataManagementType> the data management implementation type
+ * @param <TaskCacheManagerType> the task cache manager type
+ * @param <TaskTypeEnum> the task type enum
+ * @param <TaskClass> the time series task type
+ * @param <TaskManagerType> the task manager type
+ * @param <IndexableResultType> the indexable result type
+ * @param <ExecuteResultResponseRecorderType> the execute-result response recorder type
+ * @param <IndexJobActionHandlerType> the job action handler type
  */
-public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, IndexableResultType extends IndexableResult, ProfileActionType extends ActionType<ProfileResponse>, ExecuteResultResponseRecorderType extends ExecuteResultResponseRecorder<IndexType, IndexManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, IndexableResultType, ProfileActionType>, IndexJobActionHandlerType extends IndexJobActionHandler<IndexType, IndexManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, IndexableResultType, ProfileActionType, ExecuteResultResponseRecorderType>> {
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Local host call only (resultAction, inject user). Safe in multitenant.")
+public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, IndexableResultType extends IndexableResult, ExecuteResultResponseRecorderType extends ExecuteResultResponseRecorder<IndexType, DataManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, IndexableResultType>, IndexJobActionHandlerType extends IndexJobActionHandler<IndexType, DataManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, IndexableResultType, ExecuteResultResponseRecorderType>> {
 
     private static final Logger log = LogManager.getLogger(JobProcessor.class);
 
@@ -67,9 +80,9 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
     private Client client;
     private ThreadPool threadPool;
     private ConcurrentHashMap<String, Integer> endRunExceptionCount;
-    protected IndexManagementType indexManagement;
+    protected DataManagementType indexManagement;
     private TaskManagerType taskManager;
-    private NodeStateManager nodeStateManager;
+    private StateManager nodeStateManager;
     private ExecuteResultResponseRecorderType recorder;
     private AnalysisType analysisType;
     private String threadPoolName;
@@ -106,11 +119,11 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
         this.taskManager = adTaskManager;
     }
 
-    public void setIndexManagement(IndexManagementType anomalyDetectionIndices) {
+    public void setIndexManagement(DataManagementType anomalyDetectionIndices) {
         this.indexManagement = anomalyDetectionIndices;
     }
 
-    public void setNodeStateManager(NodeStateManager nodeStateManager) {
+    public void setNodeStateManager(StateManager nodeStateManager) {
         this.nodeStateManager = nodeStateManager;
     }
 
@@ -126,21 +139,48 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
         this.clock = clock;
     }
 
-    public void process(Job jobParameter, JobExecutionContext context) {
+    /**
+     * Process a job within multi-tenant.
+     *
+     * @param jobParameter the job parameter
+     * @param context the job execution context
+     * @param tenantId the tenant ID
+     */
+    public void process(Job jobParameter, JobExecutionContext context, String tenantId) {
+        process(jobParameter, context, context.getExpectedExecutionTime(), tenantId);
+    }
+
+    /**
+     * Process a job within single tenant.
+     *
+     * @param jobParameter the job parameter
+     * @param context the job execution context
+     * @param executionEndTime the execution end time
+     */
+    public void process(Job jobParameter, JobExecutionContext context, Instant executionEndTime) {
+        process(jobParameter, context, executionEndTime, null);
+    }
+
+    /**
+     * Process a job (generalized to suit both single and multi-tenant).
+     * @param jobParameter the job parameter
+     * @param context the job execution context
+     * @param executionEndTime the execution end time
+     * @param tenantId the tenant ID
+     */
+    public void process(Job jobParameter, JobExecutionContext context, Instant executionEndTime, String tenantId) {
         String configId = jobParameter.getName();
 
         log.info("Start to run {} job {}", analysisType, configId);
 
         taskManager.refreshRealtimeJobRunTime(configId);
 
-        Instant executionEndTime = Instant.now();
-
         final LockService lockService = context.getLockService();
 
         Runnable runnable = () -> {
             try {
                 // real time need to cache
-                nodeStateManager.getConfig(configId, analysisType, true, ActionListener.wrap(configOptional -> {
+                nodeStateManager.getConfig(configId, tenantId, analysisType, true, ActionListener.wrap(configOptional -> {
                     if (!configOptional.isPresent()) {
                         log.error(new ParameterizedMessage("fail to get config [{}]", configId));
                         return;
@@ -187,7 +227,13 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
                         log.warn("Can't get lock for job: " + configId);
                     }
 
-                }, e -> log.error(new ParameterizedMessage("fail to get config [{}]", configId), e)));
+                }, e -> {
+                    if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
+                        log.error(new ParameterizedMessage("index not found for config [{}]", configId));
+                        return;
+                    }
+                    log.error(new ParameterizedMessage("fail to get config [{}]", configId), e);
+                }));
             } catch (Exception e) {
                 // os log won't show anything if there is an exception happens (maybe due to running on a ExecutorService)
                 // we at least log the error.
@@ -222,6 +268,10 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
     ) {
         String configId = jobParameter.getName();
         if (lock == null) {
+            if (lockService instanceof SkipOnLockUnavailable) {
+                log.debug("Skip {} job {} as lock is not available", analysisType, configId);
+                return;
+            }
             indexResultException(
                 jobParameter,
                 lockService,
@@ -235,7 +285,7 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
             );
             return;
         }
-        indexManagement.update();
+        indexManagement.update(config.getTenantId());
 
         User userInfo = SecurityUtil.getUserFromJob(jobParameter, settings);
 
@@ -286,7 +336,12 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
             // Injecting user role to verify if the user has permissions for our API.
             injectSecurity.inject(user, roles);
 
-            ResultRequest request = createResultRequest(configId, executionStartTime.toEpochMilli(), executionEndTime.toEpochMilli());
+            ResultRequest request = createResultRequest(
+                configId,
+                executionStartTime.toEpochMilli(),
+                executionEndTime.toEpochMilli(),
+                detector.getTenantId()
+            );
             client.execute(resultAction, request, ActionListener.wrap(response -> {
                 indexResult(jobParameter, lockService, lock, executionStartTime, executionEndTime, response, recorder, detector);
             },
@@ -469,7 +524,7 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
         // transport service is null as we cannot access transport service outside of transport action
         // to reset real time job we don't need transport service and we have guarded against the null
         // reference in task manager
-        indexJobActionHandler.stopJob(configId, null, stopListener);
+        indexJobActionHandler.stopJob(configId, config.getTenantId(), null, stopListener);
     }
 
     private void indexResult(
@@ -592,5 +647,5 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
         return endRunExceptionCount.getOrDefault(configId, 0);
     }
 
-    protected abstract ResultRequest createResultRequest(String configID, long start, long end);
+    protected abstract ResultRequest createResultRequest(String configID, long start, long end, String tenantId);
 }

@@ -27,10 +27,10 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.common.Strings;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.ModelState;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.util.DateUtils;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
@@ -39,7 +39,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * Convert from ModelRequest to CheckpointWriteRequest
  *
  */
-public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CacheType extends TimeSeriesCache<RCFModelType>> {
+public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CacheType extends TimeSeriesCache<RCFModelType>> {
     private static final Logger LOG = LogManager.getLogger(CheckPointMaintainRequestAdapter.class);
     private CheckpointDaoType checkpointDao;
     private String indexName;
@@ -71,8 +71,9 @@ public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRa
     public Optional<CheckpointWriteRequest> convert(CheckpointMaintainRequest request) {
         String configId = request.getConfigId();
         String modelId = request.getModelId();
+        String tenantId = request.getTenantId();
 
-        Optional<ModelState<RCFModelType>> stateToMaintain = cache.get().getForMaintainance(configId, modelId);
+        Optional<ModelState<RCFModelType>> stateToMaintain = cache.get().getForMaintainance(tenantId, configId, modelId);
         if (stateToMaintain.isPresent()) {
             ModelState<RCFModelType> state = stateToMaintain.get();
             if (!checkpointDao.shouldSave(state, false, checkpointInterval, clock)) {
@@ -96,7 +97,11 @@ public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRa
                             // If the document does not already exist, the contents of the upsert element
                             // are inserted as a new document.
                             // If the document exists, update fields in the map
-                            new UpdateRequest(indexName, modelId).docAsUpsert(true).doc(source)
+                            new UpdateRequest(
+                                checkpointDao.resolveCheckpointIndexName(tenantId, configId, modelId, indexName),
+                                modelId
+                            ).docAsUpsert(true).doc(source),
+                            request.getTenantId()
                         )
                     );
             } catch (Exception e) {

@@ -367,7 +367,8 @@ public class AnomalyResultResponse extends ResultResponse<AnomalyResult> {
                         // Therefore, we set the following two fields to null, as we will not record any imputed fields.
                         null,
                         null,
-                        rules
+                        rules,
+                        config.getTenantId()
                     )
             );
     }

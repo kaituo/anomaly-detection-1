@@ -12,8 +12,13 @@
 package org.opensearch.timeseries.ml;
 
 import java.util.Locale;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+
+import org.apache.commons.lang3.tuple.Pair;
+import org.opensearch.core.common.Strings;
+import org.opensearch.timeseries.constant.CommonName;
 
 /**
  * Utilities to map between single-stream models and ids.  We will have circular
@@ -22,8 +27,10 @@ import java.util.regex.Pattern;
  *
  */
 public class SingleStreamModelIdMapper {
-    protected static final String CONFIG_ID_PATTERN = "(.*)_model_.+";
     protected static final String RCF_MODEL_ID_PATTERN = "%s_model_rcf_%d";
+    protected static final String RCF_MODEL_ID_PATTERN_WITH_TENANT = "%s" + CommonName.TENANT_ID_INFIX + "%s_model_rcf_%d";
+    protected static final Pattern RCF_MODEL_ID_REGEX_WITH_TENANT = Pattern
+        .compile("(.+)" + CommonName.TENANT_ID_INFIX + "(.+)_model_rcf_(\\d+)");
     protected static final String THRESHOLD_MODEL_ID_PATTERN = "%s_model_threshold";
     protected static final String CASTER_MODEL_ID_PATTERN = "%s_model_caster";
 
@@ -34,8 +41,23 @@ public class SingleStreamModelIdMapper {
      * @param partitionNumber number of the partition
      * @return ID for the RCF model partition
      */
-    public static String getRcfModelId(String detectorId, int partitionNumber) {
-        return String.format(Locale.ROOT, RCF_MODEL_ID_PATTERN, detectorId, partitionNumber);
+    public static String getRcfModelId(String tenantId, String detectorId, int partitionNumber) {
+        if (Strings.isEmpty(tenantId)) {
+            return String.format(Locale.ROOT, RCF_MODEL_ID_PATTERN, detectorId, partitionNumber);
+        } else {
+            return String.format(Locale.ROOT, RCF_MODEL_ID_PATTERN_WITH_TENANT, tenantId, detectorId, partitionNumber);
+        }
+    }
+
+    public static Optional<String> resolveTenantId(String modelId, String detectorId) {
+        Matcher matcher = RCF_MODEL_ID_REGEX_WITH_TENANT.matcher(modelId);
+        if (matcher.matches()) {
+            Pair<String, String> tenantAndDetector = Pair.of(matcher.group(1), matcher.group(2));
+            if (detectorId.equals(tenantAndDetector.getRight())) {
+                return Optional.of(tenantAndDetector.getLeft());
+            }
+        }
+        return Optional.empty();
     }
 
     /**
@@ -66,12 +88,17 @@ public class SingleStreamModelIdMapper {
      * @throws IllegalArgumentException if model id is invalid
      */
     public static String getConfigIdForModelId(String modelId) {
-        Matcher matcher = Pattern.compile(CONFIG_ID_PATTERN).matcher(modelId);
-        if (matcher.matches()) {
-            return matcher.group(1);
-        } else {
+        int modelInfixPosition = modelId.lastIndexOf("_model_");
+        if (modelInfixPosition <= 0 || modelInfixPosition + "_model_".length() >= modelId.length()) {
             throw new IllegalArgumentException("Invalid model id " + modelId);
         }
+
+        String configPrefix = modelId.substring(0, modelInfixPosition);
+        int tenantInfixPosition = configPrefix.indexOf(CommonName.TENANT_ID_INFIX);
+        if (tenantInfixPosition >= 0) {
+            return configPrefix.substring(tenantInfixPosition + CommonName.TENANT_ID_INFIX.length());
+        }
+        return configPrefix;
     }
 
     /**

@@ -6,6 +6,9 @@
 package org.opensearch.timeseries.model;
 
 import static org.opensearch.timeseries.constant.CommonMessages.INVALID_CHAR_IN_RESULT_INDEX_NAME;
+import static org.opensearch.timeseries.constant.CommonName.APPLICATION_ID_FIELD;
+import static org.opensearch.timeseries.constant.CommonName.DATA_SOURCE_ID_FIELD;
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -19,8 +22,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.builder.ToStringBuilder;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.util.Strings;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.commons.authuser.User;
@@ -39,7 +40,7 @@ import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.ImputationMethod;
 import org.opensearch.timeseries.dataprocessor.ImputationOption;
-import org.opensearch.timeseries.indices.IndexManagement;
+import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.TimeUtil;
 import org.owasp.encoder.Encode;
@@ -48,7 +49,6 @@ import com.google.common.base.Objects;
 import com.google.common.collect.ImmutableList;
 
 public abstract class Config implements Writeable, ToXContentObject {
-    private static final Logger logger = LogManager.getLogger(Config.class);
 
     public static final int MAX_RESULT_INDEX_NAME_SIZE = 255;
     // OS doesn’t allow uppercase: https://tinyurl.com/yse2xdbx
@@ -131,6 +131,9 @@ public abstract class Config implements Writeable, ToXContentObject {
     protected Instant lastUIBreakingChangeTime;
     protected TimeConfiguration frequency;
     protected Boolean autoCreated;
+    protected String tenantId;
+    protected String applicationId;
+    protected String dataSourceId;
 
     public static String INVALID_RESULT_INDEX_NAME_SIZE = "Result index name size must contains less than "
         + MAX_RESULT_INDEX_NAME_SIZE
@@ -165,7 +168,8 @@ public abstract class Config implements Writeable, ToXContentObject {
         Boolean flattenResultIndexMapping,
         Instant lastBreakingUIChangeTime,
         TimeConfiguration frequency,
-        Boolean autoCreated
+        Boolean autoCreated,
+        String tenantId
     ) {
         if (Strings.isBlank(name)) {
             errorMessage = CommonMessages.EMPTY_NAME;
@@ -329,6 +333,13 @@ public abstract class Config implements Writeable, ToXContentObject {
                 return;
             }
         }
+
+        if (!Strings.isBlank(tenantId) && Strings.isBlank(resultIndex)) {
+            issueType = ValidationIssueType.RESULT_INDEX;
+            errorMessage = "custom result index is required in multi-tenancy mode";
+            return;
+        }
+
         this.id = id;
         this.version = version;
         this.name = name;
@@ -361,6 +372,7 @@ public abstract class Config implements Writeable, ToXContentObject {
         this.lastUIBreakingChangeTime = lastBreakingUIChangeTime;
         this.frequency = frequency;
         this.autoCreated = autoCreated != null ? autoCreated : false;
+        this.tenantId = tenantId;
     }
 
     /**
@@ -464,7 +476,18 @@ public abstract class Config implements Writeable, ToXContentObject {
         } else {
             this.frequency = null;
         }
-        this.autoCreated = input.readOptionalBoolean();
+        if (input.available() > 0) {
+            this.autoCreated = input.readOptionalBoolean();
+        }
+        if (input.available() > 0) {
+            this.tenantId = input.readOptionalString();
+        }
+        if (input.available() > 0) {
+            this.applicationId = input.readOptionalString();
+        }
+        if (input.available() > 0) {
+            this.dataSourceId = input.readOptionalString();
+        }
     }
 
     /*
@@ -526,6 +549,9 @@ public abstract class Config implements Writeable, ToXContentObject {
             output.writeBoolean(false);
         }
         output.writeOptionalBoolean(autoCreated);
+        output.writeOptionalString(tenantId);
+        output.writeOptionalString(applicationId);
+        output.writeOptionalString(dataSourceId);
     }
 
     public boolean invalidShingleSizeRange(Integer shingleSizeToTest) {
@@ -585,7 +611,10 @@ public abstract class Config implements Writeable, ToXContentObject {
             && Objects.equal(customResultIndexTTL, config.customResultIndexTTL)
             && Objects.equal(flattenResultIndexMapping, config.flattenResultIndexMapping)
             && Objects.equal(frequency, config.frequency)
-            && Objects.equal(autoCreated, config.autoCreated);
+            && Objects.equal(autoCreated, config.autoCreated)
+            && Objects.equal(tenantId, config.tenantId)
+            && Objects.equal(applicationId, config.applicationId)
+            && Objects.equal(dataSourceId, config.dataSourceId);
     }
 
     @Generated
@@ -615,7 +644,10 @@ public abstract class Config implements Writeable, ToXContentObject {
                 customResultIndexTTL,
                 flattenResultIndexMapping,
                 frequency,
-                autoCreated
+                autoCreated,
+                tenantId,
+                applicationId,
+                dataSourceId
             );
     }
 
@@ -675,6 +707,15 @@ public abstract class Config implements Writeable, ToXContentObject {
         }
         if (autoCreated != null && autoCreated) {
             builder.field(AUTO_CREATED_FIELD, autoCreated);
+        }
+        if (tenantId != null) {
+            builder.field(TENANT_ID_FIELD, tenantId);
+        }
+        if (applicationId != null) {
+            builder.field(APPLICATION_ID_FIELD, applicationId);
+        }
+        if (dataSourceId != null) {
+            builder.field(DATA_SOURCE_ID_FIELD, dataSourceId);
         }
         return builder;
     }
@@ -793,6 +834,30 @@ public abstract class Config implements Writeable, ToXContentObject {
         return ((IntervalTimeConfiguration) getInferredFrequency()).toDuration();
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public String getApplicationId() {
+        return applicationId;
+    }
+
+    public void setApplicationId(String applicationId) {
+        this.applicationId = applicationId;
+    }
+
+    public String getDataSourceId() {
+        return dataSourceId;
+    }
+
+    public void setDataSourceId(String dataSourceId) {
+        this.dataSourceId = dataSourceId;
+    }
+
     public void setUser(User user) {
         this.user = user;
     }
@@ -806,7 +871,7 @@ public abstract class Config implements Writeable, ToXContentObject {
     }
 
     public String getCustomResultIndexPattern() {
-        return Strings.isEmpty(customResultIndexOrAlias) ? null : IndexManagement.getAllCustomResultIndexPattern(customResultIndexOrAlias);
+        return Strings.isEmpty(customResultIndexOrAlias) ? null : TimeSeriesIndex.getAllCustomResultIndexPattern(customResultIndexOrAlias);
     }
 
     public boolean isHighCardinality() {
@@ -986,6 +1051,7 @@ public abstract class Config implements Writeable, ToXContentObject {
             .append("flattenResultIndexMapping", flattenResultIndexMapping)
             .append("frequency", frequency)
             .append("autoCreated", autoCreated)
+            .append("tenantId", tenantId)
             .toString();
     }
 

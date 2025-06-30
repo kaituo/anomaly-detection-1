@@ -14,6 +14,7 @@ package org.opensearch.ad.ratelimit;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -39,6 +40,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 
+import org.mockito.ArgumentCaptor;
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.DocWriteRequest;
 import org.opensearch.action.bulk.BulkItemResponse;
@@ -52,6 +54,7 @@ import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.concurrency.OpenSearchRejectedExecutionException;
 import org.opensearch.core.index.Index;
@@ -60,13 +63,11 @@ import org.opensearch.core.rest.RestStatus;
 import org.opensearch.index.engine.VersionConflictEngineException;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
-
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 import test.org.opensearch.ad.util.MLUtil;
@@ -79,6 +80,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
     ClusterService clusterService;
 
     ModelState<ThresholdedRandomCutForest> state;
+    private final String tenantId = null;
 
     @Override
     @SuppressWarnings("unchecked")
@@ -92,6 +94,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
                     new HashSet<>(
                         Arrays
                             .asList(
+                                AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
                                 AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_MAX_HEAP_PERCENT,
                                 AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_CONCURRENCY,
                                 AnomalyDetectorSettings.AD_CHECKPOINT_WRITE_QUEUE_BATCH_SIZE
@@ -106,6 +109,8 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         checkpointMap.put(CommonName.FIELD_MODEL, "a");
         when(checkpoint.toIndexSource(any())).thenReturn(checkpointMap);
         when(checkpoint.shouldSave(any(), anyBoolean(), any(), any())).thenReturn(true);
+        when(checkpoint.resolveCheckpointIndexName(nullable(String.class), any(), any(), any()))
+            .thenAnswer(invocation -> invocation.getArgument(3));
 
         // Integer.MAX_VALUE makes a huge heap
         worker = new ADCheckpointWriteWorker(
@@ -125,7 +130,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             TimeSeriesSettings.QUEUE_MAINTENANCE,
             checkpoint,
             ADCommonName.CHECKPOINT_INDEX_NAME,
-            TimeSeriesSettings.HOURLY_MAINTENANCE,
+            AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             nodeStateManager,
             TimeSeriesSettings.HOURLY_MAINTENANCE
         );
@@ -148,7 +153,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             return null;
         }).when(checkpoint).batchWrite(any(), any());
 
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, times(1)).batchWrite(any(), any());
     }
@@ -170,7 +175,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
 
         List<ModelState<ThresholdedRandomCutForest>> states = new ArrayList<>();
         states.add(state);
-        worker.writeAll(states, detectorId, true, RequestPriority.MEDIUM);
+        worker.writeAll(states, detectorId, tenantId, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, times(1)).batchWrite(any(), any());
     }
@@ -186,7 +191,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         ExecutorService executorService = mock(ExecutorService.class);
 
         ThreadPool mockThreadPool = mock(ThreadPool.class);
-        when(mockThreadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(mockThreadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = () -> {
                 try {
@@ -229,7 +234,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             TimeSeriesSettings.QUEUE_MAINTENANCE,
             checkpoint,
             ADCommonName.CHECKPOINT_INDEX_NAME,
-            TimeSeriesSettings.HOURLY_MAINTENANCE,
+            AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             nodeStateManager,
             TimeSeriesSettings.HOURLY_MAINTENANCE
         );
@@ -242,7 +247,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         int numberOfRequests = 2 * AD_CHECKPOINT_WRITE_QUEUE_BATCH_SIZE.getDefault(Settings.EMPTY) + 1;
         for (int i = 0; i < numberOfRequests; i++) {
             ModelState<ThresholdedRandomCutForest> state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().build());
-            worker.write(state, true, RequestPriority.MEDIUM);
+            worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         }
 
         // Here, we allow the first 2 pulling batch from queue operations to start.
@@ -267,7 +272,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             return null;
         }).when(checkpoint).batchWrite(any(), any());
 
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, times(1)).batchWrite(any(), any());
         verify(nodeStateManager, times(1)).setException(eq(state.getConfigId()), any(OpenSearchRejectedExecutionException.class));
@@ -281,7 +286,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             return null;
         }).when(checkpoint).batchWrite(any(), any());
 
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         // we don't retry checkpoint write
         verify(checkpoint, times(1)).batchWrite(any(), any());
         verify(nodeStateManager, times(1)).setException(eq(state.getConfigId()), any(OpenSearchStatusException.class));
@@ -305,7 +310,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
             return null;
         }).when(checkpoint).batchWrite(any(), any());
 
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         // we don't retry checkpoint write
         verify(checkpoint, times(1)).batchWrite(any(), any());
     }
@@ -314,16 +319,29 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
     public void testEmptyTimeStamp() {
         ModelState<ThresholdedRandomCutForest> state = mock(ModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.MIN);
-        worker.write(state, false, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, false, RequestPriority.MEDIUM);
 
         verify(checkpoint, never()).batchWrite(any(), any());
+    }
+
+    public void testCheckpointIntervalFollowsDynamicSettingUpdates() {
+        Settings newSettings = Settings.builder().put(AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ.getKey(), TimeValue.timeValueMinutes(1)).build();
+        Settings.Builder target = Settings.builder();
+        clusterService.getClusterSettings().updateDynamicSettings(newSettings, target, Settings.builder(), "test");
+        clusterService.getClusterSettings().applySettings(target.build());
+
+        worker.write(state, tenantId, false, RequestPriority.MEDIUM);
+
+        ArgumentCaptor<java.time.Duration> checkpointIntervalCaptor = ArgumentCaptor.forClass(java.time.Duration.class);
+        verify(checkpoint).shouldSave(eq(state), eq(false), checkpointIntervalCaptor.capture(), eq(clock));
+        assertEquals(java.time.Duration.ofMinutes(1), checkpointIntervalCaptor.getValue());
     }
 
     @SuppressWarnings("unchecked")
     public void testTooSoonToSaveSingleWrite() {
         ModelState<ThresholdedRandomCutForest> state = mock(ModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.now());
-        worker.write(state, false, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, false, RequestPriority.MEDIUM);
 
         verify(checkpoint, never()).batchWrite(any(), any());
     }
@@ -336,7 +354,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         List<ModelState<ThresholdedRandomCutForest>> states = new ArrayList<>();
         states.add(state);
 
-        worker.writeAll(states, detectorId, false, RequestPriority.MEDIUM);
+        worker.writeAll(states, detectorId, tenantId, false, RequestPriority.MEDIUM);
 
         verify(checkpoint, never()).batchWrite(any(), any());
     }
@@ -346,7 +364,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         ModelState<ThresholdedRandomCutForest> state = mock(ModelState.class);
         when(state.getLastCheckpointTime()).thenReturn(Instant.now());
         when(state.getModel()).thenReturn(null);
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, never()).batchWrite(any(), any());
     }
@@ -359,7 +377,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         when(state.getModel()).thenReturn(Optional.of(model));
         when(state.getConfigId()).thenReturn("1");
         when(state.getModelId()).thenReturn(null);
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, never()).batchWrite(any(), any());
     }
@@ -372,7 +390,7 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
         when(state.getModel()).thenReturn(Optional.of(model));
         when(state.getConfigId()).thenReturn(null);
         when(state.getModelId()).thenReturn("a");
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
 
         verify(checkpoint, never()).batchWrite(any(), any());
     }
@@ -380,57 +398,63 @@ public class CheckpointWriteWorkerTests extends AbstractRateLimitingTest {
     @SuppressWarnings("unchecked")
     public void testDetectorNotAvailableSingleWrite() {
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        })
+            .when(nodeStateManager)
+            .getConfig(any(String.class), nullable(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
     }
 
     @SuppressWarnings("unchecked")
     public void testDetectorNotAvailableWriteAll() {
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.empty());
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        })
+            .when(nodeStateManager)
+            .getConfig(any(String.class), nullable(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         List<ModelState<ThresholdedRandomCutForest>> states = new ArrayList<>();
         states.add(state);
-        worker.writeAll(states, detectorId, true, RequestPriority.MEDIUM);
+        worker.writeAll(states, detectorId, tenantId, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
     }
 
     @SuppressWarnings("unchecked")
     public void testDetectorFetchException() {
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onFailure(new RuntimeException());
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        })
+            .when(nodeStateManager)
+            .getConfig(any(String.class), nullable(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
     }
 
     public void testCheckpointNullSource() throws IOException {
         when(checkpoint.toIndexSource(any())).thenReturn(null);
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
     }
 
     public void testCheckpointEmptySource() throws IOException {
         Map<String, Object> checkpointMap = new HashMap<>();
         when(checkpoint.toIndexSource(any())).thenReturn(checkpointMap);
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
     }
 
     public void testConcurrentModificationException() throws IOException {
         doThrow(ConcurrentModificationException.class).when(checkpoint).toIndexSource(any());
-        worker.write(state, true, RequestPriority.MEDIUM);
+        worker.write(state, tenantId, true, RequestPriority.MEDIUM);
         verify(checkpoint, never()).batchWrite(any(), any());
     }
 }

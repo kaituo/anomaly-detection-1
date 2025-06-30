@@ -215,7 +215,8 @@ public class AnomalyResultTests extends OpenSearchSingleNodeTestCase {
                 threshold,
                 currentData,
                 featureImputed,
-                Collections.emptyList()
+                Collections.<Rule>emptyList(),
+                null
             );
 
         // Assert that the confidence is capped at 1.0
@@ -285,7 +286,8 @@ public class AnomalyResultTests extends OpenSearchSingleNodeTestCase {
                 threshold,
                 currentData,
                 featureImputed,
-                rules
+                rules,
+                null
             );
 
         // Assert that the confidence is capped at 1.0

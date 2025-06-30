@@ -21,7 +21,6 @@ import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
@@ -30,12 +29,14 @@ import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.function.ExecutorFunction;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.ConfigValidationIssue;
@@ -43,47 +44,45 @@ import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.ValidationAspect;
 import org.opensearch.timeseries.model.ValidationIssueType;
 import org.opensearch.timeseries.rest.handler.Processor;
-import org.opensearch.timeseries.util.ParseUtils;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
+import org.opensearch.timeseries.util.ExceptionUtil;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
-public abstract class BaseValidateConfigTransportAction<IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, ConfigType extends Config>
+public abstract class BaseValidateConfigTransportAction<IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, ConfigStoreType extends DelegatingDataManagement<IndexType>>
     extends HandledTransportAction<ActionRequest, ValidateConfigResponse> {
     public static final Logger logger = LogManager.getLogger(BaseValidateConfigTransportAction.class);
 
-    protected final Client client;
-    protected final SecurityClientUtil clientUtil;
     protected final ClusterService clusterService;
     protected final NamedXContentRegistry xContentRegistry;
-    protected final IndexManagementType indexManagement;
+    protected final DataManagementType indexManagement;
     protected final SearchFeatureDao searchFeatureDao;
     protected final NamedWriteableRegistry namedWriteableRegistry;
     protected volatile Boolean filterByEnabled;
     protected Clock clock;
     protected Settings settings;
     protected ValidationAspect validationAspect;
-    private final Class<ConfigType> configTypeClass;
+    protected ConfigStoreType configStore;
+    protected final DataAccess dataAccess;
+    protected final RunContext runContext;
 
     public BaseValidateConfigTransportAction(
         String actionName,
-        Client client,
-        SecurityClientUtil clientUtil,
         ClusterService clusterService,
         NamedXContentRegistry xContentRegistry,
         Settings settings,
-        IndexManagementType indexManagement,
+        DataManagementType indexManagement,
         ActionFilters actionFilters,
         TransportService transportService,
         SearchFeatureDao searchFeatureDao,
         Setting<Boolean> filterByBackendRoleSetting,
         ValidationAspect validationAspect,
-        Class<ConfigType> configTypeClass,
-        NamedWriteableRegistry namedWriteableRegistry
+        ConfigStoreType configStore,
+        NamedWriteableRegistry namedWriteableRegistry,
+        DataAccess dataAccess,
+        RunContext runContext
     ) {
         super(actionName, transportService, actionFilters, ValidateConfigRequest::new);
-        this.client = client;
-        this.clientUtil = clientUtil;
         this.clusterService = clusterService;
         this.xContentRegistry = xContentRegistry;
         this.indexManagement = indexManagement;
@@ -94,24 +93,34 @@ public abstract class BaseValidateConfigTransportAction<IndexType extends Enum<I
         this.clock = Clock.systemUTC();
         this.settings = settings;
         this.validationAspect = validationAspect;
-        this.configTypeClass = configTypeClass;
+        this.configStore = configStore;
+        this.dataAccess = dataAccess;
+        this.runContext = runContext;
     }
 
     @Override
     protected void doExecute(Task task, ActionRequest actionRequest, ActionListener<ValidateConfigResponse> listener) {
         ValidateConfigRequest request = ValidateConfigRequest.fromActionRequest(actionRequest, namedWriteableRegistry);
-        User user = ParseUtils.getUserContext(client);
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
-            String resourceType = getResourceTypeFromClassName(configTypeClass.getSimpleName());
+        User user = runContext.getUser();
+
+        try {
+            TenantAwareHelper.validateTenantId(request.getTenantId(), settings, getMultiTenancyEnabledSetting());
+        } catch (Exception e) {
+            listener.onFailure(e);
+            return;
+        }
+
+        runContext.runWithSystemAuth(context -> {
+            String resourceType = getResourceTypeFromClassName(request.getConfig().getClass().getSimpleName());
             verifyResourceAccessAndProcessRequest(
                 resourceType,
                 () -> validateExecute(request, user, context, listener),
                 () -> resolveUserAndExecute(user, listener, () -> validateExecute(request, user, context, listener))
             );
-        } catch (Exception e) {
-            logger.error(e);
-            listener.onFailure(e);
-        }
+        }, exception -> {
+            logger.error(exception);
+            listener.onFailure(exception);
+        });
     }
 
     public void resolveUserAndExecute(User requestedUser, ActionListener<ValidateConfigResponse> listener, ExecutorFunction function) {
@@ -135,13 +144,14 @@ public abstract class BaseValidateConfigTransportAction<IndexType extends Enum<I
     protected void checkIndicesAndExecute(
         List<String> indices,
         ExecutorFunction function,
+        String tenantId,
         ActionListener<ValidateConfigResponse> listener
     ) {
         SearchRequest searchRequest = new SearchRequest()
             .indices(indices.toArray(new String[0]))
             .source(new SearchSourceBuilder().size(1).query(QueryBuilders.matchAllQuery()));
-        client.search(searchRequest, ActionListener.wrap(r -> function.execute(), e -> {
-            if (e instanceof IndexNotFoundException) {
+        dataAccess.search(searchRequest, TenantContext.user(tenantId), ActionListener.wrap(r -> function.execute(), e -> {
+            if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
                 // IndexNotFoundException is converted to a ADValidationException that gets
                 // parsed to a ValidationIssue that is returned to
                 // the user as a response indicating index doesn't exist
@@ -212,7 +222,7 @@ public abstract class BaseValidateConfigTransportAction<IndexType extends Enum<I
     public void validateExecute(
         ValidateConfigRequest request,
         User user,
-        ThreadContext.StoredContext storedContext,
+        RunContext.RestorableContext storedContext,
         ActionListener<ValidateConfigResponse> listener
     ) {
         storedContext.restore();
@@ -239,8 +249,14 @@ public abstract class BaseValidateConfigTransportAction<IndexType extends Enum<I
                 logger.error(errorMessage, exception);
                 listener.onFailure(exception);
             }
-        }, listener);
+        }, config.getTenantId(), listener);
     }
 
     protected abstract Processor<ValidateConfigResponse> createProcessor(Config config, ValidateConfigRequest request, User user);
+
+    /**
+     * Returns the setting that indicates if multi-tenancy is enabled.
+     * Subclasses must implement this to provide the appropriate setting.
+     */
+    protected abstract Setting<Boolean> getMultiTenancyEnabledSetting();
 }

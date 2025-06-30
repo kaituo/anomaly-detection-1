@@ -5,6 +5,7 @@
 
 package org.opensearch.ad.e2e;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -15,6 +16,7 @@ import java.util.Locale;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Logger;
 import org.opensearch.ad.AbstractADSyntheticDataTest;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.RestClient;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
@@ -60,7 +62,7 @@ public class SimpleRealTimeBatchIT extends AbstractADSyntheticDataTest {
             DATA_SIZE
         ).data;
 
-        ingestUniformSingleFeatureData(-1, data, DATASET, CATEGORY_FIELD);
+        ingestData(data);
 
         // Extract the first and last data item's timestamps as begin and end variables
         String firstTimestampStr = data.get(0).get("timestamp").getAsString();
@@ -90,13 +92,15 @@ public class SimpleRealTimeBatchIT extends AbstractADSyntheticDataTest {
                     + " \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"MINUTES\" } },"
                     + " \"window_delay\": { \"period\": { \"interval\": %d, \"unit\": \"MINUTES\" } },"
                     + " \"frequency\": { \"period\": { \"interval\": %d, \"unit\": \"MINUTES\" } },"
+                    + " %s"
                     + " \"schema_version\": 2"
                     + " }",
-                DATASET,
+                datasetName(),
                 CATEGORY_FIELD,
                 INTERVAL_MINUTES,
                 windowDelayMinutes,
-                FREQUENCY_MINUTES
+                FREQUENCY_MINUTES,
+                customResultIndexField()
             );
 
         String detectorId = createDetector(client, detectorJson);
@@ -191,5 +195,37 @@ public class SimpleRealTimeBatchIT extends AbstractADSyntheticDataTest {
      */
     private Instant parseMilliseconds(String timestampStr) {
         return Instant.ofEpochMilli(Long.parseLong(timestampStr));
+    }
+
+    protected RestClient ingestClient() throws IOException {
+        return client();
+    }
+
+    protected String datasetName() {
+        return DATASET;
+    }
+
+    protected String customResultIndexField() {
+        String tenantId = tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            return "";
+        }
+        String resultIndex = ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + randomAlphaOfLength(10).toLowerCase(Locale.ROOT);
+        return String.format(Locale.ROOT, "\"result_index\": \"%s\",", resultIndex);
+    }
+
+    protected void ingestData(List<JsonObject> data) throws Exception {
+        String mapping = String
+            .format(
+                Locale.ROOT,
+                "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\":"
+                    + "\"date\""
+                    + "},"
+                    + " \"data\": { \"type\": \"double\" },"
+                    + "\"%s\": { \"type\": \"keyword\"} } } }",
+                CATEGORY_FIELD
+            );
+
+        bulkIndexData(data, datasetName(), ingestClient(), mapping, data.size());
     }
 }

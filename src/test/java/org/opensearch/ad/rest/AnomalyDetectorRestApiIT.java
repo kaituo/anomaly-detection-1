@@ -180,6 +180,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             null,
             interval,
+            null,
             null
         );
 
@@ -216,7 +217,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
                     client(),
                     "POST",
                     TestHelpers.AD_BASE_DETECTORS_URI,
-                    ImmutableMap.of(),
+                    ImmutableMap.of("only_query_custom_result_index", "true"),
                     TestHelpers.toHttpEntity(detector),
                     null
                 )
@@ -260,7 +261,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
                 .makeRequest(
                     client(),
                     "POST",
-                    TestHelpers.AD_BASE_RESULT_URI + "/_search/" + expectedFlattenedIndex,
+                    "/" + expectedFlattenedIndex + "/_search",
                     ImmutableMap.of(),
                     new StringEntity("{\"query\":{\"match_all\":{}}}", ContentType.APPLICATION_JSON),
                     null
@@ -366,7 +367,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             .makeRequest(
                 client(),
                 "POST",
-                TestHelpers.AD_BASE_RESULT_URI + "/_search/" + expectedFlattenedIndex,
+                "/" + expectedFlattenedIndex + "/_search",
                 ImmutableMap.of(),
                 new StringEntity("{\"query\":{\"match_all\":{}}}", ContentType.APPLICATION_JSON),
                 null
@@ -444,6 +445,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             false,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
         Response updateResponse = TestHelpers
@@ -513,6 +515,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             true,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -654,6 +657,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
         if (isResourceSharingFeatureEnabled()) {
@@ -727,6 +731,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -815,6 +820,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector1.getLastBreakingUIChangeTime(),
             detector1.getFrequency(),
+            null,
             null
         );
 
@@ -867,6 +873,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             Instant.now(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -925,6 +932,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -1313,6 +1321,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -1402,7 +1411,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
     }
 
     public void testStartAdJobWithNonexistingDetectorIndex() throws Exception {
-        String message = "no such index [.opendistro-anomaly-detectors]";
+        String message = CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
         if (isResourceSharingFeatureEnabled()) {
             message = "no permissions for ";
         }

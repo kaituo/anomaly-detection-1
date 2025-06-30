@@ -18,23 +18,24 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Random;
 
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
+import org.opensearch.common.unit.TimeValue;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.CheckpointWriteWorker;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class ADCheckpointWriteWorker extends
-    CheckpointWriteWorker<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao> {
+    CheckpointWriteWorker<ThresholdedRandomCutForest, ADIndex, ADDelegatingDataManagement, ADCheckpointStore> {
     public static final String WORKER_NAME = "ad-checkpoint-write";
 
     public ADCheckpointWriteWorker(
@@ -52,10 +53,10 @@ public class ADCheckpointWriteWorker extends
         float lowSegmentPruneRatio,
         int maintenanceFreqConstant,
         Duration executionTtl,
-        ADCheckpointDao checkpoint,
+        ADCheckpointStore checkpoint,
         String indexName,
-        Duration checkpointInterval,
-        NodeStateManager adNodeStateManager,
+        Setting<TimeValue> checkpointIntervalSetting,
+        StateManager adNodeStateManager,
         Duration stateTtl
     ) {
         super(
@@ -67,7 +68,7 @@ public class ADCheckpointWriteWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,
@@ -81,7 +82,7 @@ public class ADCheckpointWriteWorker extends
             adNodeStateManager,
             checkpoint,
             indexName,
-            checkpointInterval,
+            checkpointIntervalSetting,
             AnalysisType.AD
         );
     }

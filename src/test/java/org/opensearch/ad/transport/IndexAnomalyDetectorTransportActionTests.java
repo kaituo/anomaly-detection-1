@@ -37,8 +37,8 @@ import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.ClusterName;
@@ -59,7 +59,12 @@ import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
@@ -78,6 +83,11 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
     private Client client = mock(Client.class);
     private SecurityClientUtil clientUtil;
     private SearchFeatureDao searchFeatureDao;
+    private DataAccess dataAccess;
+    private StateManager stateManager;
+    private RunContext runContext;
+    private ThreadPool threadPool;
+    private ThreadContext threadContext;
 
     @SuppressWarnings("unchecked")
     @Override
@@ -109,17 +119,30 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
         searchFeatureDao = mock(SearchFeatureDao.class);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        dataAccess = new DefaultDataAccess(
+            client,
+            clusterService,
+            clientUtil,
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
+        stateManager = mock(StateManager.class);
+        threadPool = mock(ThreadPool.class);
+        threadContext = new ThreadContext(Settings.EMPTY);
+        when(client.threadPool()).thenReturn(threadPool);
+        when(threadPool.getThreadContext()).thenReturn(threadContext);
+        runContext = new ThreadRunContext(threadContext);
         action = new IndexAnomalyDetectorTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client(),
-            clientUtil,
             clusterService,
             indexSettings(),
-            mock(ADIndexManagement.class),
+            mock(ADDelegatingDataManagement.class),
             xContentRegistry(),
             adTaskManager,
-            searchFeatureDao
+            searchFeatureDao,
+            dataAccess,
+            stateManager,
+            runContext
         );
         task = mock(Task.class);
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
@@ -177,7 +200,8 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
             1000,
             10,
             5,
-            10
+            10,
+            "test-tenant"
         );
         response = new ActionListener<IndexAnomalyDetectorResponse>() {
             @Override
@@ -207,18 +231,20 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
         org.opensearch.threadpool.ThreadPool mockThreadPool = mock(ThreadPool.class);
         when(client.threadPool()).thenReturn(mockThreadPool);
         when(mockThreadPool.getThreadContext()).thenReturn(threadContext);
+        RunContext runContext = new ThreadRunContext(threadContext);
 
         IndexAnomalyDetectorTransportAction transportAction = new IndexAnomalyDetectorTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client,
-            clientUtil,
             clusterService,
             settings,
-            mock(ADIndexManagement.class),
+            mock(ADDelegatingDataManagement.class),
             xContentRegistry(),
             adTaskManager,
-            searchFeatureDao
+            searchFeatureDao,
+            dataAccess,
+            stateManager,
+            runContext
         );
         transportAction.doExecute(task, request, response);
     }
@@ -232,18 +258,20 @@ public class IndexAnomalyDetectorTransportActionTests extends OpenSearchIntegTes
         org.opensearch.threadpool.ThreadPool mockThreadPool = mock(ThreadPool.class);
         when(client.threadPool()).thenReturn(mockThreadPool);
         when(mockThreadPool.getThreadContext()).thenReturn(threadContext);
+        RunContext runContext = new ThreadRunContext(threadContext);
 
         IndexAnomalyDetectorTransportAction transportAction = new IndexAnomalyDetectorTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client,
-            clientUtil,
             clusterService,
             settings,
-            mock(ADIndexManagement.class),
+            mock(ADDelegatingDataManagement.class),
             xContentRegistry(),
             adTaskManager,
-            searchFeatureDao
+            searchFeatureDao,
+            dataAccess,
+            stateManager,
+            runContext
         );
         transportAction.doExecute(task, request, response);
     }

@@ -34,11 +34,14 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestResponse;
 import org.opensearch.rest.action.RestResponseListener;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
 /**
  * Abstract class to handle search request.
+ *
+ * @param <T> the response payload type
  */
 public abstract class AbstractSearchAction<T extends ToXContentObject> extends BaseRestHandler {
 
@@ -49,6 +52,7 @@ public abstract class AbstractSearchAction<T extends ToXContentObject> extends B
     protected final ActionType<SearchResponse> actionType;
     protected final Supplier<Boolean> enabledSupplier;
     protected final String disabledMsg;
+    protected final Supplier<Boolean> isMultiTenancyEnabledSupplier;
 
     private final Logger logger = LogManager.getLogger(AbstractSearchAction.class);
 
@@ -59,7 +63,8 @@ public abstract class AbstractSearchAction<T extends ToXContentObject> extends B
         Class<T> clazz,
         ActionType<SearchResponse> actionType,
         Supplier<Boolean> adEnabledSupplier,
-        String disabledMsg
+        String disabledMsg,
+        Supplier<Boolean> isMultiTenancyEnabledSupplier
     ) {
         this.index = index;
         this.clazz = clazz;
@@ -68,9 +73,11 @@ public abstract class AbstractSearchAction<T extends ToXContentObject> extends B
         this.actionType = actionType;
         this.enabledSupplier = adEnabledSupplier;
         this.disabledMsg = disabledMsg;
+        this.isMultiTenancyEnabledSupplier = isMultiTenancyEnabledSupplier;
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!enabledSupplier.get()) {
             throw new IllegalStateException(disabledMsg);
@@ -83,12 +90,12 @@ public abstract class AbstractSearchAction<T extends ToXContentObject> extends B
             // ref-link: https://github.com/elastic/elasticsearch/issues/17639
             searchSourceBuilder.fetchSource(getSourceContext(request, searchSourceBuilder));
             searchSourceBuilder.seqNoAndPrimaryTerm(true).version(true);
-            SearchRequest searchRequest = new SearchRequest().source(searchSourceBuilder).indices(this.index);
+            String tenantId = TenantAwareHelper.getTenantID(isMultiTenancyEnabledSupplier.get(), request);
+            SearchRequest searchRequest = new SearchRequest().source(searchSourceBuilder).indices(this.index).preference(tenantId);
             return channel -> client.execute(actionType, searchRequest, search(channel));
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(Encode.forHtml(e.getMessage()));
         }
-
     }
 
     protected void onFailure(RestChannel channel, Exception e) {

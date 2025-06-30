@@ -11,6 +11,11 @@
 
 package org.opensearch.ad.settings;
 
+import static org.opensearch.remote.metadata.common.CommonValue.REMOTE_METADATA_ENDPOINT_KEY;
+import static org.opensearch.remote.metadata.common.CommonValue.REMOTE_METADATA_SERVICE_NAME_KEY;
+
+import java.util.function.Function;
+
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
@@ -86,8 +91,10 @@ public final class AnomalyDetectorSettings {
         );
 
     // Opensearch-only setting. Doesn't plan to use the value of the legacy setting
-    // AD_RESULT_HISTORY_MAX_DOCS as that's too low. If the clusterManager node uses opendistro code,
-    // it uses the legacy setting. If the clusterManager node uses opensearch code, it uses the new setting.
+    // AD_RESULT_HISTORY_MAX_DOCS as that's too low. If the clusterManager node uses
+    // opendistro code,
+    // it uses the legacy setting. If the clusterManager node uses opensearch code,
+    // it uses the new setting.
     public static final Setting<Long> AD_RESULT_HISTORY_MAX_DOCS_PER_SHARD = Setting
         .longSetting(
             "plugins.anomaly_detection.ad_result_history_max_docs_per_shard",
@@ -96,7 +103,8 @@ public final class AnomalyDetectorSettings {
             // doc a doc too. One result corresponding to 4 Lucene docs.
             // A single Lucene doc is roughly 46.8 bytes (measured by experiments).
             // 1.35 billion docs is about 65 GB. One shard can have at most 65 GB.
-            // This number in Lucene doc count is used in RolloverRequest#addMaxIndexDocsCondition
+            // This number in Lucene doc count is used in
+            // RolloverRequest#addMaxIndexDocsCondition
             // for adding condition to check if the index has at least numDocs.
             1_350_000_000L,
             0L,
@@ -113,9 +121,10 @@ public final class AnomalyDetectorSettings {
         );
 
     /**
-     * @deprecated This setting is deprecated because we need to manage fault tolerance for
-     * multiple analysis such as AD and forecasting.
-     * Use TimeSeriesSettings#MAX_RETRY_FOR_UNRESPONSIVE_NODE instead.
+     * @deprecated This setting is deprecated because we need to manage fault
+     *             tolerance for
+     *             multiple analysis such as AD and forecasting.
+     *             Use TimeSeriesSettings#MAX_RETRY_FOR_UNRESPONSIVE_NODE instead.
      */
     @Deprecated
     public static final Setting<Integer> AD_MAX_RETRY_FOR_UNRESPONSIVE_NODE = Setting
@@ -128,9 +137,10 @@ public final class AnomalyDetectorSettings {
         );
 
     /**
-     * @deprecated This setting is deprecated because we need to manage fault tolerance for
-     * multiple analysis such as AD and forecasting.
-     * Use {@link TimeSeriesSettings#COOLDOWN_MINUTES} instead.
+     * @deprecated This setting is deprecated because we need to manage fault
+     *             tolerance for
+     *             multiple analysis such as AD and forecasting.
+     *             Use {@link TimeSeriesSettings#COOLDOWN_MINUTES} instead.
      */
     @Deprecated
     public static final Setting<TimeValue> AD_COOLDOWN_MINUTES = Setting
@@ -142,9 +152,10 @@ public final class AnomalyDetectorSettings {
         );
 
     /**
-     * @deprecated This setting is deprecated because we need to manage fault tolerance for
-     * multiple analysis such as AD and forecasting.
-     * Use {@link TimeSeriesSettings#BACKOFF_MINUTES} instead.
+     * @deprecated This setting is deprecated because we need to manage fault
+     *             tolerance for
+     *             multiple analysis such as AD and forecasting.
+     *             Use {@link TimeSeriesSettings#BACKOFF_MINUTES} instead.
      */
     @Deprecated
     public static final Setting<TimeValue> AD_BACKOFF_MINUTES = Setting
@@ -194,9 +205,12 @@ public final class AnomalyDetectorSettings {
     public static final String CHECKPOINT_INDEX_MAPPING_FILE = "mappings/anomaly-checkpoint.json";
 
     // saving checkpoint every 12 hours.
-    // To support 1 million entities in 36 data nodes, each node has roughly 28K models.
-    // In each hour, we roughly need to save 2400 models. Since each model saving can
-    // take about 1 seconds (default value of AD_EXPECTED_CHECKPOINT_MAINTAIN_TIME_IN_MILLISECS)
+    // To support 1 million entities in 36 data nodes, each node has roughly 28K
+    // models.
+    // In each hour, we roughly need to save 2400 models. Since each model saving
+    // can
+    // take about 1 seconds (default value of
+    // AD_EXPECTED_CHECKPOINT_MAINTAIN_TIME_IN_MILLISECS)
     // we can use up to 2400 seconds to finish saving checkpoints.
     public static final Setting<TimeValue> AD_CHECKPOINT_SAVING_FREQ = Setting
         .positiveTimeSetting(
@@ -210,6 +224,14 @@ public final class AnomalyDetectorSettings {
         .positiveTimeSetting(
             "plugins.anomaly_detection.checkpoint_ttl",
             TimeValue.timeValueDays(7),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    public static final Setting<TimeValue> AD_DAILY_S3_CLEANUP_INTERVAL = Setting
+        .positiveTimeSetting(
+            "plugins.anomaly_detection.daily_s3_cleanup_interval",
+            TimeValue.timeValueHours(24),
             Setting.Property.NodeScope,
             Setting.Property.Dynamic
         );
@@ -249,9 +271,12 @@ public final class AnomalyDetectorSettings {
     // multi-entity caching
     public static final int MAX_ACTIVE_STATES = 1000;
 
-    // the size of the cache for small states like last cold start time for an entity.
-    // At most, we have 10 multi-entity detector and each one can be hit by 1000 different entities each
-    // minute. Since these states' life time is hour, we keep its size 10 * 1000 = 10000.
+    // the size of the cache for small states like last cold start time for an
+    // entity.
+    // At most, we have 10 multi-entity detector and each one can be hit by 1000
+    // different entities each
+    // minute. Since these states' life time is hour, we keep its size 10 * 1000 =
+    // 10000.
     public static final int MAX_SMALL_STATES = 10000;
 
     // ======================================
@@ -259,17 +284,20 @@ public final class AnomalyDetectorSettings {
     // ======================================
     /*
      * Opensearch-only setting
-     * Each detector has its dedicated cache that stores ten entities' states per node.
+     * Each detector has its dedicated cache that stores ten entities' states per
+     * node.
      * A detector's hottest entities load their states into the dedicated cache.
      * Other detectors cannot use space reserved by a detector's dedicated cache.
      * DEDICATED_CACHE_SIZE is a setting to make dedicated cache's size flexible.
      * When that setting is changed, if the size decreases, we will release memory
-     * if required (e.g., when a user also decreased AnomalyDetectorSettings.AD_MODEL_MAX_SIZE_PERCENTAGE,
+     * if required (e.g., when a user also decreased
+     * AnomalyDetectorSettings.AD_MODEL_MAX_SIZE_PERCENTAGE,
      * the max memory percentage that AD can use);
      * if the size increases, we may reject the setting change if we cannot fulfill
      * that request (e.g., when it will uses more memory than allowed for AD).
      *
-     * With compact rcf, rcf with 50 trees, 1 base dimension, shingle size 8 is of 400KB.
+     * With compact rcf, rcf with 50 trees, 1 base dimension, shingle size 8 is of
+     * 400KB.
      * The recommended max heap size is 32 GB. Even if users use all of the heap
      * for AD, the max number of entity model cannot surpass
      * 3.2 GB/500KB = 3.2 * 10^10 / 4*10^5 = 8 * 10 ^4
@@ -283,10 +311,13 @@ public final class AnomalyDetectorSettings {
     // take up 4 MB.
     public static final int MAX_INACTIVE_ENTITIES = 1_000_000;
 
-    // save partial zero-anomaly grade results after indexing pressure reaching the limit
+    // save partial zero-anomaly grade results after indexing pressure reaching the
+    // limit
     // Opendistro version has similar setting. I lowered the value to make room
-    // for INDEX_PRESSURE_HARD_LIMIT. I don't find a floatSetting that has both default
-    // and fallback values. I want users to use the new default value 0.6 instead of 0.8.
+    // for INDEX_PRESSURE_HARD_LIMIT. I don't find a floatSetting that has both
+    // default
+    // and fallback values. I want users to use the new default value 0.6 instead of
+    // 0.8.
     // So do not plan to use the value of legacy setting as fallback.
     public static final Setting<Float> AD_INDEX_PRESSURE_SOFT_LIMIT = Setting
         .floatSetting(
@@ -479,7 +510,8 @@ public final class AnomalyDetectorSettings {
             Setting.Property.Dynamic
         );
 
-    // expected execution time per checkpoint maintain request. This setting controls
+    // expected execution time per checkpoint maintain request. This setting
+    // controls
     // the speed of checkpoint maintenance execution. The larger, the faster, and
     // the more performance impact to customers' workload.
     public static final Setting<Integer> AD_EXPECTED_CHECKPOINT_MAINTAIN_TIME_IN_MILLISECS = Setting
@@ -532,7 +564,7 @@ public final class AnomalyDetectorSettings {
         );
 
     /**
-     * Max concurrent result writes per node.  Since checkpoint is relatively large
+     * Max concurrent result writes per node. Since checkpoint is relatively large
      * (250KB), we have 2 concurrent threads processing the queue.
      */
     public static final Setting<Integer> AD_RESULT_WRITE_QUEUE_CONCURRENCY = Setting
@@ -546,7 +578,7 @@ public final class AnomalyDetectorSettings {
         );
 
     /**
-     * Assume each checkpoint takes roughly 200KB.  25 requests are of 5 MB.
+     * Assume each checkpoint takes roughly 200KB. 25 requests are of 5 MB.
      */
     public static final Setting<Integer> AD_CHECKPOINT_READ_QUEUE_BATCH_SIZE = Setting
         .intSetting(
@@ -561,7 +593,7 @@ public final class AnomalyDetectorSettings {
     /**
      * ES recommends bulk size to be 5~15 MB.
      * ref: https://tinyurl.com/3zdbmbwy
-     * Assume each checkpoint takes roughly 200KB.  25 requests are of 5 MB.
+     * Assume each checkpoint takes roughly 200KB. 25 requests are of 5 MB.
      */
     public static final Setting<Integer> AD_CHECKPOINT_WRITE_QUEUE_BATCH_SIZE = Setting
         .intSetting(
@@ -576,12 +608,14 @@ public final class AnomalyDetectorSettings {
     /**
      * ES recommends bulk size to be 5~15 MB.
      * ref: https://tinyurl.com/3zdbmbwy
-     * Assume each result takes roughly 1KB.  5000 requests are of 5 MB.
+     * Assume each result takes roughly 1KB. 10000 requests are of 10 MB.
+     * 10 MB is a good balance as multitenant would split the bulk request into
+     * smaller ones (read BatchWrorker.execute).
      */
     public static final Setting<Integer> AD_RESULT_WRITE_QUEUE_BATCH_SIZE = Setting
         .intSetting(
             "plugins.anomaly_detection.result_write_queue_batch_size",
-            5000,
+            10000,
             1,
             15000,
             Setting.Property.NodeScope,
@@ -595,7 +629,8 @@ public final class AnomalyDetectorSettings {
     public static final Setting<Integer> AD_PAGE_SIZE = Setting
         .intSetting("plugins.anomaly_detection.page_size", 1_000, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
 
-    // Increase the value will adding pressure to indexing anomaly results and our feature query
+    // Increase the value will adding pressure to indexing anomaly results and our
+    // feature query
     // OpenSearch-only setting as previous the legacy default is too low (1000)
     public static final Setting<Integer> AD_MAX_ENTITIES_PER_QUERY = Setting
         .intSetting(
@@ -612,7 +647,8 @@ public final class AnomalyDetectorSettings {
     // ======================================
     public static final int MIN_PREVIEW_SIZE = 400; // ok to lower
 
-    public static final double PREVIEW_SAMPLE_RATE = 0.25; // ok to adjust, higher for more data, lower for lower latency
+    public static final double PREVIEW_SAMPLE_RATE = 0.25; // ok to adjust, higher for more data, lower for lower
+                                                           // latency
 
     public static final int MAX_PREVIEW_SAMPLES = 300; // ok to adjust, higher for more data, lower for lower latency
 
@@ -621,7 +657,8 @@ public final class AnomalyDetectorSettings {
     // Maximum number of entities retrieved for Preview API
     // Not using legacy value 30 as default.
     // Setting default value to 30 of 2-categorical field detector causes heavy GC
-    // (half of the time is GC on my 1GB heap machine). This is because we run concurrent
+    // (half of the time is GC on my 1GB heap machine). This is because we run
+    // concurrent
     // feature aggregations/training/prediction.
     // Default value 5 won't cause heavy GC on an 1-GB heap JVM.
     // Since every entity is likely to give some anomalies, 5 entities are enough.
@@ -667,8 +704,124 @@ public final class AnomalyDetectorSettings {
         );
 
     public static final double CONFIG_BUCKET_MINIMUM_SUCCESS_RATE = 0.25;
-    // This value is set to decrease the number of times we decrease the interval when recommending a new one
-    // The reason we need a max is because user could give an arbitrarly large interval where we don't know even
+    // This value is set to decrease the number of times we decrease the interval
+    // when recommending a new one
+    // The reason we need a max is because user could give an arbitrarly large
+    // interval where we don't know even
     // with multiplying the interval down how many intervals will be tried.
     public static final int MAX_TIMES_DECREASING_INTERVAL = 10;
+
+    // ======================================
+    // EventBridge setting
+    // ======================================
+
+    public static final Setting<String> AD_SQS_QUEUE_ARN = Setting
+        .simpleString("plugins.anomaly_detection.sqs_queue_arn", Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<String> AD_SCHEDULER_GROUP = Setting
+        .simpleString("plugins.anomaly_detection.scheduler_group", Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<String> AD_SCHEDULER_ROLE_ARN = Setting
+        .simpleString("plugins.anomaly_detection.scheduler_role_arn", Setting.Property.NodeScope, Setting.Property.Final);
+
+    // ======================================
+    // SQS Consumer settings
+    // ======================================
+    /** SQS queue URL for job processing */
+    public static final Setting<String> SQS_QUEUE_URL = Setting
+        .simpleString("plugins.anomaly_detection.sqs.queue_url", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** SQS polling interval in seconds */
+    public static final Setting<TimeValue> SQS_POLLING_INTERVAL = Setting
+        .positiveTimeSetting(
+            "plugins.anomaly_detection.sqs.polling_interval",
+            TimeValue.timeValueSeconds(5),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    /** Maximum number of messages to fetch per SQS poll */
+    public static final Setting<Integer> SQS_MAX_MESSAGES = Setting
+        .intSetting("plugins.anomaly_detection.sqs.max_messages", 10, 1, 10, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
+    /** SQS message visibility timeout in seconds */
+    public static final Setting<Integer> SQS_VISIBILITY_TIMEOUT = Setting
+        .intSetting("plugins.anomaly_detection.sqs.visibility_timeout", 300, 0, 3600, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
+    /** SQS wait time for long polling in seconds */
+    public static final Setting<Integer> SQS_WAIT_TIME = Setting
+        .intSetting("plugins.anomaly_detection.sqs.wait_time", 20, 0, 20, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
+    /** Maximum concurrent SQS message processors */
+    public static final Setting<Integer> SQS_MAX_CONCURRENT_PROCESSORS = Setting
+        .intSetting(
+            "plugins.anomaly_detection.sqs.max_concurrent_processors",
+            5,
+            1,
+            50,
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    /** Job processing timeout in seconds */
+    public static final Setting<TimeValue> SQS_JOB_TIMEOUT = Setting
+        .positiveTimeSetting(
+            "plugins.anomaly_detection.sqs.job_timeout",
+            TimeValue.timeValueMinutes(5),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    // Role for SQS consumer
+    public static final String SQS_CONSUMER_ROLE = "sqs_consumer";
+
+    // ======================================
+    // S3 Checkpoint settings
+    // ======================================
+    public static final Setting<String> AD_S3_CHECKPOINT_BUCKET = Setting
+        .simpleString("plugins.anomaly_detection.s3_checkpoint_bucket", Setting.Property.NodeScope, Setting.Property.Final);
+
+    // ======================================
+    // Multi-tenancy setting
+    // ======================================
+    public static final Setting<Boolean> AD_MULTI_TENANCY_ENABLED = Setting
+        .boolSetting("plugins.anomaly_detection.multi_tenancy.enabled", false, Setting.Property.NodeScope, Setting.Property.Final);
+
+    // ======================================
+    // remote metadata setting
+    // ======================================
+    /** This setting sets the remote metadata endpoint */
+    public static final Setting<String> REMOTE_METADATA_ENDPOINT = Setting
+        .simpleString("plugins.anomaly_detection." + REMOTE_METADATA_ENDPOINT_KEY, Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** This setting sets the remote metadata service name */
+    public static final Setting<String> REMOTE_METADATA_SERVICE_NAME = Setting
+        .simpleString("plugins.anomaly_detection." + REMOTE_METADATA_SERVICE_NAME_KEY, Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** This setting overrides the config document store factory class. */
+    public static final Setting<String> CONFIG_DOCUMENT_STORE_FACTORY_CLASS = new Setting<>(
+        "plugins.anomaly_detection.config_document_store_factory_class",
+        "",
+        Function.identity(),
+        Setting.Property.NodeScope,
+        Setting.Property.Final
+    );
+
+    /** This setting overrides the AD checkpoint store factory class. */
+    public static final Setting<String> CHECKPOINT_STORE_FACTORY_CLASS = new Setting<>(
+        "plugins.anomaly_detection.checkpoint_store_factory_class",
+        "",
+        Function.identity(),
+        Setting.Property.NodeScope,
+        Setting.Property.Final
+    );
+
+    /** This setting overrides the data source endpoint resolver factory class. */
+    public static final Setting<String> DATA_SOURCE_ENDPOINT_RESOLVER_FACTORY_CLASS = new Setting<>(
+        "plugins.anomaly_detection.data_source_endpoint_resolver_factory_class",
+        "",
+        Function.identity(),
+        Setting.Property.NodeScope,
+        Setting.Property.Final
+    );
 }

@@ -32,6 +32,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
     protected T model;
     protected String modelId;
     protected String configId;
+    protected String tenantId;
     protected String modelType;
     // time when the ML model was used last time
     protected Instant lastUsedTime;
@@ -47,6 +48,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
      * @param model ML model
      * @param modelId Id of model partition
      * @param configId Id of analysis this model partition is used for
+     * @param tenantId Id of tenant this model partition belongs to
      * @param modelType type of model
      * @param clock UTC clock
      * @param priority Priority of the model state.  Used in multi-entity detectors' cache.
@@ -57,6 +59,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
         T model,
         String modelId,
         String configId,
+        String tenantId,
         String modelType,
         Clock clock,
         float priority,
@@ -66,6 +69,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
         this.model = model;
         this.modelId = modelId;
         this.configId = configId;
+        this.tenantId = tenantId;
         this.modelType = modelType;
         this.lastUsedTime = clock.instant();
         // this is inaccurate until we find the last checkpoint time from disk
@@ -82,11 +86,12 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
      * @param model ML model
      * @param modelId Id of model partition
      * @param configId Id of analysis this model partition is used for
+     * @param tenantId Id of tenant this model partition belongs to
      * @param modelType type of model
      * @param clock UTC clock
      */
-    public ModelState(T model, String modelId, String configId, String modelType, Clock clock) {
-        this(model, modelId, configId, modelType, clock, 0, Optional.empty(), new ArrayDeque<>());
+    public ModelState(T model, String modelId, String configId, String tenantId, String modelType, Clock clock) {
+        this(model, modelId, configId, tenantId, modelType, clock, 0, Optional.empty(), new ArrayDeque<>());
     }
 
     /**
@@ -162,6 +167,15 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
     }
 
     /**
+     * Gets the Tenant ID of the model
+     *
+     * @return the tenant id associated with the model
+     */
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    /**
      * In old checkpoint mapping, we don't have entity. It's fine we are missing
      * entity as it is mostly used for debugging.
      * @return entity
@@ -225,6 +239,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
             {
                 put(CommonName.MODEL_ID_FIELD, modelId);
                 put(CommonName.CONFIG_ID_KEY, configId);
+                put(CommonName.TENANT_ID_FIELD, tenantId);
                 put(MODEL_TYPE_KEY, modelType);
                 /* A stats API broadcasts requests to all nodes and renders node responses using toXContent.
                  *

@@ -5,6 +5,7 @@
 
 package org.opensearch.timeseries.model;
 
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 import static org.opensearch.timeseries.model.TaskState.NOT_ENDED_STATES;
 
 import java.io.IOException;
@@ -65,6 +66,7 @@ public abstract class TimeSeriesTask implements ToXContentObject, Writeable {
     protected String parentTaskId = null;
     protected Integer estimatedMinutesLeft = null;
     protected User user = null;
+    protected String tenantId = null;
 
     @SuppressWarnings("unchecked")
     public abstract static class Builder<T extends Builder<T>> {
@@ -89,6 +91,7 @@ public abstract class TimeSeriesTask implements ToXContentObject, Writeable {
         protected String parentTaskId;
         protected Integer estimatedMinutesLeft;
         protected User user = null;
+        protected String tenantId = null;
 
         public Builder() {}
 
@@ -194,6 +197,11 @@ public abstract class TimeSeriesTask implements ToXContentObject, Writeable {
 
         public T user(User user) {
             this.user = user;
+            return (T) this;
+        }
+
+        public T tenantId(String tenantId) {
+            this.tenantId = tenantId;
             return (T) this;
         }
     }
@@ -388,6 +396,9 @@ public abstract class TimeSeriesTask implements ToXContentObject, Writeable {
         if (user != null) {
             builder.field(TimeSeriesTask.USER_FIELD, user);
         }
+        if (getTenantId() != null) {
+            builder.field(TENANT_ID_FIELD, getTenantId());
+        }
         return builder;
     }
 
@@ -419,7 +430,8 @@ public abstract class TimeSeriesTask implements ToXContentObject, Writeable {
             && Objects.equal(getEntity(), that.getEntity())
             && Objects.equal(getParentTaskId(), that.getParentTaskId())
             && Objects.equal(getEstimatedMinutesLeft(), that.getEstimatedMinutesLeft())
-            && Objects.equal(getUser(), that.getUser());
+            && Objects.equal(getUser(), that.getUser())
+            && Objects.equal(getTenantId(), that.getTenantId());
     }
 
     @Generated
@@ -446,13 +458,18 @@ public abstract class TimeSeriesTask implements ToXContentObject, Writeable {
                 entity,
                 parentTaskId,
                 estimatedMinutesLeft,
-                user
+                user,
+                getTenantId()
             );
     }
 
     public abstract boolean isHistoricalEntityTask();
 
     public String getEntityModelId() {
-        return entity == null ? null : entity.getModelId(configId).orElse(null);
+        return entity == null ? null : entity.getModelId(getTenantId(), configId).orElse(null);
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 }

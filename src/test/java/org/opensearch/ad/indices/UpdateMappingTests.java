@@ -55,6 +55,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.client.AdminClient;
@@ -73,6 +74,7 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
     private Client client;
     private Settings settings;
     private DiscoveryNodeFilterer nodeFilter;
+    private DataAccess dataAccess;
 
     @BeforeClass
     public static void setUpBeforeClass() {
@@ -125,6 +127,13 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
         nodeFilter = mock(DiscoveryNodeFilterer.class);
         numberOfNodes = 2;
         when(nodeFilter.getNumberOfEligibleDataNodes()).thenReturn(numberOfNodes);
+        dataAccess = mock(DataAccess.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) invocation.getArgument(2);
+            listener.onResponse(null);
+            return null;
+        }).when(dataAccess).search(any(), any(), any());
+
         adIndices = new ADIndexManagement(
             client,
             clusterService,
@@ -132,7 +141,8 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
             settings,
             nodeFilter,
             TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-            NamedXContentRegistry.EMPTY
+            NamedXContentRegistry.EMPTY,
+            dataAccess
         );
 
         // simulate search config index for custom result index
@@ -145,12 +155,12 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
     }
 
     public void testNoIndexToUpdate() {
-        adIndices.update();
+        adIndices.update(null);
         verify(indicesAdminClient, never()).putMapping(any(), any());
         // for an index, we may check doesAliasExists/doesIndexExists for both mapping and setting
         // 5 indices * mapping/setting checks + 1 doesIndexExist in updateCustomResultIndexMapping = 11
         verify(clusterService, times(11)).state();
-        adIndices.update();
+        adIndices.update(null);
         // we will not trigger new check since we have checked all indices before
         verify(clusterService, times(11)).state();
     }
@@ -191,7 +201,7 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
         Metadata metadata = Metadata.builder().indices(openMapBuilder).build();
         when(clusterState.getMetadata()).thenReturn(metadata);
         when(clusterState.metadata()).thenReturn(metadata);
-        adIndices.update();
+        adIndices.update(null);
         verify(indicesAdminClient, times(1)).putMapping(any(), any());
     }
 
@@ -213,7 +223,7 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
             listener.onResponse(getSettingsResponse);
             return null;
         }).when(client).execute(any(), any(), any());
-        adIndices.update();
+        adIndices.update(null);
         verify(indicesAdminClient, never()).updateSettings(any(), any());
     }
 
@@ -246,13 +256,13 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
             listener.onResponse(new AcknowledgedResponse(true));
             return null;
         }).when(indicesAdminClient).updateSettings(createIndexRequestCaptor.capture(), any());
-        adIndices.update();
+        adIndices.update(null);
         verify(client, times(1)).execute(eq(GetSettingsAction.INSTANCE), any(), any());
         verify(indicesAdminClient, times(1)).updateSettings(any(), any());
         UpdateSettingsRequest request = createIndexRequestCaptor.getValue();
         assertEquals("1-10", request.settings().get(IndexMetadata.SETTING_AUTO_EXPAND_REPLICAS));
 
-        adIndices.update();
+        adIndices.update(null);
         // won't have to do it again since we succeeded last time
         verify(client, times(1)).execute(eq(GetSettingsAction.INSTANCE), any(), any());
         verify(indicesAdminClient, times(1)).updateSettings(any(), any());
@@ -271,7 +281,7 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
             listener.onResponse(getSettingsResponse);
             return null;
         }).when(client).execute(any(), any(), any());
-        adIndices.update();
+        adIndices.update(null);
         verify(indicesAdminClient, never()).updateSettings(any(), any());
     }
 
@@ -284,7 +294,7 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).execute(any(), any(), any());
 
-        adIndices.update();
+        adIndices.update(null);
         verify(client, times(1)).execute(eq(GetSettingsAction.INSTANCE), any(), any());
         verify(indicesAdminClient, never()).updateSettings(any(), any());
     }
@@ -299,12 +309,12 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
             return null;
         }).when(indicesAdminClient).updateSettings(any(), any());
 
-        adIndices.update();
+        adIndices.update(null);
         verify(client, times(1)).execute(eq(GetSettingsAction.INSTANCE), any(), any());
         verify(indicesAdminClient, times(1)).updateSettings(any(), any());
 
         // will have to do it again since last time we fail
-        adIndices.update();
+        adIndices.update(null);
         verify(client, times(2)).execute(eq(GetSettingsAction.INSTANCE), any(), any());
         verify(indicesAdminClient, times(2)).updateSettings(any(), any());
     }
@@ -319,10 +329,19 @@ public class UpdateMappingTests extends AbstractTimeSeriesTest {
             return null;
         }).when(indicesAdminClient).updateSettings(any(), any());
 
-        adIndices = new ADIndexManagement(client, clusterService, threadPool, settings, nodeFilter, 1, NamedXContentRegistry.EMPTY);
+        adIndices = new ADIndexManagement(
+            client,
+            clusterService,
+            threadPool,
+            settings,
+            nodeFilter,
+            1,
+            NamedXContentRegistry.EMPTY,
+            dataAccess
+        );
 
-        adIndices.update();
-        adIndices.update();
+        adIndices.update(null);
+        adIndices.update(null);
 
         // even though we updated two times, since it passed the max retry limit (1), we won't retry
         verify(client, times(1)).execute(eq(GetSettingsAction.INSTANCE), any(), any());

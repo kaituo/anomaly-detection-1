@@ -55,7 +55,8 @@ public class ValidateForecasterRequestTests extends OpenSearchSingleNodeTestCase
             1,   // max HC configs
             1,   // max features
             requestTimeout,
-            10   // max categorical fields
+            10,   // max categorical fields
+            null
         );
 
         /* --------  round‑trip serialise / deserialise  -------- */
@@ -94,7 +95,8 @@ public class ValidateForecasterRequestTests extends OpenSearchSingleNodeTestCase
             1,   // max HC configs
             1,   // max features
             requestTimeout,
-            10   // max categorical fields
+            10,   // max categorical fields
+            null
         );
 
         /* --------  round‑trip serialise / deserialise  -------- */

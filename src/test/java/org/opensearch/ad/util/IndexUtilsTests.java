@@ -11,12 +11,9 @@
 
 package org.opensearch.ad.util;
 
-import static org.mockito.Mockito.mock;
-
 import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.action.support.clustermanager.AcknowledgedResponse;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.timeseries.util.IndexUtils;
@@ -26,19 +23,16 @@ public class IndexUtilsTests extends OpenSearchIntegTestCase {
 
     private ClientUtil clientUtil;
 
-    private IndexNameExpressionResolver indexNameResolver;
-
     @Before
     public void setup() {
         Client client = client();
         clientUtil = new ClientUtil(client);
-        indexNameResolver = mock(IndexNameExpressionResolver.class);
     }
 
     @Test
     public void testGetIndexHealth_NoIndex() {
-        IndexUtils indexUtils = new IndexUtils(clusterService(), indexNameResolver);
-        String output = indexUtils.getIndexHealthStatus("test");
+        IndexUtils indexUtils = new IndexUtils(clusterService());
+        String output = indexUtils.getIndexHealthStatus(null, "test");
         assertEquals(IndexUtils.NONEXISTENT_INDEX_STATUS, output);
     }
 
@@ -47,8 +41,8 @@ public class IndexUtilsTests extends OpenSearchIntegTestCase {
         String indexName = "test-2";
         createIndex(indexName);
         flush();
-        IndexUtils indexUtils = new IndexUtils(clusterService(), indexNameResolver);
-        String status = indexUtils.getIndexHealthStatus(indexName);
+        IndexUtils indexUtils = new IndexUtils(clusterService());
+        String status = indexUtils.getIndexHealthStatus(null, indexName);
         assertTrue(status.equals("green") || status.equals("yellow"));
     }
 
@@ -60,8 +54,8 @@ public class IndexUtilsTests extends OpenSearchIntegTestCase {
         flush();
         AcknowledgedResponse response = client().admin().indices().prepareAliases().addAlias(indexName, aliasName).execute().actionGet();
         assertTrue(response.isAcknowledged());
-        IndexUtils indexUtils = new IndexUtils(clusterService(), indexNameResolver);
-        String status = indexUtils.getIndexHealthStatus(aliasName);
+        IndexUtils indexUtils = new IndexUtils(clusterService());
+        String status = indexUtils.getIndexHealthStatus(null, aliasName);
         assertTrue(status.equals("green") || status.equals("yellow"));
     }
 }

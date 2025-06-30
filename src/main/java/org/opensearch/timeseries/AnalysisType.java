@@ -8,6 +8,8 @@ package org.opensearch.timeseries;
 public enum AnalysisType {
     AD,
     FORECAST,
+    HOURLY_MAINTENANCE,
+    DAILY_S3_CHECKPOINT_CLEANUP,
     // for test
     UNKNOWN;
 

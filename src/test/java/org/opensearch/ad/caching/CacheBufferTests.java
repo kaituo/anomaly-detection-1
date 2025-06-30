@@ -125,15 +125,16 @@ public class CacheBufferTests extends AbstractCacheTest {
     }
 
     @SuppressWarnings("unchecked")
-    public void testMaintainByHourNothingToSave() {
+    public void testMaintainByIntervalNothingToSave() {
+        cacheBuffer.setCheckpointIntervalMins(6);
         // hash code 49 % 6 = 1
         String modelId1 = "1";
         // hash code 50 % 6 = 2
         String modelId2 = "2";
         // hash code 51 % 6 = 3
         String modelId3 = "3";
-        // hour 17. 17 % 6 (check point frequency) = 5
-        when(clock.instant()).thenReturn(Instant.ofEpochSecond(1658854904L));
+        // minute 11. 11 % 6 (checkpoint frequency) = 5
+        when(clock.instant()).thenReturn(Instant.ofEpochSecond(11 * 60L));
         cacheBuffer.put(modelId1, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
         cacheBuffer.put(modelId2, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
         cacheBuffer.put(modelId3, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
@@ -142,22 +143,19 @@ public class CacheBufferTests extends AbstractCacheTest {
         cacheBuffer.maintenance();
         verify(checkpointMaintainQueue, times(1)).putAll(savedStates.capture());
         assertTrue(savedStates.getValue().isEmpty());
-
-        // hour 13. 13 % 6 (check point frequency) = 1
-        when(clock.instant()).thenReturn(Instant.ofEpochSecond(1658928080L));
-
     }
 
     @SuppressWarnings("unchecked")
-    public void testMaintainByHourSaveOne() {
+    public void testMaintainByIntervalSaveOne() {
+        cacheBuffer.setCheckpointIntervalMins(6);
         // hash code 49 % 6 = 1
         String modelId1 = "1";
         // hash code 50 % 6 = 2
         String modelId2 = "2";
         // hash code 51 % 6 = 3
         String modelId3 = "3";
-        // hour 13. 13 % 6 (check point frequency) = 1
-        when(clock.instant()).thenReturn(Instant.ofEpochSecond(1658928080L));
+        // minute 13. 13 % 6 (checkpoint frequency) = 1
+        when(clock.instant()).thenReturn(Instant.ofEpochSecond(13 * 60L));
         cacheBuffer.put(modelId1, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
         cacheBuffer.put(modelId2, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));
         cacheBuffer.put(modelId3, MLUtil.randomModelState(new RandomModelStateConfig.Builder().priority(initialPriority).build()));

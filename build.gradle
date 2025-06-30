@@ -10,6 +10,7 @@
  */
 
 
+import groovy.json.JsonSlurper
 import org.opensearch.gradle.testclusters.OpenSearchCluster
 
 import javax.net.ssl.HostnameVerifier
@@ -37,7 +38,7 @@ buildscript {
     ext {
         opensearch_group = "org.opensearch"
         isSnapshot = "true" == System.getProperty("build.snapshot", "true")
-        opensearch_version = System.getProperty("opensearch.version", "3.4.0-SNAPSHOT")
+        opensearch_version = System.getProperty("opensearch.version", "3.3.0-SNAPSHOT")
         buildVersionQualifier = System.getProperty("build.version_qualifier", "")
         // 3.0.0-SNAPSHOT -> 3.0.0.0-SNAPSHOT
         version_tokens = opensearch_version.tokenize('-')
@@ -49,8 +50,12 @@ buildscript {
         }
         if (isSnapshot) {
             opensearch_build += "-SNAPSHOT"
+        } else {
+            opensearch_build = opensearch_build.replace("-SNAPSHOT","")
         }
+
         opensearch_no_snapshot = opensearch_version.replace("-SNAPSHOT","")
+        opensearch_distribution_version = isSnapshot ? opensearch_version : opensearch_no_snapshot
         js_resource_folder = "src/test/resources/job-scheduler"
         common_utils_version = System.getProperty("common_utils.version", opensearch_build)
         job_scheduler_version = System.getProperty("job_scheduler.version", opensearch_build)
@@ -65,6 +70,7 @@ buildscript {
         bwcJobSchedulerPath = bwcFilePath + "job-scheduler/"
         bwcAnomalyDetectionPath = bwcFilePath + "anomaly-detection/"
         jacksonVersion = "2.18.2"
+        awsSdkVersion = "2.32.29"
         // gradle build won't print logs during test by default unless there is a failure.
         // It is useful to record intermediately information like prediction precision and recall.
         // This option turn on log printing during tests.
@@ -89,6 +95,29 @@ plugins {
     id 'java-library'
     id 'org.gradle.test-retry' version '1.6.0'
     id "de.undercouch.download" version "5.6.0"
+    // important to use latest version 1.17
+    // lower versions of io.spring.dependency-management plugin is known to use
+    // the deprecated Gradle API LenientConfiguration.getArtifacts(Spec).
+    // With Gradle 8.10.2 this method logs a deprecation warning and fails the build.
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+// opensearch.build is needed to use the version catalog from OpenSearch’s gradle/libs.versions.toml
+apply plugin: 'opensearch.build'
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'opensearch.opensearchplugin'
+apply plugin: 'opensearch.testclusters'
+apply plugin: 'base'
+apply plugin: 'jacoco'
+apply plugin: 'eclipse'
+apply plugin: 'opensearch.pluginzip'
+apply plugin: 'opensearch.java-agent'
+
+dependencyManagement {
+    imports {
+        mavenBom("software.amazon.awssdk:bom:${awsSdkVersion}")
+    }
 }
 
 tasks.withType(JavaCompile) {
@@ -109,6 +138,7 @@ tasks.withType(Test) {
 }
 tasks.withType(Javadoc) {
     options.encoding = 'UTF-8'
+    options.addStringOption('Xdoclint:all,-missing', '-quiet')
 }
 tasks.withType(AbstractArchiveTask).configureEach {
     preserveFileTimestamps = false
@@ -163,6 +193,7 @@ dependencies {
 
 
     implementation "org.jacoco:org.jacoco.agent:0.8.13"
+    testImplementation "org.jacoco:org.jacoco.core:0.8.13"
     implementation ("org.jacoco:org.jacoco.ant:0.8.13") {
         exclude group: 'org.ow2.asm', module: 'asm-commons'
         exclude group: 'org.ow2.asm', module: 'asm'
@@ -192,17 +223,59 @@ dependencies {
     testImplementation 'org.reflections:reflections:0.10.2'
 
     testImplementation "org.opensearch.test:framework:${opensearch_version}"
-}
 
-apply plugin: 'java'
-apply plugin: 'idea'
-apply plugin: 'opensearch.opensearchplugin'
-apply plugin: 'opensearch.testclusters'
-apply plugin: 'base'
-apply plugin: 'jacoco'
-apply plugin: 'eclipse'
-apply plugin: 'opensearch.pluginzip'
-apply plugin: 'opensearch.java-agent'
+    // Use the AWS SDK BOM so individual modules don't need version numbers
+    implementation 'software.amazon.awssdk:servicediscovery'
+    implementation 'software.amazon.awssdk:dynamodb'
+    implementation 'software.amazon.awssdk:eventbridge'
+    implementation 'software.amazon.awssdk:scheduler'
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:regions'
+    implementation 'software.amazon.awssdk:aws-core'
+    implementation 'software.amazon.awssdk:sdk-core'
+    implementation 'software.amazon.awssdk:url-connection-client'
+    implementation 'software.amazon.awssdk:auth'
+    implementation 'software.amazon.awssdk:http-auth-spi'
+    implementation 'software.amazon.awssdk:http-auth-aws'
+    implementation 'software.amazon.awssdk:http-auth'
+    implementation 'software.amazon.awssdk:utils'
+    implementation 'software.amazon.awssdk:http-client-spi'
+    implementation 'software.amazon.awssdk:identity-spi'
+    implementation 'software.amazon.awssdk:aws-json-protocol'
+    implementation 'software.amazon.awssdk:aws-query-protocol'
+    implementation 'software.amazon.awssdk:aws-xml-protocol'
+    implementation 'software.amazon.awssdk:retries-spi'
+    implementation 'software.amazon.awssdk:retries'
+    implementation 'software.amazon.awssdk:profiles'
+    implementation 'software.amazon.awssdk:endpoints-spi'
+    implementation 'software.amazon.awssdk:json-utils'
+    implementation 'software.amazon.awssdk:third-party-jackson-core'
+    implementation 'software.amazon.awssdk:netty-nio-client'
+    implementation 'software.amazon.awssdk:metrics-spi'
+    implementation 'software.amazon.awssdk:protocol-core'
+    implementation 'software.amazon.awssdk:checksums'
+    implementation 'software.amazon.awssdk:checksums-spi'
+    implementation 'software.amazon.awssdk:s3'
+    implementation "io.netty:netty-transport:${versions.netty}"
+    implementation "io.netty:netty-buffer:${versions.netty}"
+    implementation "io.netty:netty-common:${versions.netty}"
+    implementation "io.netty:netty-resolver:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-classes-macos:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-native-macos:${versions.netty}"
+    implementation "io.netty:netty-handler:${versions.netty}"
+    implementation "io.netty:netty-codec-http2:${versions.netty}"
+    implementation "io.netty:netty-codec-http:${versions.netty}"
+    implementation "io.netty:netty-codec:${versions.netty}"
+    implementation "io.netty:netty-transport-native-unix-common:${versions.netty}"
+    // ddb zero-etl opensearch client
+    api ("org.opensearch:opensearch-remote-metadata-sdk:${opensearch_build}")
+    implementation ("org.opensearch:opensearch-remote-metadata-sdk-ddb-client:${opensearch_build}") {
+        // OpenSearch already provides BouncyCastle on the host/test classpath; keeping the SDK's
+        // transitive copy causes jar hell during OpenSearchTestCase bootstrap.
+        exclude group: 'org.bouncycastle', module: 'bcprov-jdk18on'
+    }
+}
 
 ext {
     isSnapshot = "true" == System.getProperty("build.snapshot", "true")
@@ -260,6 +333,12 @@ configurations.all {
         force "commons-logging:commons-logging:${versions.commonslogging}"
         force "org.apache.httpcomponents.core5:httpcore5:${versions.httpcore5}"
         force "org.apache.httpcomponents.client5:httpclient5:${versions.httpclient5}"
+        // pins the conflicting transitive dependencies introduced by the remote metadata SDK so we
+        // stay on a single AWS/Jackson/Dafny version set.
+        force "org.apache.httpcomponents:httpcore:4.4.16"
+        force "commons-codec:commons-codec:1.18.0"
+        force "jakarta.json:jakarta.json-api:2.1.3"
+        force "software.amazon.awssdk:bom:${awsSdkVersion}"
 
         force "org.mockito:mockito-core:5.14.2"
         force "org.objenesis:objenesis:3.4"
@@ -267,9 +346,14 @@ configurations.all {
         force "net.bytebuddy:byte-buddy-agent:1.15.10"
         force "com.google.code.gson:gson:2.11.0"
         force "junit:junit:4.13.2"
+        // resolves the dependency clash introduced by opensearch-remote-metadata-sdk
+        // (which pulled in SLF4J 2.0.17 while other components still referenced 1.7.36).
+        force "org.slf4j:slf4j-api:2.0.17"
 
         force "com.google.guava:guava:33.4.5-jre" // CVE for 31.1
         force("com.fasterxml.jackson.core:jackson-core:${jacksonVersion}")
+        force "com.fasterxml.jackson.dataformat:jackson-dataformat-cbor:${jacksonVersion}"
+        force "org.dafny:DafnyRuntime:4.9.0"
         force "org.eclipse.platform:org.eclipse.core.runtime:3.29.0" // CVE for < 3.29.0
         force "org.ow2.asm:asm:9.7.1"
     }
@@ -316,6 +400,7 @@ tasks.named('forbiddenApisMain').configure {
     // Only enable limited check because AD code has too many violations.
     replaceSignatureFiles 'jdk-signatures'
     signaturesFiles += files('src/forbidden/ad-signatures.txt')
+    suppressAnnotations.add('org.opensearch.timeseries.annotation.SuppressForbidden')
 }
 
 //Adds custom file that only has some of the checks for testApis checks since too many violations
@@ -422,6 +507,10 @@ integTest {
         }
     }
 
+    filter {
+        excludeTestsMatching "org.opensearch.ad.rest.MultiTenant*IT"
+    }
+
     // The 'doFirst' delays till execution time.
     doFirst {
         // Tell the test JVM if the cluster JVM is running under a debugger so that tests can
@@ -477,15 +566,23 @@ def securityEnabled = System.getProperty("security", "false") == "true" || Syste
 
 testClusters.integTest {
     testDistribution = "ARCHIVE"
+    version = opensearch_distribution_version
     // Cluster shrink exception thrown if we try to set numberOfNodes to 1, so only apply if > 1
     if (_numNodes > 1) numberOfNodes = _numNodes
     configureClusterPlugins(delegate, jobSchedulerFile, securityPluginFile, securityEnabled)
     nodes.each { it.jvmArgs("-Xms1g", "-Xmx1g") }
+
+    // Tell Gradle to forward credentials to the forked OpenSearch node JVM:
+    // this allows us to set the env-vars using export before gradle is run
+    environment 'AWS_ACCESS_KEY_ID', System.getenv().getOrDefault('AWS_ACCESS_KEY_ID', 'integration_test_access_key')
+    environment 'AWS_SECRET_ACCESS_KEY', System.getenv().getOrDefault('AWS_SECRET_ACCESS_KEY', 'integration_test_secret_access_key')
+    environment 'AWS_SESSION_TOKEN', System.getenv().getOrDefault('AWS_SESSION_TOKEN', 'integration_test_session_token')
 }
 
 testClusters {
     leaderCluster {
         testDistribution = "ARCHIVE"
+        version = opensearch_distribution_version
         setting 'path.repo', file("${buildDir}/leaderCluster/repo").absolutePath
         setting 'discovery.type', 'single-node'
         // Add custom attribute to identify this cluster
@@ -495,11 +592,394 @@ testClusters {
 
     followCluster {
         testDistribution = "ARCHIVE"
+        version = opensearch_distribution_version
         setting 'path.repo', file("${buildDir}/followCluster/repo").absolutePath
         setting 'discovery.type', 'single-node'
         // Add custom attribute to identify this cluster
         setting 'node.attr.cluster_role', 'follower'
         configureClusterPlugins(delegate, jobSchedulerFile, securityPluginFile, securityEnabled)
+    }
+}
+
+ext.multiTenantAwsProfileSettingsCache = null
+ext.multiTenantAwsCredentialsCache = null
+
+def hasNonBlankValue(String value) {
+    return value != null && !value.isBlank()
+}
+
+def isMultiTenantAwsTaskRequested() {
+    def requestedTaskNames = gradle.startParameter.taskNames
+    if (requestedTaskNames.isEmpty()) {
+        return false
+    }
+    return requestedTaskNames.any { taskName ->
+        taskName == 'dualNodeMultiTenantIntegTest' || taskName.endsWith(':dualNodeMultiTenantIntegTest')
+    }
+}
+
+def hasMultiTenantAwsCredentialsConfigured() {
+    def accessKeyId = System.getenv('AWS_ACCESS_KEY_ID')
+    def secretAccessKey = System.getenv('AWS_SECRET_ACCESS_KEY')
+    if (hasNonBlankValue(accessKeyId) && hasNonBlankValue(secretAccessKey)) {
+        return true
+    }
+
+    def credentialProcess = readDefaultAwsProfileSettings()['credential_process']
+    return hasNonBlankValue(credentialProcess)
+}
+
+def isMultiTenantAwsTaskConfigured() {
+    return [
+        resolveOpenSearchTestSetting(
+            'plugins.anomaly_detection.remote_metadata_endpoint',
+            'tests.multiTenant.remoteMetadataEndpoint',
+            'MULTI_TENANT_REMOTE_METADATA_ENDPOINT'
+        ),
+        resolveOpenSearchTestSetting(
+            'plugins.anomaly_detection.sqs_queue_arn',
+            'tests.multiTenant.adSqsQueueArn',
+            'MULTI_TENANT_AD_SQS_QUEUE_ARN'
+        ),
+        resolveOpenSearchTestSetting(
+            'plugins.anomaly_detection.sqs.queue_url',
+            'tests.multiTenant.adSqsQueueUrl',
+            'MULTI_TENANT_AD_SQS_QUEUE_URL'
+        ),
+        resolveOpenSearchTestSetting(
+            'plugins.anomaly_detection.scheduler_role_arn',
+            'tests.multiTenant.adSchedulerRoleArn',
+            'MULTI_TENANT_AD_SCHEDULER_ROLE_ARN'
+        ),
+        resolveOpenSearchTestSetting(
+            'plugins.anomaly_detection.s3_checkpoint_bucket',
+            'tests.multiTenant.adS3CheckpointBucket',
+            'MULTI_TENANT_AD_S3_CHECKPOINT_BUCKET'
+        )
+    ].every { value -> hasNonBlankValue(value) } && hasMultiTenantAwsCredentialsConfigured()
+}
+
+def shouldRunMultiTenantAwsTask() {
+    return isMultiTenantAwsTaskRequested() || isMultiTenantAwsTaskConfigured()
+}
+
+def resolveMultiTenantSetting(String propertyName, String envName, String defaultValue = null) {
+    if (propertyName != null && !propertyName.isBlank()) {
+        def projectValue = project.findProperty(propertyName)?.toString()
+        if (projectValue != null && !projectValue.isBlank()) {
+            return projectValue
+        }
+
+        def systemValue = System.getProperty(propertyName)
+        if (systemValue != null && !systemValue.isBlank()) {
+            return systemValue
+        }
+    }
+
+    if (envName != null && !envName.isBlank()) {
+        def envValue = System.getenv(envName)
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue
+        }
+    }
+
+    return defaultValue
+}
+
+def resolveOpenSearchTestSetting(String settingKey, String propertyName = null, String envName = null, String defaultValue = null) {
+    def testPropertyValue = System.getProperty("tests.opensearch.${settingKey}")
+    if (testPropertyValue != null && !testPropertyValue.isBlank()) {
+        return testPropertyValue
+    }
+
+    return resolveMultiTenantSetting(propertyName, envName, defaultValue)
+}
+
+def requireMultiTenantSetting(String propertyName, String envName, String description, String defaultValue = null) {
+    def value = resolveMultiTenantSetting(propertyName, envName, defaultValue)
+    if ((value == null || value.isBlank()) && isMultiTenantAwsTaskRequested()) {
+        throw new GradleException(
+            "Missing ${description} for AWS-backed multi-tenant integration tests. "
+                + "Set -P${propertyName}=... or ${envName}."
+        )
+    }
+    return value ?: ""
+}
+
+def requireOpenSearchTestSetting(String settingKey, String propertyName = null, String envName = null, String description, String defaultValue = null) {
+    def value = resolveOpenSearchTestSetting(settingKey, propertyName, envName, defaultValue)
+    if ((value == null || value.isBlank()) && isMultiTenantAwsTaskRequested()) {
+        throw new GradleException(
+            "Missing ${description} for AWS-backed multi-tenant integration tests. "
+                + "Set -Dtests.opensearch.${settingKey}=..., -P${propertyName}=..., or ${envName}."
+        )
+    }
+    return value ?: ""
+}
+
+def readDefaultAwsProfileSettings() {
+    if (project.ext.multiTenantAwsProfileSettingsCache != null) {
+        return project.ext.multiTenantAwsProfileSettingsCache
+    }
+
+    File configFile = file(System.getenv('AWS_CONFIG_FILE') ?: "${System.getProperty('user.home')}/.aws/config")
+    if (!configFile.exists()) {
+        project.ext.multiTenantAwsProfileSettingsCache = [:]
+        return project.ext.multiTenantAwsProfileSettingsCache
+    }
+
+    def profileSettings = [:]
+    boolean inDefaultProfile = false
+    configFile.eachLine(StandardCharsets.UTF_8.name()) { rawLine ->
+        String line = rawLine.trim()
+        if (line.isEmpty() || line.startsWith('#') || line.startsWith(';')) {
+            return
+        }
+
+        if (line.startsWith('[') && line.endsWith(']')) {
+            String section = line.substring(1, line.length() - 1).trim()
+            inDefaultProfile = section == 'default' || section == 'profile default'
+            return
+        }
+
+        if (!inDefaultProfile) {
+            return
+        }
+
+        int separatorIndex = line.indexOf('=')
+        if (separatorIndex <= 0) {
+            return
+        }
+
+        String key = line.substring(0, separatorIndex).trim()
+        String value = line.substring(separatorIndex + 1).trim()
+        profileSettings[key] = value
+    }
+
+    project.ext.multiTenantAwsProfileSettingsCache = profileSettings
+    return project.ext.multiTenantAwsProfileSettingsCache
+}
+
+def resolveMultiTenantAwsCredentials() {
+    if (project.ext.multiTenantAwsCredentialsCache != null) {
+        return project.ext.multiTenantAwsCredentialsCache
+    }
+
+    def accessKeyId = System.getenv('AWS_ACCESS_KEY_ID')
+    def secretAccessKey = System.getenv('AWS_SECRET_ACCESS_KEY')
+    def sessionToken = System.getenv('AWS_SESSION_TOKEN')
+    if (accessKeyId != null && !accessKeyId.isBlank() && secretAccessKey != null && !secretAccessKey.isBlank()) {
+        project.ext.multiTenantAwsCredentialsCache = [
+            accessKeyId    : accessKeyId,
+            secretAccessKey: secretAccessKey,
+            sessionToken   : sessionToken ?: ""
+        ]
+        return project.ext.multiTenantAwsCredentialsCache
+    }
+
+    if (!shouldRunMultiTenantAwsTask()) {
+        project.ext.multiTenantAwsCredentialsCache = [:]
+        return project.ext.multiTenantAwsCredentialsCache
+    }
+
+    def credentialProcess = readDefaultAwsProfileSettings()['credential_process']
+    if (credentialProcess == null || credentialProcess.isBlank()) {
+        throw new GradleException(
+            "Missing AWS credentials for AWS-backed multi-tenant integration tests. "
+                + "Export AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or configure credential_process in the default AWS profile."
+        )
+    }
+
+    def process = new ProcessBuilder('/bin/zsh', '-lc', credentialProcess).redirectErrorStream(true).start()
+    def output = process.inputStream.getText(StandardCharsets.UTF_8.name())
+    if (!process.waitFor(60, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        throw new GradleException("Timed out while resolving AWS credentials from the default AWS profile credential_process.")
+    }
+    if (process.exitValue() != 0) {
+        throw new GradleException(
+            "Failed to resolve AWS credentials from the default AWS profile credential_process. Output: ${output.trim()}"
+        )
+    }
+
+    def parsed = new JsonSlurper().parseText(output)
+    accessKeyId = parsed.AccessKeyId ?: parsed.accessKeyId
+    secretAccessKey = parsed.SecretAccessKey ?: parsed.secretAccessKey
+    sessionToken = parsed.SessionToken ?: parsed.sessionToken ?: ""
+    if (accessKeyId == null || accessKeyId.toString().isBlank() || secretAccessKey == null || secretAccessKey.toString().isBlank()) {
+        throw new GradleException("Default AWS profile credential_process did not return AccessKeyId/SecretAccessKey.")
+    }
+
+    project.ext.multiTenantAwsCredentialsCache = [
+        accessKeyId    : accessKeyId.toString(),
+        secretAccessKey: secretAccessKey.toString(),
+        sessionToken   : sessionToken.toString()
+    ]
+    return project.ext.multiTenantAwsCredentialsCache
+}
+
+def resolveMultiTenantAwsRegion() {
+    return resolveOpenSearchTestSetting(
+        'plugins.timeseries.region',
+        'tests.multiTenant.awsRegion',
+        'MULTI_TENANT_AWS_REGION',
+        System.getenv('AWS_REGION') ?: System.getenv('AWS_DEFAULT_REGION') ?: readDefaultAwsProfileSettings()['region'] ?: 'us-west-2'
+    )
+}
+
+def configureLocalMultiTenantCluster(
+    cluster,
+    clusterDirName,
+    httpPort,
+    transportPort,
+    nodeRoles,
+    jobSchedulerFile,
+    securityPluginFile,
+    securityEnabled,
+    extraSettings = [:]
+) {
+    String awsRegion = resolveMultiTenantAwsRegion()
+    Map<String, String> awsCredentials = resolveMultiTenantAwsCredentials()
+
+    cluster.testDistribution = "ARCHIVE"
+    cluster.version = opensearch_distribution_version
+    cluster.setting 'path.repo', file("${buildDir}/${clusterDirName}/repo").absolutePath
+    cluster.setting 'discovery.type', 'single-node'
+    cluster.singleNode().setHttpPort("${httpPort}")
+    cluster.singleNode().setTransportPort("${transportPort}")
+    cluster.setting 'plugins.timeseries.node.roles', nodeRoles
+    cluster.setting 'plugins.anomaly_detection.multi_tenancy.enabled', 'true'
+    cluster.setting(
+        'plugins.timeseries.internal_api_shared_secret',
+        resolveOpenSearchTestSetting(
+            'plugins.timeseries.internal_api_shared_secret',
+            null,
+            null,
+            'integration-test-internal-token'
+        )
+    )
+    cluster.setting 'plugins.timeseries.cluster_membership_reader_ttl', '1s'
+    cluster.setting 'plugins.timeseries.region', awsRegion
+    cluster.setting(
+        'plugins.anomaly_detection.remote_metadata_endpoint',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.remote_metadata_endpoint',
+            'tests.multiTenant.remoteMetadataEndpoint',
+            'MULTI_TENANT_REMOTE_METADATA_ENDPOINT',
+            'remote metadata endpoint'
+        )
+    )
+    cluster.setting(
+        'plugins.anomaly_detection.remote_metadata_service_name',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.remote_metadata_service_name',
+            'tests.multiTenant.remoteMetadataServiceName',
+            'MULTI_TENANT_REMOTE_METADATA_SERVICE_NAME',
+            'remote metadata service name',
+            'es'
+        )
+    )
+    cluster.setting(
+        'plugins.anomaly_detection.sqs_queue_arn',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.sqs_queue_arn',
+            'tests.multiTenant.adSqsQueueArn',
+            'MULTI_TENANT_AD_SQS_QUEUE_ARN',
+            'AD SQS queue ARN'
+        )
+    )
+    cluster.setting(
+        'plugins.anomaly_detection.sqs.queue_url',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.sqs.queue_url',
+            'tests.multiTenant.adSqsQueueUrl',
+            'MULTI_TENANT_AD_SQS_QUEUE_URL',
+            'AD SQS queue URL'
+        )
+    )
+    cluster.setting(
+        'plugins.anomaly_detection.scheduler_role_arn',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.scheduler_role_arn',
+            'tests.multiTenant.adSchedulerRoleArn',
+            'MULTI_TENANT_AD_SCHEDULER_ROLE_ARN',
+            'AD scheduler role ARN'
+        )
+    )
+    cluster.setting(
+        'plugins.anomaly_detection.s3_checkpoint_bucket',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.s3_checkpoint_bucket',
+            'tests.multiTenant.adS3CheckpointBucket',
+            'MULTI_TENANT_AD_S3_CHECKPOINT_BUCKET',
+            'AD S3 checkpoint bucket'
+        )
+    )
+    def schedulerGroup = resolveOpenSearchTestSetting(
+        'plugins.anomaly_detection.scheduler_group',
+        'tests.multiTenant.adSchedulerGroup',
+        'MULTI_TENANT_AD_SCHEDULER_GROUP'
+    )
+    if (schedulerGroup != null && !schedulerGroup.isBlank()) {
+        cluster.setting 'plugins.anomaly_detection.scheduler_group', schedulerGroup
+    }
+    def cloudMapNamespace = resolveOpenSearchTestSetting('plugins.timeseries.cloud_map_namespace')
+    if (cloudMapNamespace != null && !cloudMapNamespace.isBlank()) {
+        cluster.setting 'plugins.timeseries.cloud_map_namespace', cloudMapNamespace
+    }
+    def cloudMapService = resolveOpenSearchTestSetting('plugins.timeseries.cloud_map_service')
+    if (cloudMapService != null && !cloudMapService.isBlank()) {
+        cluster.setting 'plugins.timeseries.cloud_map_service', cloudMapService
+    }
+    def cloudMapTableName = resolveOpenSearchTestSetting('plugins.timeseries.cloud_map_table_name')
+    if (cloudMapTableName != null && !cloudMapTableName.isBlank()) {
+        cluster.setting 'plugins.timeseries.cloud_map_table_name', cloudMapTableName
+    }
+    def openSearchPort = resolveOpenSearchTestSetting('plugins.timeseries.opensearch_port')
+    if (openSearchPort != null && !openSearchPort.isBlank()) {
+        cluster.setting 'plugins.timeseries.opensearch_port', openSearchPort
+    }
+    extraSettings.each { key, value -> cluster.setting key, value }
+    configureClusterPlugins(cluster, jobSchedulerFile, securityPluginFile, securityEnabled)
+    cluster.nodes.each { it.jvmArgs("-Xms1g", "-Xmx1g") }
+
+    cluster.environment 'AWS_REGION', awsRegion
+    cluster.environment 'AWS_DEFAULT_REGION', awsRegion
+    cluster.environment 'AWS_PROFILE', 'default'
+    if (!awsCredentials.isEmpty()) {
+        cluster.environment 'AWS_ACCESS_KEY_ID', awsCredentials.accessKeyId
+        cluster.environment 'AWS_SECRET_ACCESS_KEY', awsCredentials.secretAccessKey
+        if (awsCredentials.sessionToken != null && !awsCredentials.sessionToken.isBlank()) {
+            cluster.environment 'AWS_SESSION_TOKEN', awsCredentials.sessionToken
+        }
+    }
+}
+
+testClusters {
+    multiTenantModelCluster {
+        configureLocalMultiTenantCluster(
+            delegate,
+            'multiTenantModelCluster',
+            9201,
+            9301,
+            'model',
+            jobSchedulerFile,
+            securityPluginFile,
+            securityEnabled
+        )
+    }
+
+    multiTenantCoordinatorCluster {
+        configureLocalMultiTenantCluster(
+            delegate,
+            'multiTenantCoordinatorCluster',
+            9200,
+            9300,
+            'coordinator',
+            jobSchedulerFile,
+            securityPluginFile,
+            securityEnabled
+        )
     }
 }
 
@@ -782,6 +1262,48 @@ task integTestRemote(type: RestIntegTestTask) {
             excludeTestsMatching "org.opensearch.ad.e2e.BatchADSchedulingCheckpointIT"
         }
     }
+
+    filter {
+        excludeTestsMatching "org.opensearch.ad.rest.MultiTenant*IT"
+    }
+}
+
+task dualNodeMultiTenantIntegTest(type: RestIntegTestTask) {
+    description = "Run the AWS-backed multi-tenant AD integration tests"
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    dependsOn 'bundlePlugin'
+    onlyIf { shouldRunMultiTenantAwsTask() }
+    useCluster testClusters.multiTenantCoordinatorCluster
+    useCluster testClusters.multiTenantModelCluster
+    systemProperty 'tests.security.manager', 'false'
+    systemProperty 'java.io.tmpdir', opensearch_tmp_dir.absolutePath
+    systemProperty "https", System.getProperty("https")
+    systemProperty "user", System.getProperty("user")
+    systemProperty "password", System.getProperty("password")
+    systemProperty "resource_sharing.enabled", System.getProperty("resource_sharing.enabled")
+    filter {
+        includeTestsMatching "org.opensearch.ad.rest.MultiTenant*IT"
+        includeTestsMatching "org.opensearch.ad.e2e.MultiTenant*IT"
+    }
+    nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters.multiTenantCoordinatorCluster.allHttpSocketURI.join(",")}")
+    nonInputProperties.systemProperty('tests.model.rest.cluster', "${-> testClusters.multiTenantModelCluster.allHttpSocketURI.join(",")}")
+    nonInputProperties.systemProperty('tests.clustername', "${-> testClusters.multiTenantCoordinatorCluster.getName()}")
+
+    doFirst {
+        getClusters().forEach { cluster ->
+            cluster.waitForAllConditions()
+        }
+    }
+}
+
+// wired dualNodeMultiTenantIntegTest into check so that build includes check
+def releaseRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName == "release" || taskName.endsWith(":release")
+}
+
+if (!releaseRequested) {
+    tasks.named("check").configure { dependsOn(dualNodeMultiTenantIntegTest) }
 }
 
 configurations {
@@ -811,7 +1333,7 @@ ext.resolvebwcZipFile = { pluginId ->
     testClusters {
         "${baseName}$i" {
             testDistribution = "ARCHIVE"
-            versions = [bwcVersionShort, opensearch_version]
+            versions = [bwcVersionShort, opensearch_distribution_version]
             numberOfNodes = 3
             plugin(provider(resolvebwcZipFile("opensearch-job-scheduler")))
             plugin(provider(new Callable<RegularFile>(){
@@ -1004,13 +1526,12 @@ run {
 
 evaluationDependsOnChildren()
 
+// bundlePlugin creates the zip -> release unpacks that zip and copies the files into ../build/plugins/anomaly-detection
 task release(type: Copy, group: 'build') {
-    dependsOn allprojects*.tasks.build
-    from(zipTree(project.tasks.bundlePlugin.outputs.files.getSingleFile()))
-    into "build/plugins/opensearch-anomaly-detection"
+    dependsOn assemble
+    from(zipTree(bundlePlugin.getArchiveFile()))
+    into "../build/plugins/anomaly-detection"
     includeEmptyDirs = false
-    // ES versions < 6.3 have a top-level opensearch directory inside the plugin zip which we need to remove
-    eachFile { it.path = it.path - "opensearch/" }
 }
 
 def usingRemoteCluster = System.properties.containsKey('tests.rest.cluster') || System.properties.containsKey('tests.cluster')
@@ -1022,7 +1543,7 @@ if (!usingRemoteCluster && !usingMultiNode) {
 
 List<String> jacocoExclusions = [
         // code for configuration, settings, etc is excluded from coverage
-        'org.opensearch.timeseries.TimeSeriesAnalyticsPlugin',
+        'org.opensearch.timeseries.TimeSeriesAnalyticsPlugin*',
 
         // rest layer is tested in integration testing mostly, difficult to mock all of it
         'org.opensearch.ad.rest.*',
@@ -1042,7 +1563,6 @@ List<String> jacocoExclusions = [
 
         // TODO: add test coverage (kaituo)
         'org.opensearch.forecast.*',
-        'org.opensearch.ad.transport.ADHCImputeRequest',
         'org.opensearch.timeseries.transport.BaseDeleteConfigTransportAction.1',
         'org.opensearch.timeseries.transport.BaseSuggestConfigParamTransportAction',
         'org.opensearch.timeseries.rest.AbstractSearchAction.1',
@@ -1055,12 +1575,58 @@ List<String> jacocoExclusions = [
         'org.opensearch.timeseries.ratelimit.RateLimitedRequestWorker',
         'org.opensearch.timeseries.util.TimeUtil',
         'org.opensearch.ad.transport.ADHCImputeTransportAction',
+
+        // TODO: add coverage for recent multi-tenancy / SDK / infra classes
+        'org.opensearch.ad.sqs.ADSQSService*',
+        'org.opensearch.ad.client.HttpNodeCommunicator*',
+        'org.opensearch.ad.client.ADHttpNodeCommunicator*',
+        'org.opensearch.ad.client.TransportNodeCommunicator*',
+        'org.opensearch.ad.ADDataManagement*',
+        'org.opensearch.timeseries.util.SafeSecurityInjector*',
+        'org.opensearch.timeseries.util.SDKNodeFilter*',
+        'org.opensearch.timeseries.util.SecurityUtil*',
+        'org.opensearch.timeseries.util.SdkClientProvider*',
+        'org.opensearch.timeseries.util.TransportUtil*',
+        'org.opensearch.timeseries.util.StringUtil*',
+        'org.opensearch.timeseries.util.SDKIndexOperations*',
+        'org.opensearch.timeseries.util.TenantAwareHelper*',
+        'org.opensearch.timeseries.rest.handler.store.spi.DefaultDataSourceEndpointResolver*',
+        'org.opensearch.timeseries.executor.SQSConsumerContributor*',
+        'org.opensearch.timeseries.executor.CloudMapWatcherContributor*',
+        'org.opensearch.timeseries.cluster.CloudMapWatcherTask*',
+        'org.opensearch.timeseries.cluster.ClusterMembershipReader*',
+        'org.opensearch.timeseries.cluster.SQSConsumerTask*',
+        'org.opensearch.timeseries.cluster.MultiTenantMaintenanceScheduler*',
+        'org.opensearch.timeseries.cluster.ClusterMembershipReaderTask*',
+        'org.opensearch.timeseries.cluster.CloudMapWatcher*',
+        'org.opensearch.timeseries.client.FieldMappingsView*',
+        'org.opensearch.timeseries.client.SdkDataAccess*',
+        'org.opensearch.timeseries.client.RestClientProvider*',
+        'org.opensearch.timeseries.client.SecurityHeaderInjector*',
+        'org.opensearch.timeseries.client.RemoteMetadataConfigDocumentStore*',
+        'org.opensearch.ad.cluster.ADSQSConsumerTask*',
+        'org.opensearch.timeseries.rest.handler.EventBridgeHandler*',
+        'org.opensearch.ad.transport.ADHCImputeNodesResponse*',
+        'org.opensearch.ad.transport.DeleteAnomalyDetectorMutliTenantTransportAction*',
+        'org.opensearch.timeseries.common.exception.InternalFailure*',
+        'org.opensearch.ad.ml.ADS3CheckpointDao*',
+        'org.opensearch.timeseries.sqs.SQSService*',
+        'org.opensearch.timeseries.rest.RestCronAction*',
+        'org.opensearch.timeseries.ml.S3CheckpointDao*',
+        'org.opensearch.timeseries.ml.SingleStreamModelIdMapper*',
+        'org.opensearch.timeseries.transport.BaseValidateConfigTransportAction*',
+        'org.opensearch.timeseries.cluster.diskcleanup.BaseModelCheckpointIndexRetention*',
+        'org.opensearch.timeseries.cluster.diskcleanup.S3ModelCheckpointRetention*',
+        'org.opensearch.ad.executor.ADModelContributor*',
+        'org.opensearch.ad.executor.ADCoordinatorContributor*',
+        'org.opensearch.ad.indices.ADIndexManagement*',
+        'org.opensearch.ad.indices.ADIndex*',
 ]
 
 
 jacocoTestCoverageVerification {
     dependsOn(jacocoTestReport)
-    executionData.from = [integTest.jacoco.destinationFile, test.jacoco.destinationFile]
+    executionData.from = [integTest.jacoco.destinationFile, test.jacoco.destinationFile, dualNodeMultiTenantIntegTest.jacoco.destinationFile]
     violationRules {
         rule {
             element = 'CLASS'
@@ -1082,8 +1648,10 @@ jacocoTestCoverageVerification {
     }
 }
 
-check.dependsOn jacocoTestCoverageVerification
-jacocoTestCoverageVerification.dependsOn jacocoTestReport
+if (!releaseRequested) {
+    check.dependsOn jacocoTestCoverageVerification
+    jacocoTestCoverageVerification.dependsOn jacocoTestReport
+}
 
 compileJava.options.compilerArgs << "-Xlint:-deprecation,-rawtypes,-serial,-try,-unchecked"
 
@@ -1194,5 +1762,322 @@ tasks.withType(AbstractPublishToMaven) {
     }
     onlyIf("Publishing only ZIP distributions") {
         predicate.get()
+    }
+}
+
+// ====== Inputs you can override with -P ======
+def osVersion      = opensearch_distribution_version
+def httpPort       = (findProperty('httpPort') ?: '9201').toString()
+def transportPort  = (findProperty('transportPort') ?: '9301').toString()
+
+// Always use the Linux "min" distro; choose arch by host JVM arch
+def hostArch   = System.getProperty('os.arch').toLowerCase()
+def linuxArch  = (hostArch.contains('aarch64') || hostArch.contains('arm64')) ? 'arm64' : 'x64'
+def osPlatform = "linux-${linuxArch}"  // always Linux
+
+// Extra OpenSearch node settings (-E k=v,k=v) and JVM args for the process
+def extraSettings  = (findProperty('extraSettings') ?: '').toString()
+def osJavaOpts     = (findProperty('osJavaOpts') ?: '').toString()
+
+def parseRunAtPortsSettings = { String raw ->
+    def settings = new LinkedHashMap<String, String>()
+    if (!raw) {
+        return settings
+    }
+
+    raw.split(/\s*,\s*/).findAll { it }.each { kv ->
+        def parts = kv.split(/\s*=\s*/, 2)
+        if (parts.size() != 2 || parts[0].trim().isEmpty()) {
+            throw new GradleException("Invalid setting '${kv}'. Expected key=value.")
+        }
+        settings[parts[0].trim()] = parts[1]
+    }
+    return settings
+}
+
+def collectTestOpenSearchSettings = {
+    def settings = new LinkedHashMap<String, String>()
+    System.properties
+        .findAll { entry -> entry.key.toString().startsWith('tests.opensearch.') }
+        .sort { a, b -> a.key.toString() <=> b.key.toString() }
+        .each { entry ->
+            def key = entry.key.toString().substring('tests.opensearch.'.length())
+            settings[key] = entry.value.toString()
+        }
+    return settings
+}
+
+// Where OpenSearch should take its JDK from (CRITICAL on macOS!)
+def osJavaHome = (findProperty('osJavaHome')
+        ?: System.getenv('OPENSEARCH_JAVA_HOME')
+        ?: System.getenv('JAVA_HOME')
+        ?: System.getProperty('java.home')).toString()
+if (!new File(osJavaHome).exists()) {
+    throw new GradleException("OPENSEARCH_JAVA_HOME not found. Set -PosJavaHome=<your JDK> or export JAVA_HOME/OPENSEARCH_JAVA_HOME.")
+}
+
+// Dependent plugins (install first). AD needs Job Scheduler.
+def depPluginsCsv  = (findProperty('depPlugins') ?: 'opensearch-job-scheduler').toString()
+// Optional: override plugin URLs, e.g. CI/BWC
+def depPluginUrls  = (findProperty('depPluginUrls') ?: '').toString()
+// Force reinstall deps too
+def forceReinstallDeps = (findProperty('forceReinstallDeps') ?: 'false').toString().toBoolean()
+
+// AD plugin version scheme: <osVersion>.<patch>[ -SNAPSHOT ]
+def isSnapshot = osVersion.endsWith('-SNAPSHOT')
+def baseVer    = isSnapshot ? osVersion.replace('-SNAPSHOT','') : osVersion
+def patch      = (findProperty('pluginPatch') ?: '0').toString()
+def pluginVer  = isSnapshot ? "${baseVer}.${patch}-SNAPSHOT" : "${baseVer}.${patch}"
+
+// ====== Linux-min distro URLs only ======
+def archiveExt = 'tar.gz'
+def defaultReleaseUrl  = "https://artifacts.opensearch.org/releases/core/opensearch/${osVersion}/opensearch-min-${osVersion}-${osPlatform}.${archiveExt}"
+def defaultSnapshotUrl = "https://artifacts.opensearch.org/snapshots/core/opensearch/${osVersion}/opensearch-min-${osVersion}-${osPlatform}-latest.${archiveExt}"
+
+// Allow explicit override (URL or local file)
+def osDistUrlProp  = (findProperty('osDistUrl')  ?: '').toString()
+def osDistFileProp = (findProperty('osDistFile') ?: '').toString()
+
+// ====== Layout ======
+def cacheDir  = layout.buildDirectory.dir("run/cache").get().asFile
+def tarDest   = new File(cacheDir, "opensearch-dist.${archiveExt}")
+def osRootDir = layout.buildDirectory.dir("run/os").get().asFile
+
+// --- Download Linux-min distro ---
+tasks.register('prepareOpenSearchTar') {
+    outputs.file(tarDest)
+    doLast {
+        cacheDir.mkdirs()
+        if (osDistFileProp) {
+            copy {
+                from file(osDistFileProp)
+                into cacheDir
+                rename { "opensearch-dist.${archiveExt}" }
+            }
+        } else {
+            def url = osDistUrlProp ?: (isSnapshot ? defaultSnapshotUrl : defaultReleaseUrl)
+            println "Downloading OpenSearch (Linux-min) from: ${url}"
+            ant.get(src: url, dest: tarDest, verbose: true, usetimestamp: true)
+        }
+    }
+}
+
+// --- Unpack and ensure scripts are executable ---
+tasks.register('unpackOpenSearch', Copy) {
+    dependsOn 'prepareOpenSearchTar'
+    from { tarTree(resources.gzip(tarDest)) }
+    into osRootDir
+    doLast {
+        def children = osRootDir.listFiles() ?: [] as File[]
+        println "Unpacked into: ${osRootDir}"
+        println "Contents: ${children.collect{it.name}}"
+        // Make sure scripts are executable (macOS sometimes strips exec bits)
+        def root = osRootDir.listFiles().find { it.isDirectory() && it.name.toLowerCase().startsWith("opensearch") }
+        if (root) {
+            ["bin/opensearch", "bin/opensearch-plugin"].each { rel ->
+                def f = new File(root, rel)
+                if (f.exists()) {
+                    f.setExecutable(true, true)
+                }
+            }
+        }
+    }
+}
+
+// --- Helper: locate OpenSearch home (works for min / non-min) ---
+def findOpenSearchHome = {
+    if (!osRootDir.exists()) osRootDir.mkdirs()
+    def cands = osRootDir.listFiles()?.findAll { it.isDirectory() && it.name.toLowerCase().startsWith("opensearch") } ?: []
+    if (cands.isEmpty()) {
+        throw new GradleException("No 'opensearch*' directory under ${osRootDir}. " +
+            "Expected something like 'opensearch-3.x.y'.")
+    }
+    return cands.sort { -it.lastModified() }[0]
+}
+
+// Try explicit override → Gradle resolution (uses repositories order) → Maven coords → Maven Central URL → artifacts site → (optional) CI
+
+def pluginUrlFor = { String pluginName ->
+    // 1) explicit per-plugin override: -PdepPluginUrls="name=url,name2=url2"
+    if (depPluginUrls) {
+        def map = depPluginUrls.split(/\s*,\s*/).findResults {
+            def m = it.split(/\s*=\s*/, 2)
+            (m.size() == 2) ? [(m[0]): m[1]] : null
+        }.inject([:]) { acc, m -> acc << m }
+        if (map[pluginName]) return [ map[pluginName] ]
+    }
+
+    def baseVerShort = baseVer.split('\\.')[0..1].join('.') // e.g., 3.2
+    def candidates = []
+
+    // 2) Resolve via Gradle first (respects repositories order: mavenLocal() → CI snapshots → mavenCentral() → ...)
+    try {
+        def dep = dependencies.create("org.opensearch.plugin:${pluginName}:${pluginVer}@zip")
+        def cfg = configurations.detachedConfiguration(dep)
+        cfg.transitive = false
+        def artifact = cfg.resolvedConfiguration.resolvedArtifacts.find { it.name.startsWith(pluginName) }
+        if (artifact?.file?.exists()) {
+            candidates << "file:${artifact.file.absolutePath}"
+        }
+    } catch (Exception ignored) {
+        // Fall back to other candidates below
+    }
+
+    // 3) Maven coordinates (opensearch-plugin can fetch from Maven Central)
+    candidates << "org.opensearch.plugin:${pluginName}:${pluginVer}"
+
+    // 4) Direct Maven Central URL (repo1)
+    candidates << "https://repo1.maven.org/maven2/org/opensearch/plugin/${pluginName}/${pluginVer}/${pluginName}-${pluginVer}.zip"
+
+    // 5) Official artifacts site (releases or snapshots)
+    if (isSnapshot) {
+        candidates << "https://artifacts.opensearch.org/snapshots/plugins/${pluginName}/${osVersion}/${pluginName}-${pluginVer}.zip"
+    } else {
+        candidates << "https://artifacts.opensearch.org/releases/plugins/${pluginName}/${baseVer}/${pluginName}-${pluginVer}.zip"
+    }
+
+    // 6) CI mirror
+    // e.g., https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/3.4.0/latest/linux/x64/tar/builds/opensearch/plugins/opensearch-job-scheduler-3.4.0.0.zip
+    candidates << "https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/${baseVer}/latest/linux/x64/tar/builds/opensearch/plugins/${pluginName}-${pluginVer}.zip"
+
+    return candidates
+}
+
+// --- Install dependency plugins (Job Scheduler first) ---
+tasks.register('installDepPlugins') {
+    dependsOn 'unpackOpenSearch'
+    mustRunAfter 'clean'
+    doLast {
+        def root = findOpenSearchHome()
+        def depNames = depPluginsCsv.split(/\s*,\s*/).findAll { it }
+
+        depNames.each { pluginName ->
+            if (forceReinstallDeps) {
+                exec {
+                    workingDir root
+                    ignoreExitValue = true
+                    environment "OPENSEARCH_JAVA_HOME", osJavaHome
+                    commandLine "./bin/opensearch-plugin", "remove", pluginName
+                }
+            } else if (new File(root, "plugins/${pluginName}").exists()) {
+                println "Dependency plugin already present: ${pluginName} — skipping."
+                return
+            }
+
+            def installed = false
+            def tried = []
+            pluginUrlFor(pluginName).each { ref ->
+                if (installed) return
+                tried << ref
+                def res = exec {
+                    workingDir root
+                    ignoreExitValue = true
+                    environment "OPENSEARCH_JAVA_HOME", osJavaHome
+                    commandLine "./bin/opensearch-plugin", "install", "--batch", ref
+                }
+                if (res.exitValue == 0) {
+                    println "Installed dependency plugin: ${pluginName} via ${ref}"
+                    installed = true
+                } else {
+                    println "Install attempt failed for ${pluginName} via ${ref} (trying next)"
+                }
+            }
+            if (!installed) throw new GradleException("Failed to install dependency plugin ${pluginName}. Tried: ${tried}")
+        }
+    }
+}
+
+// --- Always reinstall AD (remove if exists, then install fresh ZIP) ---
+tasks.register('installPlugin') {
+    dependsOn 'bundlePlugin', 'installDepPlugins'
+    mustRunAfter 'clean'
+    doLast {
+        def root = findOpenSearchHome()
+        // remove if present
+        exec {
+            workingDir root
+            ignoreExitValue = true
+            environment "OPENSEARCH_JAVA_HOME", osJavaHome
+            commandLine "./bin/opensearch-plugin", "remove", "opensearch-anomaly-detection"
+        }
+        File pluginZip = tasks.named('bundlePlugin').get().archiveFile.get().asFile
+        if (!pluginZip.exists()) throw new GradleException("Plugin zip not found: ${pluginZip}")
+        exec {
+            workingDir root
+            environment "OPENSEARCH_JAVA_HOME", osJavaHome
+            commandLine "./bin/opensearch-plugin", "install", "--batch", "file:${pluginZip.absolutePath}"
+        }
+        println "Installed AD plugin from ${pluginZip.name}"
+    }
+}
+
+// --- Run OpenSearch single-node on explicit ports (Linux/macOS) ---
+tasks.register('runAtPorts', Exec) {
+    group = "opensearch"
+    description = "Run OpenSearch (Linux-min) single-node with this plugin on custom HTTP/transport ports (Linux/macOS)"
+    dependsOn 'bundlePlugin', 'installPlugin'
+    mustRunAfter 'clean'
+    doFirst {
+        def root = findOpenSearchHome()
+        workingDir root
+        def forwardedTestSettings = collectTestOpenSearchSettings()
+        def mergedSettings = new LinkedHashMap<String, String>(forwardedTestSettings)
+        mergedSettings.putAll(parseRunAtPortsSettings(extraSettings))
+        def cmd = ["./bin/opensearch",
+            "-E", "discovery.type=single-node",
+            "-E", "http.port=${httpPort}",
+            "-E", "transport.port=${transportPort}"]
+        if (!mergedSettings.isEmpty()) {
+            mergedSettings.each { key, value -> cmd += ["-E", "${key}=${value}"] }
+        }
+        commandLine cmd
+        // Force use of host JDK (mac must not try to use the Linux JDK inside the tarball)
+        environment "OPENSEARCH_JAVA_HOME", osJavaHome
+        if (osJavaOpts) environment "OPENSEARCH_JAVA_OPTS", osJavaOpts
+
+        println "OpenSearch home       : ${root}"
+        println "HTTP / Transport ports: ${httpPort} / ${transportPort}"
+        println "OPENSEARCH_JAVA_HOME  : ${osJavaHome}"
+        if (!forwardedTestSettings.isEmpty()) {
+            println "Forwarded -Dtests.*   : ${forwardedTestSettings.collect { key, value -> "${key}=${value}" }.join(', ')}"
+        }
+        if (extraSettings) println "Extra -E              : ${extraSettings}"
+        if (osJavaOpts)   println "OPENSEARCH_JAVA_OPTS  : ${osJavaOpts}"
+        println "Starting OpenSearch (single-node)... (Ctrl+C to stop)"
+    }
+}
+
+// Create gradle cache by resolving all the project dependencies, used by brazil-gradle
+ 
+void resolveConfiguration(configuration) {
+  if (configuration.canBeResolved && isResolveableConfiguration(configuration)) {
+      configuration.resolve()
+  }
+}
+ 
+boolean isResolveableConfiguration(configuration) {
+    def nonResolveableConfigurations = ['loggerUsagePlugin']
+    def dependency_list = configuration.allDependencies
+    for(dep in dependency_list){
+        if("${dep.group}:${dep.name}" == "org.opensearch.distribution.integ-test-zip:opensearch"){
+            println("Skipping configuration: ${configuration.getName()} because it contains dependency ${dep.group}:${dep.name}:${dep.version}")
+            return false
+        }
+    }
+    if (nonResolveableConfigurations.contains(configuration.getName())) {
+        return false
+    }
+    return true
+}
+ 
+allprojects {
+    tasks.register('resolveAllDependencies') {
+        doLast {
+            project.rootProject.allprojects.each { subProject ->
+                subProject.configurations.each { configuration ->
+                    resolveConfiguration(configuration)
+                }
+            }
+        }
     }
 }

@@ -20,7 +20,8 @@ package org.opensearch.timeseries;
 public interface CleanState {
     /**
      * Remove state associated with a detector Id
-     * @param detectorId Detector Id
+     * @param tenantId Tenant Id
+     * @param configId Config Id
      */
-    void clear(String detectorId);
+    void clear(String tenantId, String configId);
 }

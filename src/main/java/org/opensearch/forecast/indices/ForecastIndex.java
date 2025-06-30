@@ -13,11 +13,11 @@ package org.opensearch.forecast.indices;
 
 import java.util.function.Supplier;
 
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.ThrowingSupplierWrapper;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 
 public enum ForecastIndex implements TimeSeriesIndex {
     // throw RuntimeException since we don't know how to handle the case when the mapping reading throws IOException
@@ -27,8 +27,8 @@ public enum ForecastIndex implements TimeSeriesIndex {
         ThrowingSupplierWrapper.throwingSupplierWrapper(ForecastIndexManagement::getResultMappings)
     ),
     // two config indices share the same mapping as they overlap a lot
-    CONFIG(ForecastCommonName.CONFIG_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getConfigMappings)),
-    JOB(CommonName.JOB_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getJobMappings)),
+    CONFIG(ForecastCommonName.CONFIG_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(IndexResourceLoader::getConfigMappings)),
+    JOB(CommonName.JOB_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(IndexResourceLoader::getJobMappings)),
     CHECKPOINT(
         ForecastCommonName.FORECAST_CHECKPOINT_INDEX_NAME,
         false,
@@ -70,5 +70,10 @@ public enum ForecastIndex implements TimeSeriesIndex {
     @Override
     public boolean isConfigIndex() {
         return ForecastCommonName.CONFIG_INDEX.equals(getIndexName());
+    }
+
+    @Override
+    public boolean isResultIndex() {
+        return RESULT.getIndexName().equals(indexName) || CUSTOM_RESULT.getIndexName().equals(indexName);
     }
 }
