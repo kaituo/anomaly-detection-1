@@ -14,8 +14,14 @@ package org.opensearch.timeseries.ratelimit;
 public class CheckpointMaintainRequest extends QueuedRequest {
     private String modelId;
 
-    public CheckpointMaintainRequest(long expirationEpochMs, String configId, RequestPriority priority, String entityModelId) {
-        super(expirationEpochMs, configId, priority);
+    public CheckpointMaintainRequest(
+        long expirationEpochMs,
+        String configId,
+        RequestPriority priority,
+        String entityModelId,
+        String tenantId
+    ) {
+        super(expirationEpochMs, configId, priority, tenantId);
         this.modelId = entityModelId;
     }
 

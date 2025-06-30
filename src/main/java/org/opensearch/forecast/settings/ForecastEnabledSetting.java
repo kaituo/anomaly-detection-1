@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 import org.opensearch.common.settings.Setting;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.timeseries.settings.DynamicNumericSetting;
 
 public class ForecastEnabledSetting extends DynamicNumericSetting {
@@ -53,5 +54,9 @@ public class ForecastEnabledSetting extends DynamicNumericSetting {
      */
     public static boolean isForecastEnabled() {
         return ForecastEnabledSetting.getInstance().getSettingValue(ForecastEnabledSetting.FORECAST_ENABLED);
+    }
+
+    public static boolean isForecastMultiTenancyEnabled(Settings settings) {
+        return ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED.get(settings);
     }
 }

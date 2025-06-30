@@ -5,6 +5,7 @@
 package org.opensearch.timeseries.exception;
 
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 
 /** Exercises every reflection branch in TimeSeriesException#cloneWithMsgPrefix. */
@@ -88,5 +89,42 @@ public class TimeSeriesExceptionCloneTests extends OpenSearchTestCase {
 
         assertEquals("Suppressed count mismatch", 1, clone.getSuppressed().length);
         assertSame("Suppressed throwable not copied", suppressed, clone.getSuppressed()[0]);
+    }
+
+    public void testEndRunExceptionClonePreservesEndNow() {
+        EndRunException src = new EndRunException("cfg-1", "orig", new IllegalArgumentException("boom"), true);
+
+        TimeSeriesException clone = src.cloneWithMsgPrefix("P:");
+
+        assertTrue(clone instanceof EndRunException);
+        assertTrue(((EndRunException) clone).isEndNow());
+        assertEquals("P:orig", clone.getMessage());
+        assertEquals("cfg-1", clone.getConfigId());
+    }
+
+    public void testEndRunExceptionThreeArgConstructorDefaultsEndNowFalse() {
+        IllegalArgumentException cause = new IllegalArgumentException("boom");
+
+        EndRunException exception = new EndRunException("cfg-1", "orig", cause);
+
+        assertFalse(exception.isEndNow());
+        assertSame(cause, exception.getCause());
+        assertEquals("cfg-1", exception.getConfigId());
+    }
+
+    public void testEndRunExceptionCloneCopiesSuppressedAndMetadata() {
+        EndRunException src = new EndRunException("cfg-1", "orig", new IllegalArgumentException("boom"), false);
+        src.countedInStats(false);
+        src.addSuppressed(new IllegalStateException("suppressed"));
+        StackTraceElement[] stackTrace = new StackTraceElement[] { new StackTraceElement("Cls", "method", "Cls.java", 42) };
+        src.setStackTrace(stackTrace);
+
+        EndRunException clone = (EndRunException) src.cloneWithMsgPrefix("P:");
+
+        assertFalse(clone.isEndNow());
+        assertFalse(clone.isCountedInStats());
+        assertEquals(1, clone.getSuppressed().length);
+        assertEquals("suppressed", clone.getSuppressed()[0].getMessage());
+        assertArrayEquals(stackTrace, clone.getStackTrace());
     }
 }

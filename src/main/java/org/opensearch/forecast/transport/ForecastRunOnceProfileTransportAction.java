@@ -21,7 +21,7 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.forecast.ratelimit.ForecastCheckpointReadWorker;
 import org.opensearch.forecast.ratelimit.ForecastColdStartWorker;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.transport.TransportService;
 
@@ -30,7 +30,7 @@ public class ForecastRunOnceProfileTransportAction extends
     private static final Logger LOG = LogManager.getLogger(ForecastRunOnceProfileTransportAction.class);
     private final ForecastColdStartWorker coldStartWorker;
     private final ForecastCheckpointReadWorker checkpointReadWorker;
-    private final NodeStateManager nodeStateManager;
+    private final StateManager nodeStateManager;
 
     /**
      * Constructor
@@ -53,7 +53,7 @@ public class ForecastRunOnceProfileTransportAction extends
         Settings settings,
         ForecastColdStartWorker coldStartWorker,
         ForecastCheckpointReadWorker checkpointReadWorker,
-        NodeStateManager nodeStateManager
+        StateManager nodeStateManager
     ) {
         super(
             ForecastRunOnceProfileAction.NAME,

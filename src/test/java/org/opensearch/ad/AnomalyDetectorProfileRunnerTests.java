@@ -42,19 +42,17 @@ import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.DetectorInternalState;
 import org.opensearch.ad.model.DetectorProfile;
-import org.opensearch.ad.transport.ADProfileAction;
 import org.opensearch.ad.transport.RCFPollingAction;
 import org.opensearch.ad.transport.RCFPollingResponse;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.NotSerializableExceptionWrapper;
 import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.index.IndexNotFoundException;
-import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
@@ -68,7 +66,6 @@ import org.opensearch.timeseries.model.ModelProfileOnNode;
 import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.transport.ProfileNodeResponse;
 import org.opensearch.timeseries.transport.ProfileResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.RemoteTransportException;
 
 public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTests {
@@ -101,23 +98,66 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         ErrorResultStatus errorResultStatus
     ) throws IOException {
         detector = TestHelpers.randomAnomalyDetectorWithInterval(new IntervalTimeConfiguration(detectorIntervalMin, ChronoUnit.MINUTES));
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
-            listener.onResponse(Optional.of(detector));
-            return null;
-        }).when(nodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
-        clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        nodeCommunicator = mock(NodeCommunicator.class);
+        dataAccess = mock(DataAccess.class);
         oldRunner = new OldAnomalyDetectorProfileRunner(
             client,
-            clientUtil,
+            nodeCommunicator,
             xContentRegistry(),
             nodeFilter,
             requiredSamples,
             transportService,
             adTaskManager,
-            taskProfileRunner
+            taskProfileRunner,
+            dataAccess
         );
+
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends AnomalyDetector>> listener = invocation.getArgument(4);
+            switch (detectorStatus) {
+                case EXIST:
+                    listener.onResponse(Optional.of(detector));
+                    break;
+                case INDEX_NOT_EXIST:
+                    listener.onFailure(new IndexNotFoundException(ADCommonName.CONFIG_INDEX));
+                    break;
+                case NO_DOC:
+                    listener.onResponse(Optional.empty());
+                    break;
+                default:
+                    assertTrue("should not reach here", false);
+                    break;
+            }
+            return null;
+        }).when(stateManager).getConfig(anyString(), any(), any(), anyBoolean(), any());
+
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            switch (jobStatus) {
+                case INDEX_NOT_EXIT:
+                    listener.onFailure(new IndexNotFoundException(CommonName.JOB_INDEX));
+                    break;
+                case DISABLED:
+                    listener.onResponse(Optional.of(TestHelpers.randomJob(false, jobEnabledTime, null)));
+                    break;
+                case ENABLED:
+                    listener.onResponse(Optional.of(TestHelpers.randomJob(true, jobEnabledTime, null)));
+                    break;
+                default:
+                    assertTrue("should not reach here", false);
+                    break;
+            }
+            return null;
+        }).when(stateManager).getJob(anyString(), any(), anyBoolean(), any());
+
+        doAnswer(invocation -> {
+            Consumer<Optional<ADTask>> function = invocation.getArgument(3);
+            ADTask task = mock(ADTask.class);
+            when(task.getLastUpdateTime()).thenReturn(Instant.now());
+            when(task.getError()).thenReturn(getError(errorResultStatus));
+            function.accept(Optional.of(task));
+            return null;
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(anyString(), any(), any(), any(), any(), anyBoolean(), any());
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
@@ -194,11 +234,15 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         return null;
     }
 
+    private void profile(String detectorId, ActionListener<DetectorProfile> listener, Set<ProfileName> profilesToCollect) {
+        oldRunner.profile(detectorId, null, listener, profilesToCollect);
+    }
+
     public void testDetectorNotExist() throws IOException, InterruptedException {
         setUpClientGet(DetectorStatus.INDEX_NOT_EXIST, JobStatus.INDEX_NOT_EXIT, RCFPollingStatus.EMPTY, ErrorResultStatus.NO_ERROR);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile("x123", ActionListener.wrap(response -> {
+        profile("x123", ActionListener.wrap(response -> {
             assertTrue("Should not reach here", false);
             inProgressLatch.countDown();
         }, exception -> {
@@ -213,7 +257,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         ConfigProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.DISABLED).build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -237,7 +281,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         DetectorProfile expectedProfile = new DetectorProfile.Builder().state(expectedState).build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -288,12 +332,13 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         ADTask adTask = TestHelpers.randomAdTask();
 
         adTask.setError(getError(status));
+        adTask.setLastUpdateTime(jobEnabledTime.plus(1, ChronoUnit.MINUTES));
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            Consumer<Optional<ADTask>> function = (Consumer<Optional<ADTask>>) args[2];
+            Consumer<Optional<ADTask>> function = (Consumer<Optional<ADTask>>) args[3];
             function.accept(Optional.of(adTask));
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), any(), any(), any(), anyBoolean(), any());
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(anyString(), anyString(), any(), any(), any(), anyBoolean(), any());
 
         setUpClientExecuteRCFPollingAction(initStatus);
         setUpClientGet(DetectorStatus.EXIST, jobStatus, initStatus, status);
@@ -307,7 +352,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         DetectorProfile expectedProfile = builder.build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -381,7 +426,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
     private void setUpClientExecuteProfileAction() {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             node1 = "node1";
             nodeName1 = "nodename1";
@@ -448,7 +493,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
             listener.onResponse(profileResponse);
 
             return null;
-        }).when(client).execute(any(ADProfileAction.class), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
 
     }
 
@@ -516,7 +561,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(profileResponse -> {
+        profile(detector.getId(), ActionListener.wrap(profileResponse -> {
             assertEquals(node1, profileResponse.getCoordinatingNode());
             assertEquals(modelSize * 2, profileResponse.getTotalSizeInBytes());
             assertEquals(2, profileResponse.getModelProfile().length);
@@ -547,7 +592,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         expectedProfile.setInitProgress(profile);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -566,7 +611,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         expectedProfile.setInitProgress(profile);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {
@@ -584,7 +629,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
             .build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -606,7 +651,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
             .build();
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -624,14 +669,14 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         expectThrows(
             IllegalArgumentException.class,
             () -> new AnomalyDetectorProfileRunner(
-                client,
-                clientUtil,
+                nodeCommunicator,
                 xContentRegistry(),
                 nodeFilter,
                 0,
                 transportService,
                 adTaskManager,
-                taskProfileRunner
+                taskProfileRunner,
+                dataAccess
             )
         );
     }
@@ -640,7 +685,7 @@ public class AnomalyDetectorProfileRunnerTests extends AbstractProfileRunnerTest
         setUpClientGet(DetectorStatus.EXIST, JobStatus.ENABLED, RCFPollingStatus.EXCEPTION, ErrorResultStatus.NO_ERROR);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        profile(detector.getId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {

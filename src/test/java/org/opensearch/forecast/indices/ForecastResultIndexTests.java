@@ -38,9 +38,11 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.index.Index;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.env.Environment;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.indices.IndexManagement;
@@ -98,6 +100,7 @@ public class ForecastResultIndexTests extends AbstractTimeSeriesTest {
         numberOfNodes = 2;
         when(nodeFilter.getNumberOfEligibleDataNodes()).thenReturn(numberOfNodes);
 
+        DataAccess dataAccess = mock(DataAccess.class);
         forecastIndices = new ForecastIndexManagement(
             client,
             clusterService,
@@ -105,7 +108,8 @@ public class ForecastResultIndexTests extends AbstractTimeSeriesTest {
             settings,
             nodeFilter,
             TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-            NamedXContentRegistry.EMPTY
+            NamedXContentRegistry.EMPTY,
+            dataAccess
         );
 
         clusterAdminClient = mock(ClusterAdminClient.class);
@@ -113,7 +117,7 @@ public class ForecastResultIndexTests extends AbstractTimeSeriesTest {
 
         doAnswer(invocation -> {
             ClusterStateRequest clusterStateRequest = invocation.getArgument(0);
-            assertEquals(ForecastIndexManagement.ALL_FORECAST_RESULTS_INDEX_PATTERN, clusterStateRequest.indices()[0]);
+            assertEquals(ForecastCommonName.ALL_FORECAST_RESULTS_INDEX_PATTERN, clusterStateRequest.indices()[0]);
             @SuppressWarnings("unchecked")
             ActionListener<ClusterStateResponse> listener = (ActionListener<ClusterStateResponse>) invocation.getArgument(1);
             listener.onResponse(new ClusterStateResponse(clusterName, clusterState, true));
@@ -157,7 +161,7 @@ public class ForecastResultIndexTests extends AbstractTimeSeriesTest {
         }).when(indicesClient).create(any(), any());
 
         ArgumentCaptor<Exception> response = ArgumentCaptor.forClass(Exception.class);
-        forecastIndices.initCustomResultIndexAndExecute("abc", function, listener);
+        forecastIndices.initCustomResultIndexAndExecute("abc", function, listener, null);
         verify(listener, times(1)).onFailure(response.capture());
         Exception value = response.getValue();
         assertTrue(value instanceof EndRunException);
@@ -199,7 +203,7 @@ public class ForecastResultIndexTests extends AbstractTimeSeriesTest {
             return null;
         }).when(indicesClient).create(any(), any());
 
-        forecastIndices.initCustomResultIndexAndExecute(indexName, function, listener);
+        forecastIndices.initCustomResultIndexAndExecute(indexName, function, listener, null);
         verify(listener, never()).onFailure(any());
     }
 
@@ -217,7 +221,7 @@ public class ForecastResultIndexTests extends AbstractTimeSeriesTest {
         }).when(indicesClient).create(any(), any());
         super.setUpLog4jForJUnit(IndexManagement.class);
         try {
-            forecastIndices.initCustomResultIndexAndExecute(indexName, function, listener);
+            forecastIndices.initCustomResultIndexAndExecute(indexName, function, listener, null);
             ArgumentCaptor<Exception> response = ArgumentCaptor.forClass(Exception.class);
             verify(listener, times(1)).onFailure(response.capture());
 

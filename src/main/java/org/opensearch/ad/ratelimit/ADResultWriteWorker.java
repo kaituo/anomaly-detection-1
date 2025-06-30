@@ -19,9 +19,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Random;
 
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.transport.ADResultBulkRequest;
 import org.opensearch.ad.transport.handler.ADIndexMemoryPressureAwareResultHandler;
 import org.opensearch.cluster.service.ClusterService;
@@ -30,14 +31,13 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.ratelimit.ResultWriteWorker;
 
 public class ADResultWriteWorker extends
-    ResultWriteWorker<AnomalyResult, ADResultWriteRequest, ADResultBulkRequest, ADIndex, ADIndexManagement, ADIndexMemoryPressureAwareResultHandler> {
+    ResultWriteWorker<AnomalyResult, ADResultWriteRequest, ADResultBulkRequest, ADIndex, ADDelegatingDataManagement, ADIndexMemoryPressureAwareResultHandler> {
     public static final String WORKER_NAME = "ad-result-write";
 
     public ADResultWriteWorker(
@@ -57,7 +57,7 @@ public class ADResultWriteWorker extends
         Duration executionTtl,
         ADIndexMemoryPressureAwareResultHandler resultHandler,
         NamedXContentRegistry xContentRegistry,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         Duration stateTtl
     ) {
         super(
@@ -69,7 +69,7 @@ public class ADResultWriteWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,
@@ -89,8 +89,8 @@ public class ADResultWriteWorker extends
     }
 
     @Override
-    protected ADResultBulkRequest toBatchRequest(List<ADResultWriteRequest> toProcess) {
-        final ADResultBulkRequest bulkRequest = new ADResultBulkRequest();
+    protected ADResultBulkRequest toBatchRequest(List<ADResultWriteRequest> toProcess, String tenantId, String dataSourceId) {
+        final ADResultBulkRequest bulkRequest = new ADResultBulkRequest(tenantId, dataSourceId);
         for (ADResultWriteRequest request : toProcess) {
             bulkRequest.add(request);
         }

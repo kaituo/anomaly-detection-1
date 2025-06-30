@@ -13,6 +13,8 @@ package org.opensearch.ad.util;
 
 import org.opensearch.OpenSearchException;
 import org.opensearch.action.index.IndexResponse;
+import org.opensearch.action.search.SearchPhaseExecutionException;
+import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.action.support.replication.ReplicationResponse;
 import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.core.rest.RestStatus;
@@ -63,5 +65,26 @@ public class ExceptionUtilsTests extends OpenSearchTestCase {
                 .getErrorMessage(new RuntimeException("test"))
                 .contains("at org.opensearch.ad.util.ExceptionUtilsTests.testGetErrorMessage")
         );
+    }
+
+    public void testIsSearchPhaseExecutionException() {
+        assertTrue(
+            ExceptionUtil
+                .isSearchPhaseExecutionException(
+                    new SearchPhaseExecutionException("query", "all shards failed", ShardSearchFailure.EMPTY_ARRAY)
+                )
+        );
+        assertTrue(
+            ExceptionUtil
+                .isSearchPhaseExecutionException(
+                    new RuntimeException(
+                        "wrapper",
+                        new RuntimeException("Request failed: [search_phase_execution_exception] all shards failed")
+                    )
+                )
+        );
+        assertTrue(ExceptionUtil.isSearchPhaseExecutionException(new RuntimeException("Request failed: all shards failed")));
+        assertFalse(ExceptionUtil.isSearchPhaseExecutionException(new RuntimeException("some other failure")));
+        assertFalse(ExceptionUtil.isSearchPhaseExecutionException(null));
     }
 }

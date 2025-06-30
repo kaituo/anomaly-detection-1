@@ -1,10 +1,22 @@
 {
   "dynamic": true,
   "_meta": {
-    "schema_version": 5
+    "schema_version": 6
   },
   "properties": {
     "detectorId": {
+      "type": "keyword"
+    },
+    "tenant_id": {
+      "type": "keyword"
+    },
+    "application_id": {
+      "type": "keyword"
+    },
+    "workspace_id": {
+      "type": "keyword"
+    },
+    "s3_reference": {
       "type": "keyword"
     },
     "model": {

@@ -26,10 +26,10 @@ import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.IndexAnomalyDetectorResponse;
@@ -44,6 +44,8 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
@@ -52,9 +54,7 @@ import org.opensearch.timeseries.model.ValidationAspect;
 import org.opensearch.timeseries.model.ValidationIssueType;
 import org.opensearch.timeseries.rest.handler.AbstractTimeSeriesActionHandler;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import com.google.common.collect.Sets;
 
@@ -86,7 +86,7 @@ import com.google.common.collect.Sets;
  *  @param <T> the response type that extends ActionResponse
  */
 public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionResponse> extends
-    AbstractTimeSeriesActionHandler<T, ADIndex, ADIndexManagement, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager> {
+    AbstractTimeSeriesActionHandler<T, ADIndex, ADDelegatingDataManagement, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager> {
     protected final Logger logger = LogManager.getLogger(AbstractAnomalyDetectorActionHandler.class);
 
     public static final String EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG = "Can't create more than %d HC anomaly detectors.";
@@ -102,40 +102,11 @@ public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionRespo
      */
     public static final String VALIDATION_FEATURE_FAILURE = "Validation failed for feature(s) of detector %s";
 
-    /**
-     * Constructor function.
-     *
-     * @param clusterService          ClusterService
-     * @param client                  ES node client that executes actions on the local node
-     * @param clientUtil              AD security client
-     * @param transportService        ES transport service
-     * @param anomalyDetectionIndices anomaly detector index manager
-     * @param detectorId              detector identifier
-     * @param seqNo                   sequence number of last modification
-     * @param primaryTerm             primary term of last modification
-     * @param refreshPolicy           refresh policy
-     * @param anomalyDetector         anomaly detector instance
-     * @param requestTimeout          request time out configuration
-     * @param maxSingleStreamAnomalyDetectors     max single-entity anomaly detectors allowed
-     * @param maxHCAnomalyDetectors      max multi-entity detectors allowed
-     * @param maxFeatures             max features allowed per detector
-     * @param maxCategoricalFields    max number of categorical fields
-     * @param method                  Rest Method type
-     * @param xContentRegistry        Registry which is used for XContentParser
-     * @param user                    User context
-     * @param adTaskManager           AD Task manager
-     * @param searchFeatureDao        Search feature dao
-     * @param validationType          Whether validation is for detector or model
-     * @param isDryRun                Whether handler is dryrun or not
-     * @param clock                   clock object to know when to timeout
-     * @param settings                Node settings
-     */
     public AbstractAnomalyDetectorActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         TransportService transportService,
-        ADIndexManagement anomalyDetectionIndices,
+        ADDelegatingDataManagement anomalyDetectionIndices,
         String detectorId,
         Long seqNo,
         Long primaryTerm,
@@ -154,15 +125,14 @@ public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionRespo
         String validationType,
         boolean isDryRun,
         Clock clock,
-        Settings settings
+        Settings settings,
+        RunContext runContext
     ) {
         super(
             anomalyDetector,
             anomalyDetectionIndices,
             isDryRun,
-            client,
             detectorId,
-            clientUtil,
             user,
             method,
             clusterService,
@@ -185,7 +155,9 @@ public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionRespo
             clock,
             settings,
             ValidationAspect.DETECTOR,
-            ADCommonName.CONFIG_INDEX
+            ADCommonName.CONFIG_INDEX,
+            dataAccess,
+            runContext
         );
 
     }
@@ -223,7 +195,7 @@ public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionRespo
     @Override
     protected AnomalyDetector copyConfig(User user, Config config) {
         AnomalyDetector detector = (AnomalyDetector) config;
-        return new AnomalyDetector(
+        AnomalyDetector copiedDetector = new AnomalyDetector(
             config.getId(),
             config.getVersion(),
             config.getName(),
@@ -252,8 +224,60 @@ public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionRespo
             config.getFlattenResultIndexMapping(),
             breakingUIChange ? Instant.now() : config.getLastBreakingUIChangeTime(),
             config.getFrequency(),
-            detector.getAutoCreated()
+            detector.getAutoCreated(),
+            config.getTenantId()
         );
+        copiedDetector.setApplicationId(config.getApplicationId());
+        copiedDetector.setDataSourceId(config.getDataSourceId());
+        copiedDetector.setWorkspaceId(config.getWorkspaceId());
+        copiedDetector.setS3Reference(config.getS3Reference());
+        copiedDetector.setEventBridgeCellId(config.getEventBridgeCellId());
+        return copiedDetector;
+    }
+
+    protected AnomalyDetector createAnomalyDetector(AnomalyDetector detector, User user, String analysisType) {
+        AnomalyDetector createdDetector = new AnomalyDetector(
+            detector.getId(),
+            detector.getVersion(),
+            detector.getName(),
+            detector.getDescription(),
+            detector.getTimeField(),
+            detector.getIndices(),
+            detector.getFeatureAttributes(),
+            detector.getFilterQuery(),
+            detector.getInterval(),
+            detector.getWindowDelay(),
+            detector.getShingleSize(),
+            detector.getUiMetadata(),
+            detector.getSchemaVersion(),
+            Instant.now(),
+            detector.getCategoryFields(),
+            user,
+            detector.getCustomResultIndexOrAlias(),
+            detector.getImputationOption(),
+            detector.getRecencyEmphasis(),
+            detector.getSeasonIntervals(),
+            detector.getHistoryIntervals(),
+            detector.getRules(),
+            detector.getCustomResultIndexMinSize(),
+            detector.getCustomResultIndexMinAge(),
+            detector.getCustomResultIndexTTL(),
+            detector.getFlattenResultIndexMapping(),
+            detector.getLastBreakingUIChangeTime(),
+            detector.getFrequency(),
+            detector.getAutoCreated(),
+            detector.getTenantId()
+        );
+        createdDetector.setApplicationId(detector.getApplicationId());
+        createdDetector.setDataSourceId(detector.getDataSourceId());
+        createdDetector.setWorkspaceId(detector.getWorkspaceId());
+        createdDetector.setS3Reference(detector.getS3Reference());
+        createdDetector.setEventBridgeCellId(detector.getEventBridgeCellId());
+        return createdDetector;
+    }
+
+    protected String getAnalysisType(RestRequest request) {
+        return request.param("type");
     }
 
     @SuppressWarnings("unchecked")
@@ -283,8 +307,7 @@ public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionRespo
     protected void validateModel(ActionListener<T> listener) {
         ADModelValidationActionHandler modelValidationActionHandler = new ADModelValidationActionHandler(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             (ActionListener<ValidateConfigResponse>) listener,
             (AnomalyDetector) config,
             requestTimeout,

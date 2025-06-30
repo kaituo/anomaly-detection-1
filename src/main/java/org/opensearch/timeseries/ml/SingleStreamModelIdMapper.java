@@ -12,8 +12,6 @@
 package org.opensearch.timeseries.ml;
 
 import java.util.Locale;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
  * Utilities to map between single-stream models and ids.  We will have circular
@@ -22,7 +20,6 @@ import java.util.regex.Pattern;
  *
  */
 public class SingleStreamModelIdMapper {
-    protected static final String CONFIG_ID_PATTERN = "(.*)_model_.+";
     protected static final String RCF_MODEL_ID_PATTERN = "%s_model_rcf_%d";
     protected static final String THRESHOLD_MODEL_ID_PATTERN = "%s_model_threshold";
     protected static final String CASTER_MODEL_ID_PATTERN = "%s_model_caster";
@@ -34,7 +31,7 @@ public class SingleStreamModelIdMapper {
      * @param partitionNumber number of the partition
      * @return ID for the RCF model partition
      */
-    public static String getRcfModelId(String detectorId, int partitionNumber) {
+    public static String getRcfModelId(String tenantId, String detectorId, int partitionNumber) {
         return String.format(Locale.ROOT, RCF_MODEL_ID_PATTERN, detectorId, partitionNumber);
     }
 
@@ -66,12 +63,12 @@ public class SingleStreamModelIdMapper {
      * @throws IllegalArgumentException if model id is invalid
      */
     public static String getConfigIdForModelId(String modelId) {
-        Matcher matcher = Pattern.compile(CONFIG_ID_PATTERN).matcher(modelId);
-        if (matcher.matches()) {
-            return matcher.group(1);
-        } else {
+        int modelInfixPosition = modelId.lastIndexOf("_model_");
+        if (modelInfixPosition <= 0 || modelInfixPosition + "_model_".length() >= modelId.length()) {
             throw new IllegalArgumentException("Invalid model id " + modelId);
         }
+
+        return modelId.substring(0, modelInfixPosition);
     }
 
     /**

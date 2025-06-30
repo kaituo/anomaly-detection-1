@@ -63,8 +63,9 @@ public class SuggestConfigParamRequestTests extends OpenSearchTestCase {
         AnalysisType context = AnalysisType.AD;
         String param = "test-param";
         TimeValue requestTimeout = TimeValue.timeValueSeconds(30);
+        String tenantId = "account-1:application-1:workspace-1";
 
-        SuggestConfigParamRequest originalRequest = new SuggestConfigParamRequest(context, detector, param, requestTimeout);
+        SuggestConfigParamRequest originalRequest = new SuggestConfigParamRequest(context, detector, param, requestTimeout, tenantId);
 
         // Serialize the request
         BytesStreamOutput out = new BytesStreamOutput();
@@ -84,6 +85,7 @@ public class SuggestConfigParamRequestTests extends OpenSearchTestCase {
         assertEquals(detector, deserializedDetector);
         assertEquals(param, deserializedRequest.getParam());
         assertEquals(requestTimeout, deserializedRequest.getRequestTimeout());
+        assertEquals(tenantId, deserializedRequest.getTenantId());
 
         assertEquals(ADIndex.CONFIG.getIndexName(), deserializedRequest.index());
     }
@@ -118,6 +120,7 @@ public class SuggestConfigParamRequestTests extends OpenSearchTestCase {
         assertEquals(forecaster, deserializedForecaster);
         assertEquals(param, deserializedRequest.getParam());
         assertEquals(requestTimeout, deserializedRequest.getRequestTimeout());
+        assertNull(deserializedRequest.getTenantId());
 
         assertEquals(ForecastIndex.CONFIG.getIndexName(), deserializedRequest.index());
     }

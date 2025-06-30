@@ -17,13 +17,13 @@ import org.opensearch.common.inject.Inject;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
 import org.opensearch.forecast.ml.ForecastColdStart;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.ratelimit.ForecastCheckpointWriteWorker;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.BaseDeleteModelTransportAction;
 import org.opensearch.transport.TransportService;
@@ -31,7 +31,7 @@ import org.opensearch.transport.TransportService;
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 
 public class DeleteForecastModelTransportAction extends
-    BaseDeleteModelTransportAction<RCFCaster, ForecastPriorityCache, ForecastCacheProvider, TaskCacheManager, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastResult, ForecastColdStart> {
+    BaseDeleteModelTransportAction<RCFCaster, ForecastPriorityCache, ForecastCacheProvider, TaskCacheManager, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastResult, ForecastColdStart> {
 
     @Inject
     public DeleteForecastModelTransportAction(
@@ -39,7 +39,7 @@ public class DeleteForecastModelTransportAction extends
         ClusterService clusterService,
         TransportService transportService,
         ActionFilters actionFilters,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         ForecastCacheProvider cache,
         TaskCacheManager taskCacheManager,
         ForecastColdStart coldStarter

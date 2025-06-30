@@ -49,6 +49,7 @@ public class IndexAnomalyDetectorActionTests extends OpenSearchSingleNodeTestCas
     public void testIndexRequest() throws Exception {
         BytesStreamOutput out = new BytesStreamOutput();
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
+        detector.setApplicationId("app-1");
         IndexAnomalyDetectorRequest request = new IndexAnomalyDetectorRequest(
             "1234",
             4321,
@@ -60,12 +61,15 @@ public class IndexAnomalyDetectorActionTests extends OpenSearchSingleNodeTestCas
             1000,
             10,
             5,
-            10
+            10,
+            null,
+            null
         );
         request.writeTo(out);
         NamedWriteableAwareStreamInput input = new NamedWriteableAwareStreamInput(out.bytes().streamInput(), writableRegistry());
         IndexAnomalyDetectorRequest newRequest = new IndexAnomalyDetectorRequest(input);
         Assert.assertEquals(request.getDetectorID(), newRequest.getDetectorID());
+        Assert.assertEquals("app-1", newRequest.getDetector().getApplicationId());
         Assert.assertNull(newRequest.validate());
     }
 

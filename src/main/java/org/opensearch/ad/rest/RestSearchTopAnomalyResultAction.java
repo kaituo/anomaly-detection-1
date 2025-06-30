@@ -19,14 +19,17 @@ import java.util.Locale;
 
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.SearchTopAnomalyResultAction;
 import org.opensearch.ad.transport.SearchTopAnomalyResultRequest;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.util.RestHandlerUtils;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -46,8 +49,11 @@ public class RestSearchTopAnomalyResultAction extends BaseRestHandler {
             RestHandlerUtils.TOP_ANOMALIES
         );
     private final String SEARCH_TOP_ANOMALY_DETECTOR_ACTION = "search_top_anomaly_result";
+    private final Settings settings;
 
-    public RestSearchTopAnomalyResultAction() {}
+    public RestSearchTopAnomalyResultAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -55,6 +61,7 @@ public class RestSearchTopAnomalyResultAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
 
         // Throw error if disabled
@@ -78,9 +85,10 @@ public class RestSearchTopAnomalyResultAction extends BaseRestHandler {
             throw new IllegalStateException(ADCommonMessages.AD_ID_MISSING_MSG);
         }
         boolean historical = request.paramAsBoolean("historical", false);
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings), request);
         XContentParser parser = request.contentParser();
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-        return SearchTopAnomalyResultRequest.parse(parser, detectorId, historical);
+        return SearchTopAnomalyResultRequest.parse(parser, detectorId, historical, tenantId);
     }
 
     @Override

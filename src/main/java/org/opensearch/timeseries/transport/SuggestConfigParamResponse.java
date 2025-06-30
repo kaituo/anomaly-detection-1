@@ -25,8 +25,10 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Mergeable;
+import org.opensearch.timeseries.model.TimeConfiguration;
 
 public class SuggestConfigParamResponse extends ActionResponse implements ToXContentObject, Mergeable {
     public static final String INTERVAL_FIELD = "interval";
@@ -196,5 +198,40 @@ public class SuggestConfigParamResponse extends ActionResponse implements ToXCon
         } catch (IOException e) {
             throw new IllegalArgumentException("failed to parse ActionResponse into SuggestConfigParamResponse", e);
         }
+    }
+
+    public static SuggestConfigParamResponse parse(XContentParser parser) throws IOException {
+        IntervalTimeConfiguration interval = null;
+        Integer horizon = null;
+        Integer history = null;
+        IntervalTimeConfiguration windowDelay = null;
+
+        if (parser.currentToken() == null) {
+            parser.nextToken();
+        }
+
+        if (parser.currentToken() != XContentParser.Token.END_OBJECT) {
+            while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
+                String fieldName = parser.currentName();
+                parser.nextToken();
+
+                if (INTERVAL_FIELD.equals(fieldName)) {
+                    interval = (IntervalTimeConfiguration) TimeConfiguration.parse(parser);
+                } else if (HORIZON_FIELD.equals(fieldName)) {
+                    horizon = parser.intValue();
+                } else if (HISTORY_FIELD.equals(fieldName)) {
+                    history = parser.intValue();
+                } else if (WINDOW_DELAY_FIELD.equals(fieldName)) {
+                    windowDelay = (IntervalTimeConfiguration) TimeConfiguration.parse(parser);
+                }
+            }
+        }
+
+        return new SuggestConfigParamResponse.Builder()
+            .interval(interval)
+            .horizon(horizon)
+            .history(history)
+            .windowDelay(windowDelay)
+            .build();
     }
 }

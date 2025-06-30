@@ -24,6 +24,7 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.forecast.constant.ForecastCommonMessages;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
+import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.transport.ValidateForecasterAction;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
@@ -34,6 +35,7 @@ import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.model.ConfigValidationIssue;
 import org.opensearch.timeseries.rest.RestValidateAction;
 import org.opensearch.timeseries.transport.ValidateConfigRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -45,18 +47,8 @@ import com.google.common.collect.ImmutableList;
 public class RestValidateForecasterAction extends AbstractForecasterAction {
     private static final String VALIDATE_FORECASTER_ACTION = "validate_forecaster_action";
 
-    private RestValidateAction validateAction;
-
     public RestValidateForecasterAction(Settings settings, ClusterService clusterService) {
         super(settings, clusterService);
-        this.validateAction = new RestValidateAction(
-            AnalysisType.FORECAST,
-            maxSingleStreamForecasters,
-            maxHCForecasters,
-            maxForecastFeatures,
-            maxCategoricalFields,
-            requestTimeout
-        );
     }
 
     @Override
@@ -80,6 +72,7 @@ public class RestValidateForecasterAction extends AbstractForecasterAction {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected BaseRestHandler.RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ForecastEnabledSetting.isForecastEnabled()) {
             throw new IllegalStateException(ForecastCommonMessages.DISABLED_ERR_MSG);
@@ -90,10 +83,19 @@ public class RestValidateForecasterAction extends AbstractForecasterAction {
             ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
             // we have to get the param from a subclass of BaseRestHandler. Otherwise, we cannot parse the type out of request params
             String typesStr = request.param(TYPE);
+            String tenantId = TenantAwareHelper.getTenantID(ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED.get(this.settings), request);
+            RestValidateAction validateAction = new RestValidateAction(
+                AnalysisType.FORECAST,
+                maxSingleStreamForecasters,
+                maxHCForecasters,
+                maxForecastFeatures,
+                maxCategoricalFields,
+                requestTimeout
+            );
 
             return channel -> {
                 try {
-                    ValidateConfigRequest validateForecasterRequest = validateAction.prepareRequest(request, client, typesStr);
+                    ValidateConfigRequest validateForecasterRequest = validateAction.prepareRequest(request, client, typesStr, tenantId);
                     client.execute(ValidateForecasterAction.INSTANCE, validateForecasterRequest, new RestToXContentListener<>(channel));
                 } catch (Exception ex) {
                     if (ex instanceof ValidationException) {

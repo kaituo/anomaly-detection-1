@@ -53,10 +53,12 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.common.action.ActionFuture;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.time.DateFormatter;
+import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.index.mapper.DateFieldMapper;
@@ -85,7 +87,7 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
@@ -103,6 +105,8 @@ public class SearchFeatureDaoTests {
     @Mock
     private NamedXContentRegistry xContent;
     private SecurityClientUtil clientUtil;
+    @Mock
+    private DataAccess dataAccess;
 
     @Mock
     private Factory factory;
@@ -146,7 +150,7 @@ public class SearchFeatureDaoTests {
         MockitoAnnotations.initMocks(this);
 
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();
@@ -155,15 +159,7 @@ public class SearchFeatureDaoTests {
 
         settings = Settings.EMPTY;
 
-        when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
-            listener.onResponse(Optional.of(detector));
-            return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
-        clientUtil = new SecurityClientUtil(nodeStateManager, settings);
-        searchFeatureDao = spy(new SearchFeatureDao(client, xContent, clientUtil, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE));
+        searchFeatureDao = spy(new SearchFeatureDao(xContent, dataAccess, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE));
 
         detectionInterval = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);
         detectorId = "123";
@@ -187,10 +183,10 @@ public class SearchFeatureDaoTests {
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[4];
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(eq(searchRequest), any());
+        }).when(dataAccess).searchWithInjectedSecurity(eq(searchRequest), any(User.class), any(), any(), any());
         when(searchResponse.getAggregations()).thenReturn(aggregations);
 
         multiSearchRequest = new MultiSearchRequest();
@@ -239,10 +235,10 @@ public class SearchFeatureDaoTests {
         aggsMap.put(CommonName.AGG_NAME_MAX_TIME, max);
         when(max.getValue()).thenReturn((double) epochTime);
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(eq(searchRequest), any(ActionListener.class));
+        }).when(dataAccess).searchWithInjectedSecurity(eq(searchRequest), any(User.class), any(), any(), any(ActionListener.class));
 
         InternalMax maxAgg = new InternalMax(CommonName.AGG_NAME_MAX_TIME, epochTime, DocValueFormat.RAW, emptyMap());
         InternalAggregations internalAggregations = InternalAggregations.from(Collections.singletonList(maxAgg));
@@ -265,10 +261,10 @@ public class SearchFeatureDaoTests {
         long end = 200L;
         when(detector.getEnabledFeatureIds()).thenReturn(null);
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), any(User.class), any(), any(), any(ActionListener.class));
 
         ActionListener<Optional<double[]>> listener = mock(ActionListener.class);
         searchFeatureDao.getFeaturesForPeriod(detector, start, end, listener);
@@ -283,10 +279,10 @@ public class SearchFeatureDaoTests {
         long start = 100L;
         long end = 200L;
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             listener.onFailure(new RuntimeException());
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), any(User.class), any(), any(), any(ActionListener.class));
 
         ActionListener<Optional<double[]>> listener = mock(ActionListener.class);
         searchFeatureDao.getFeaturesForPeriod(detector, start, end, listener);
@@ -337,10 +333,10 @@ public class SearchFeatureDaoTests {
                 assertThat(iterator.next(), anyOf(instanceOf(MaxAggregationBuilder.class), instanceOf(MinAggregationBuilder.class)));
             }
 
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), any(User.class), any(), any(), any(ActionListener.class));
 
         ActionListener<Optional<Long>> listener = mock(ActionListener.class);
         Entity entity = Entity.createSingleAttributeEntity("field", "app_1");

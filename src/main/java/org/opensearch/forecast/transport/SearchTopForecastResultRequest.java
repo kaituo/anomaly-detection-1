@@ -69,6 +69,7 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
     private QueryBuilder filterQuery;
     private List<Subaggregation> subaggregations;
     private Instant forecastFrom;
+    private String tenantId;
 
     public SearchTopForecastResultRequest(StreamInput in) throws IOException {
         super(in);
@@ -104,6 +105,7 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
             subaggregations = null;
         }
         forecastFrom = in.readOptionalInstant();
+        tenantId = in.readOptionalString();
     }
 
     public SearchTopForecastResultRequest(
@@ -118,7 +120,8 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
         RelationalOperation relationToThreshold,
         QueryBuilder filterQuery,
         List<Subaggregation> subaggregations,
-        Instant forecastFrom
+        Instant forecastFrom,
+        String tenantId
     ) {
         super();
         this.forecasterId = forecasterId;
@@ -133,6 +136,7 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
         this.filterQuery = filterQuery;
         this.subaggregations = subaggregations;
         this.forecastFrom = forecastFrom;
+        this.tenantId = tenantId;
     }
 
     public String getTaskId() {
@@ -183,6 +187,10 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
         return relationToThreshold;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     public void setTaskId(String taskId) {
         this.taskId = taskId;
     }
@@ -231,7 +239,7 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
         this.relationToThreshold = relationToThreshold;
     }
 
-    public static SearchTopForecastResultRequest parse(XContentParser parser, String forecasterId) throws IOException {
+    public static SearchTopForecastResultRequest parse(XContentParser parser, String forecasterId, String tenantId) throws IOException {
         String taskId = null;
         Integer size = null;
         List<String> splitBy = null;
@@ -330,7 +338,8 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
             relationToThreshold,
             filterQuery,
             subaggregations,
-            forecastFrom
+            forecastFrom,
+            tenantId
         );
     }
 
@@ -409,6 +418,7 @@ public class SearchTopForecastResultRequest extends ActionRequest implements ToX
             out.writeList(subaggregations);
         }
         out.writeOptionalInstant(forecastFrom);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

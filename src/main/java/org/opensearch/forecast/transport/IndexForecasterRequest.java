@@ -37,6 +37,7 @@ public class IndexForecasterRequest extends ActionRequest implements DocRequest 
     private Integer maxHCForecasters;
     private Integer maxForecastFeatures;
     private Integer maxCategoricalFields;
+    private String tenantId;
 
     public IndexForecasterRequest(StreamInput in) throws IOException {
         super(in);
@@ -51,6 +52,7 @@ public class IndexForecasterRequest extends ActionRequest implements DocRequest 
         maxHCForecasters = in.readInt();
         maxForecastFeatures = in.readInt();
         maxCategoricalFields = in.readInt();
+        tenantId = in.readOptionalString();
     }
 
     public IndexForecasterRequest(
@@ -64,7 +66,8 @@ public class IndexForecasterRequest extends ActionRequest implements DocRequest 
         Integer maxSingleEntityAnomalyDetectors,
         Integer maxMultiEntityAnomalyDetectors,
         Integer maxAnomalyFeatures,
-        Integer maxCategoricalFields
+        Integer maxCategoricalFields,
+        String tenantId
     ) {
         super();
         this.forecastID = forecasterID;
@@ -78,6 +81,7 @@ public class IndexForecasterRequest extends ActionRequest implements DocRequest 
         this.maxHCForecasters = maxMultiEntityAnomalyDetectors;
         this.maxForecastFeatures = maxAnomalyFeatures;
         this.maxCategoricalFields = maxCategoricalFields;
+        this.tenantId = tenantId;
     }
 
     public String getForecasterID() {
@@ -124,6 +128,10 @@ public class IndexForecasterRequest extends ActionRequest implements DocRequest 
         return maxCategoricalFields;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
@@ -138,6 +146,7 @@ public class IndexForecasterRequest extends ActionRequest implements DocRequest 
         out.writeInt(maxHCForecasters);
         out.writeInt(maxForecastFeatures);
         out.writeInt(maxCategoricalFields);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

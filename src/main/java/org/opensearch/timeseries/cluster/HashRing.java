@@ -37,7 +37,7 @@ import org.opensearch.Version;
 import org.opensearch.action.admin.cluster.node.info.NodeInfo;
 import org.opensearch.action.admin.cluster.node.info.NodesInfoRequest;
 import org.opensearch.action.admin.cluster.node.info.PluginsAndModules;
-import org.opensearch.ad.ml.ADModelManager;
+import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.cluster.ClusterChangedEvent;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.node.DiscoveryNodes;
@@ -48,18 +48,21 @@ import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.plugins.PluginInfo;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.transport.client.AdminClient;
-import org.opensearch.transport.client.Client;
-import org.opensearch.transport.client.ClusterAdminClient;
+import org.opensearch.timeseries.settings.TimeSeriesSettings;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.TransportUtil;
 
+import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 import com.google.common.collect.Sets;
 
 public class HashRing {
     private static final Logger LOG = LogManager.getLogger(HashRing.class);
+    private static final long[] DEFERRED_NODE_RETRY_DELAYS_MILLIS = new long[] { 20000L, 60000L, 300000L, 600000L };
     // In case of frequent node join/leave, hash ring has a cooldown period say 5 minute.
     // Hash ring doesn't respond to more than 1 cluster membership changes within the
     // cool-down period.
@@ -91,31 +94,36 @@ public class HashRing {
     // Record node change event. Will check if there is node change event when rebuild AD hash ring with
     // cooldown for realtime job.
     private ConcurrentLinkedQueue<Boolean> nodeChangeEvents;
+    private Map<String, DeferredNodeProbeState> deferredNodeProbeStates;
 
-    private final DiscoveryNodeFilterer nodeFilter;
+    private final DiscoveryNodeSelector nodeFilter;
     private final ClusterService clusterService;
     private final ADDataMigrator dataMigrator;
     private final Clock clock;
-    private final Client client;
-    private final ADModelManager modelManager;
+    private final DataAccess dataAccess;
+    private final ADCacheProvider cacheProvider;
+    private final Settings settings;
+    private final int opensearchPort;
 
     public HashRing(
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         Clock clock,
         Settings settings,
-        Client client,
+        DataAccess dataAccess,
         ClusterService clusterService,
         ADDataMigrator dataMigrator,
-        ADModelManager modelManager
+        ADCacheProvider cacheProvider
     ) {
         this.nodeFilter = nodeFilter;
         this.buildHashRingSemaphore = new Semaphore(1);
         this.clock = clock;
+        this.settings = settings;
+        this.opensearchPort = TimeSeriesSettings.OPENSEARCH_PORT.get(settings);
         this.coolDownPeriodForRealtimeAD = AD_COOLDOWN_MINUTES.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_COOLDOWN_MINUTES, it -> coolDownPeriodForRealtimeAD = it);
 
         this.lastUpdateForRealtimeAD = 0;
-        this.client = client;
+        this.dataAccess = dataAccess;
         this.clusterService = clusterService;
         this.dataMigrator = dataMigrator;
         this.nodeVersions = new ConcurrentHashMap<>();
@@ -123,7 +131,8 @@ public class HashRing {
         this.circlesForRealtimeAD = new TreeMap<>();
         this.hashRingInited = new AtomicBoolean(false);
         this.nodeChangeEvents = new ConcurrentLinkedQueue<>();
-        this.modelManager = modelManager;
+        this.deferredNodeProbeStates = new ConcurrentHashMap<>();
+        this.cacheProvider = cacheProvider;
     }
 
     public boolean isHashRingInited() {
@@ -164,11 +173,12 @@ public class HashRing {
             actionListener.onResponse(false);
             return;
         }
-        DiscoveryNode[] allNodes = nodeFilter.getAllNodes();
+        DiscoveryNode[] allNodes = getEligibleDataNodesForHashRing();
         Set<String> nodeIds = new HashSet<>();
         for (DiscoveryNode node : allNodes) {
             nodeIds.add(node.getId());
         }
+        pruneDeferredNodeProbeStates(nodeIds);
         Set<String> currentNodeIds = nodeVersions.keySet();
         Set<String> removedNodeIds = Sets.difference(currentNodeIds, nodeIds);
         Set<String> addedNodeIds = Sets.difference(nodeIds, currentNodeIds);
@@ -176,12 +186,24 @@ public class HashRing {
     }
 
     public void buildCirclesForRealtime() {
-        if (nodeChangeEvents.isEmpty()) {
+        /*
+         * Caller-side change for deferred retries:
+         *
+         * The caller path is widened so deferred readiness retries can wake the rebuild flow even
+         * without a fresh node-change event. In other words, realtime rebuild attempts are not only
+         * entered through queued nodeChangeEvents, but also entered through when the ring is empty
+         * and the local single node has both roles (mostly for testing).
+         */
+        if (nodeChangeEvents.isEmpty() && !hasDueDeferredNodeProbe() && !shouldBootstrapSingleLocalCoordinatorModelNode()) {
             return;
         }
         buildCircles(
             ActionListener.wrap(r -> { LOG.debug("build circles successfully"); }, e -> { LOG.error("Failed to build circles", e); })
         );
+    }
+
+    public boolean hasRealtimeHashRing() {
+        return circlesForRealtimeAD.values().stream().anyMatch(circle -> circle != null && !circle.isEmpty());
     }
 
     /**
@@ -221,13 +243,34 @@ public class HashRing {
         }
         try {
             DiscoveryNode localNode = clusterService.localNode();
+            /*
+             * versionCirclesChanged means: did this buildCircles(...) pass actually change the
+             * authoritative versioned hash ring, circles?
+             *
+             * It becomes true only when:
+             * 1. an eligible node is removed from circles, or
+             * 2. an eligible node is successfully admitted into a version circle after nodesInfo()
+             *    returns.
+             *
+             * It does not mean "some node event happened". Deferred or not-yet-ready nodes can
+             * create retry bookkeeping and keep rebuild flow active without setting this flag,
+             * because the realtime ring should only be rebuilt on actual version-circle changes.
+             */
+            boolean versionCirclesChanged = false;
             if (removedNodeIds != null && removedNodeIds.size() > 0) {
-                LOG.info("Node removed: {}", Arrays.toString(removedNodeIds.toArray(new String[0])));
+                clearDeferredNodeProbeStates(removedNodeIds);
+                LOG
+                    .info(
+                        "Node removed: {}",
+                        Arrays.toString(removedNodeIds.toArray(new String[0])),
+                        new Exception("Node removed stack trace")
+                    );
                 for (String nodeId : removedNodeIds) {
                     TimeSeriesNodeInfo nodeInfo = nodeVersions.remove(nodeId);
                     if (nodeInfo != null && nodeInfo.isEligibleDataNode()) {
                         removeNodeFromCircles(nodeId, nodeInfo.getVersion());
                         LOG.info("Remove data node from version hash ring: {}", nodeId);
+                        versionCirclesChanged = true;
                     }
                 }
             }
@@ -236,26 +279,48 @@ public class HashRing {
             if (addedNodeIds != null) {
                 allAddedNodes.addAll(addedNodeIds);
             }
-            if (!nodeVersions.containsKey(localNode.getId())) {
-                allAddedNodes.add(localNode.getId());
+
+            // Prepare for nodesInfo() call across deployment modes:
+            // - Single-tenant: eligible nodes and nodesInfo() use real node IDs, so nodeVersions is keyed by node ID.
+            // resolveLocalNodeVersionKey() returns localNode.getId(), matching previous behavior.
+            // - Multi-tenant SDK mode: eligible nodes come from CloudMap as id=ip:port and SDK nodesInfo()
+            // also uses ip:port identities. nodeVersions is therefore keyed by ip:port, so
+            // resolveLocalNodeVersionKey() falls back to local transport address (ip:port) to avoid repeatedly
+            // force-adding the local UUID key.
+            // Only force-add local when the resolved key is an eligible node in current membership.
+            String localNodeVersionKey = resolveLocalNodeVersionKey(localNode);
+            if (shouldIncludeLocalNode(localNodeVersionKey) && !nodeVersions.containsKey(localNodeVersionKey)) {
+                allAddedNodes.add(localNodeVersionKey);
             }
             if (allAddedNodes.size() == 0) {
-                actionListener.onResponse(true);
                 // rebuild version hash ring with cooldown.
-                rebuildCirclesForRealtimeAD();
+                seedRealtimeRebuildEventIfNeeded(versionCirclesChanged);
+                rebuildCirclesForRealtimeAD(versionCirclesChanged);
                 buildHashRingSemaphore.release();
+                hashRingInited.set(true);
+                actionListener.onResponse(true);
                 return;
             }
 
-            LOG.info("Node added: {}", Arrays.toString(allAddedNodes.toArray(new String[0])));
+            LOG.info("Nodes discovered from membership: {}", Arrays.toString(allAddedNodes.toArray(new String[0])));
+            Set<String> nodesToRefresh = getDueNodeIds(allAddedNodes);
+            if (nodesToRefresh.isEmpty()) {
+                seedRealtimeRebuildEventIfNeeded(versionCirclesChanged);
+                rebuildCirclesForRealtimeAD(versionCirclesChanged);
+                buildHashRingSemaphore.release();
+                hashRingInited.set(true);
+                actionListener.onResponse(true);
+                return;
+            }
             NodesInfoRequest nodesInfoRequest = new NodesInfoRequest();
-            nodesInfoRequest.nodesIds(allAddedNodes.toArray(new String[0]));
+            nodesInfoRequest.nodesIds(nodesToRefresh.toArray(new String[0]));
             nodesInfoRequest.clear().addMetric(NodesInfoRequest.Metric.PLUGINS.metricName());
+            boolean circlesChangedBeforeNodesInfo = versionCirclesChanged;
 
-            AdminClient admin = client.admin();
-            ClusterAdminClient cluster = admin.cluster();
-            cluster.nodesInfo(nodesInfoRequest, ActionListener.wrap(r -> {
+            dataAccess.nodesInfo(nodesInfoRequest, ActionListener.wrap(r -> {
                 Map<String, NodeInfo> nodesMap = r.getNodesMap();
+                boolean currentVersionCirclesChanged = circlesChangedBeforeNodesInfo;
+                Set<String> admittedNodeIds = new HashSet<>();
                 if (nodesMap != null && nodesMap.size() > 0) {
                     for (Map.Entry<String, NodeInfo> entry : nodesMap.entrySet()) {
                         NodeInfo nodeInfo = entry.getValue();
@@ -265,6 +330,7 @@ public class HashRing {
                             continue;
                         }
                         TreeMap<Integer, DiscoveryNode> circle = null;
+                        boolean versionRecorded = false;
                         for (PluginInfo pluginInfo : plugins.getPluginInfos()) {
                             // bwc: Need to include both.
                             if (AD_PLUGIN_NAME.equals(pluginInfo.getName())
@@ -278,7 +344,14 @@ public class HashRing {
                                     LOG.info("Add data node to version hash ring: {}", curNode.getId());
                                 }
                                 nodeVersions.put(curNode.getId(), new TimeSeriesNodeInfo(version, eligibleNode));
+                                versionRecorded = true;
                                 break;
+                            }
+                        }
+                        if (versionRecorded) {
+                            admittedNodeIds.add(curNode.getId());
+                            if (circle != null) {
+                                currentVersionCirclesChanged = true;
                             }
                         }
                         if (circle != null) {
@@ -288,10 +361,21 @@ public class HashRing {
                         }
                     }
                 }
+                clearDeferredNodeProbeStates(admittedNodeIds);
+                Set<String> deferredNodeIds = new HashSet<>(nodesToRefresh);
+                deferredNodeIds.removeAll(admittedNodeIds);
+                recordDeferredNodeProbeFailures(deferredNodeIds);
+                if (!admittedNodeIds.isEmpty()) {
+                    LOG.info("Node version admitted: {}", Arrays.toString(admittedNodeIds.toArray(new String[0])));
+                }
+                if (!deferredNodeIds.isEmpty()) {
+                    LOG.info("Node deferred for readiness retry: {}", Arrays.toString(deferredNodeIds.toArray(new String[0])));
+                }
                 LOG.info("All nodes with known version: {}", nodeVersions);
 
                 // rebuild version hash ring with cooldown after all new node added.
-                rebuildCirclesForRealtimeAD();
+                seedRealtimeRebuildEventIfNeeded(currentVersionCirclesChanged);
+                rebuildCirclesForRealtimeAD(currentVersionCirclesChanged);
 
                 if (!dataMigrator.isMigrated() && circles.size() > 0) {
                     // Find owning node with highest version to make sure the data migration logic be compatible to
@@ -338,11 +422,50 @@ public class HashRing {
         }
     }
 
-    private void rebuildCirclesForRealtimeAD() {
+    /**
+     * Rebuild the realtime AD hash ring only when this build pass actually changed the
+     * authoritative version circles.
+     *
+     * Behavior:
+     * 1. A full realtime rebuild happens only when versionCirclesChanged is true, meaning this
+     *    buildCircles(...) pass actually changed the authoritative versioned hash ring, circles.
+     * 2. If versionCirclesChanged is false and deferred node probes are pending, drain queued
+     *    node-change events and wait for readiness retries instead of churning the realtime ring.
+     * 3. If versionCirclesChanged is false and there are only queued node-change events, consume
+     *    those events and return without copying circles into circlesForRealtimeAD.
+     * 4. Only when versionCirclesChanged is true do we copy circles into circlesForRealtimeAD,
+     *    update lastUpdateForRealtimeAD, and rebalance model ownership.
+     * 5. If buildCircles(...) changed circles without a queued node-change event, a caller seeds
+     *    exactly one synthetic event before invoking this method so cooldown-delayed realtime
+     *    rebuilds can still happen once they become eligible.
+     *
+     * Net effect:
+     * realtime AD hash ring rebuilds now happen on actual ring changes, not just on any
+     * membership signal. Newly discovered but not-yet-ready nodes are retried separately, which
+     * avoids unnecessary realtime ring churn.
+     *
+     * @param versionCirclesChanged true only when this build pass changed circles by removing an
+     *                              eligible node or admitting an eligible node into a version
+     *                              circle after nodesInfo() returned
+     */
+    private void rebuildCirclesForRealtimeAD(boolean versionCirclesChanged) {
         // Check if it's eligible to rebuild hash ring with cooldown
         if (eligibleToRebuildCirclesForRealtimeAD()) {
-            LOG.info("Rebuild hash ring for realtime with cooldown, nodeChangeEvents size {}", nodeChangeEvents.size());
             int size = nodeChangeEvents.size();
+            if (!versionCirclesChanged && hasPendingDeferredNodeProbe()) {
+                consumeNodeChangeEvents(size);
+                LOG.debug("Skip realtime hash ring rebuild while waiting for deferred node readiness retries.");
+                return;
+            }
+            if (!versionCirclesChanged && size == 0) {
+                LOG.info("No node change events, skip rebuild hash ring for realtime");
+                return;
+            }
+            if (!versionCirclesChanged) {
+                consumeNodeChangeEvents(size);
+                return;
+            }
+            LOG.info("Rebuild hash ring for realtime with cooldown, nodeChangeEvents size {}", size);
             TreeMap<Version, TreeMap<Integer, DiscoveryNode>> newCircles = new TreeMap<>();
             for (Map.Entry<Version, TreeMap<Integer, DiscoveryNode>> entry : circles.entrySet()) {
                 newCircles.put(entry.getKey(), new TreeMap<>(entry.getValue()));
@@ -350,35 +473,46 @@ public class HashRing {
             circlesForRealtimeAD = newCircles;
             lastUpdateForRealtimeAD = clock.millis();
             LOG.info("Build version hash ring successfully");
-            String localNodeId = clusterService.localNode().getId();
-            Set<String> modelIds = modelManager.getAllModelIds();
-            for (String modelId : modelIds) {
-                Optional<DiscoveryNode> node = getOwningNodeWithSameLocalVersionForRealtime(modelId);
-                if (node.isPresent() && !node.get().getId().equals(localNodeId)) {
+            DiscoveryNode localNode = clusterService.localNode();
+            String localNodeVersionKey = resolveLocalNodeVersionKey(localNode);
+            boolean localNodeResolved = localNodeVersionKey != null && nodeVersions.containsKey(localNodeVersionKey);
+            for (ModelState<ThresholdedRandomCutForest> modelState : cacheProvider.get().getAllModels()) {
+                String modelId = modelState.getModelId();
+                if (modelId == null) {
+                    continue;
+                }
+                String routingKey = modelState.getEntity().map(Object::toString).orElse(modelId);
+                Optional<DiscoveryNode> node = getOwningNodeWithSameLocalVersionForRealtime(routingKey);
+                if (node.isPresent() && localNodeResolved && !node.get().getId().equals(localNodeVersionKey)) {
                     LOG.info(REMOVE_MODEL_MSG + " {}", modelId);
-                    modelManager
-                        .stopModel(
-                            // stopModel will clear model cache
-                            SingleStreamModelIdMapper.getConfigIdForModelId(modelId),
-                            modelId,
-                            ActionListener
-                                .wrap(
-                                    r -> LOG.info("Stopped model [{}] with response [{}]", modelId, r),
-                                    e -> LOG.error("Fail to stop model " + modelId, e)
-                                )
-                        );
+                    String configId = modelState.getConfigId() != null
+                        ? modelState.getConfigId()
+                        : SingleStreamModelIdMapper.getConfigIdForModelId(modelId);
+                    cacheProvider.get().stopModel(modelState.getTenantId(), configId, modelId);
+                    LOG.info("Stopped model [{}] on old owning node", modelId);
+                } else if (node.isPresent() && !localNodeResolved) {
+                    LOG.debug("Skip stale-model cleanup because local hash ring identity is unresolved for model [{}]", modelId);
                 }
             }
             // It's possible that multiple threads add new event to nodeChangeEvents,
             // but this is the only place to consume/poll the event and there is only
             // one thread poll it as we are using buildHashRingSemaphore
             // to control only 1 thread build hash ring.
-            while (size-- > 0) {
-                Boolean poll = nodeChangeEvents.poll();
-                if (poll == null) {
-                    break;
-                }
-            }
+            consumeNodeChangeEvents(size);
+        }
+    }
+
+    /**
+     * Seed a single rebuild event when a build pass changes circles without a queued node-change
+     * event, such as the non-delta snapshot path or deferred readiness retries. This preserves the
+     * existing realtime rebuild gate while letting deferred retries wake up independently via
+     * {@link #hasDueDeferredNodeProbe()}.
+     *
+     * @param versionCirclesChanged whether the current build pass changed circles
+     */
+    private void seedRealtimeRebuildEventIfNeeded(boolean versionCirclesChanged) {
+        if (versionCirclesChanged && nodeChangeEvents.isEmpty()) {
+            addNodeChangeEvent();
         }
     }
 
@@ -404,8 +538,14 @@ public class HashRing {
      */
     public boolean eligibleToRebuildCirclesForRealtimeAD() {
         // Check if there is any node change event
-        if (nodeChangeEvents.isEmpty() && !circlesForRealtimeAD.isEmpty()) {
+        if (nodeChangeEvents.isEmpty() && !hasPendingDeferredNodeProbe() && !circlesForRealtimeAD.isEmpty()) {
             return false;
+        }
+
+        // If realtime circles are still empty, rebuild immediately to avoid startup races
+        // where membership arrives shortly after an empty initial build.
+        if (circlesForRealtimeAD.isEmpty()) {
+            return true;
         }
 
         // Check cooldown period
@@ -446,7 +586,10 @@ public class HashRing {
     ) {
         buildCircles(ActionListener.wrap(r -> {
             DiscoveryNode localNode = clusterService.localNode();
-            Version version = nodeVersions.containsKey(localNode.getId()) ? getVersion(localNode.getId()) : Version.CURRENT;
+            String localNodeVersionKey = resolveLocalNodeVersionKey(localNode);
+            Version version = localNodeVersionKey != null && nodeVersions.containsKey(localNodeVersionKey)
+                ? getVersion(localNodeVersionKey)
+                : Version.CURRENT;
             Optional<DiscoveryNode> owningNode = getOwningNodeWithSameVersionDirectly(modelId, version, false);
             function.accept(owningNode);
         }, e -> listener.onFailure(e)));
@@ -454,16 +597,30 @@ public class HashRing {
 
     public Optional<DiscoveryNode> getOwningNodeWithSameLocalVersionForRealtime(String modelId) {
         try {
-            DiscoveryNode localNode = clusterService.localNode();
-            Version version = nodeVersions.containsKey(localNode.getId()) ? getVersion(localNode.getId()) : Version.CURRENT;
-            Optional<DiscoveryNode> owningNode = getOwningNodeWithSameVersionDirectly(modelId, version, true);
-            // rebuild hash ring
             buildCirclesForRealtime();
+            Optional<DiscoveryNode> owningNode = getOwningNodeWithSameLocalVersionForRealtimeDirectly(modelId);
+            if (owningNode.isEmpty() && circlesForRealtimeAD.isEmpty() && hasPendingDeferredNodeProbe()) {
+                // When startup has only deferred model nodes, retry immediately on the first realtime lookup
+                // instead of waiting for the deferred backoff window to expire.
+                clearDeferredNodeProbeStates(new HashSet<>(deferredNodeProbeStates.keySet()));
+                buildCircles(ActionListener.wrap(r -> {}, e -> LOG.error("Failed forced realtime hash ring refresh", e)));
+                owningNode = getOwningNodeWithSameLocalVersionForRealtimeDirectly(modelId);
+            }
+            LOG.debug("Owning node with same local version for realtime: {}", owningNode.orElse(null));
             return owningNode;
         } catch (Exception e) {
             LOG.error("Failed to get owning node with same local time series version", e);
             return Optional.empty();
         }
+    }
+
+    private Optional<DiscoveryNode> getOwningNodeWithSameLocalVersionForRealtimeDirectly(String modelId) {
+        DiscoveryNode localNode = clusterService.localNode();
+        String localNodeVersionKey = resolveLocalNodeVersionKey(localNode);
+        Version version = localNodeVersionKey != null && nodeVersions.containsKey(localNodeVersionKey)
+            ? getVersion(localNodeVersionKey)
+            : Version.CURRENT;
+        return getOwningNodeWithSameVersionDirectly(modelId, version, true);
     }
 
     private Optional<DiscoveryNode> getOwningNodeWithSameVersionDirectly(String modelId, Version version, boolean forRealtime) {
@@ -479,9 +636,12 @@ public class HashRing {
     public <T> void getNodesWithSameLocalVersion(Consumer<DiscoveryNode[]> function, ActionListener<T> listener) {
         buildCircles(ActionListener.wrap(updated -> {
             DiscoveryNode localNode = clusterService.localNode();
-            Version version = nodeVersions.containsKey(localNode.getId()) ? getVersion(localNode.getId()) : Version.CURRENT;
+            String localNodeVersionKey = resolveLocalNodeVersionKey(localNode);
+            Version version = localNodeVersionKey != null && nodeVersions.containsKey(localNodeVersionKey)
+                ? getVersion(localNodeVersionKey)
+                : Version.CURRENT;
             Set<DiscoveryNode> nodes = getNodesWithSameVersion(version, false);
-            if (!nodeVersions.containsKey(localNode.getId())) {
+            if (shouldIncludeLocalNode(localNodeVersionKey) && !nodeVersions.containsKey(localNodeVersionKey)) {
                 nodes.add(localNode);
             }
             // Make sure listener return in function
@@ -491,7 +651,10 @@ public class HashRing {
 
     public DiscoveryNode[] getNodesWithSameLocalVersion() {
         DiscoveryNode localNode = clusterService.localNode();
-        Version version = nodeVersions.containsKey(localNode.getId()) ? getVersion(localNode.getId()) : Version.CURRENT;
+        String localNodeVersionKey = resolveLocalNodeVersionKey(localNode);
+        Version version = localNodeVersionKey != null && nodeVersions.containsKey(localNodeVersionKey)
+            ? getVersion(localNodeVersionKey)
+            : Version.CURRENT;
         Set<DiscoveryNode> nodes = getNodesWithSameVersion(version, false);
         // rebuild hash ring
         buildCirclesForRealtime();
@@ -526,6 +689,104 @@ public class HashRing {
     }
 
     /**
+     *
+     * Prefer node ID first to preserve single-tenant behavior.
+     * Fall back to address key only when map data already uses that format.
+     * 
+     * @param localNode local node
+     * @return local node version key
+     */
+    private String resolveLocalNodeVersionKey(DiscoveryNode localNode) {
+        if (localNode == null) {
+            return null;
+        }
+
+        String nodeIdKey = localNode.getId();
+        if (nodeVersions.containsKey(nodeIdKey)) {
+            return nodeIdKey;
+        }
+
+        // Multi-tenant: CloudMap nodes are keyed by ip:HTTP-port while localNode.getAddress()
+        // uses the transport port. If there is exactly one ring node with the same IP, use that
+        // key as the local hash-ring identity. Ambiguous same-IP matches are ignored.
+        TransportAddress address = localNode.getAddress();
+        if (address != null) {
+            String key = findUniqueNodeVersionKeyByIp(TransportUtil.extractIp(address));
+            if (key != null) {
+                return key;
+            }
+        }
+
+        // Preserve the existing bootstrap behavior when no local key has been recorded.
+        return nodeIdKey;
+    }
+
+    private String findUniqueNodeVersionKeyByIp(String ipAddress) {
+        String matchedKey = null;
+        for (String key : nodeVersions.keySet()) {
+            if (!key.split(":")[0].equals(ipAddress)) {
+                continue;
+            }
+            if (matchedKey != null) {
+                LOG.debug("Local hash ring identity is ambiguous for IP [{}]; matched [{}] and [{}]", ipAddress, matchedKey, key);
+                return null;
+            }
+            matchedKey = key;
+        }
+        return matchedKey;
+    }
+
+    /**
+     * Decide whether to force-add local node before calling nodesInfo().
+     *
+     * Multi-tenant: local UUID is no longer force-added when it is not part of
+     * CloudMap/eligible membership, so repeated local-add attempts stop.
+     *
+     * Single-tenant: behavior remains the same because local node ID exists in
+     * eligible membership.
+     *
+     * @param localNodeVersionKey resolved local key (node id or ip:port)
+     * @return true if local key exists in current eligible membership
+     */
+    private boolean shouldIncludeLocalNode(String localNodeVersionKey) {
+        return localNodeVersionKey != null && nodeFilter.nodeExists(localNodeVersionKey);
+    }
+
+    private DiscoveryNode[] getEligibleDataNodesForHashRing() {
+        DiscoveryNode[] eligibleNodes = nodeFilter.getEligibleDataNodes();
+        if (eligibleNodes != null && eligibleNodes.length > 0) {
+            return eligibleNodes;
+        }
+
+        DiscoveryNode localModelNode = getSingleLocalCoordinatorModelNode();
+        if (localModelNode == null) {
+            return new DiscoveryNode[0];
+        }
+        return new DiscoveryNode[] { localModelNode };
+    }
+
+    private boolean shouldBootstrapSingleLocalCoordinatorModelNode() {
+        return getSingleLocalCoordinatorModelNode() != null && circlesForRealtimeAD.isEmpty();
+    }
+
+    private DiscoveryNode getSingleLocalCoordinatorModelNode() {
+        List<String> roles = TimeSeriesSettings.NODE_ROLE.get(settings);
+        if (!roles.contains(TimeSeriesSettings.COORDINATOR_ROLE) || !roles.contains(TimeSeriesSettings.MODEL_ROLE)) {
+            return null;
+        }
+
+        DiscoveryNode localNode = clusterService.localNode();
+        if (localNode == null || localNode.getAddress() == null) {
+            return null;
+        }
+        String localIp = TransportUtil.extractIp(localNode.getAddress());
+        if (localIp == null || localIp.isBlank()) {
+            return null;
+        }
+        return TransportUtil.createDiscoveryNodeFromIp(localIp, opensearchPort);
+    }
+
+    /**
      * Get node by transport address.
      * If transport address is null, return local node; otherwise, filter current eligible data nodes
      * with IP address. If no node found, will return Optional.empty()
@@ -539,7 +800,7 @@ public class HashRing {
             return Optional.of(clusterService.localNode());
         }
         String ipAddress = getIpAddress(address);
-        DiscoveryNode[] allNodes = nodeFilter.getAllNodes();
+        DiscoveryNode[] allNodes = nodeFilter.getEligibleDataNodes();
 
         // Can't handle this edge case for BWC of AD1.0: mixed cluster with AD1.0 and Version after 1.1.
         // Start multiple OpenSearch processes on same IP, some run AD 1.0, some run new AD
@@ -554,15 +815,8 @@ public class HashRing {
         return Optional.empty();
     }
 
-    /**
-     * Get IP address from transport address.
-     * TransportAddress.toString() example: 100.200.100.200:12345
-     * @param address transport address
-     * @return IP address
-     */
     private String getIpAddress(TransportAddress address) {
-        // Ignore port number as it may change, just use ip to look for node
-        return address.toString().split(":")[0];
+        return TransportUtil.extractIp(address);
     }
 
     /**
@@ -593,5 +847,148 @@ public class HashRing {
      */
     public void addNodeChangeEvent() {
         this.nodeChangeEvents.add(true);
+    }
+
+    /**
+     * Record a failed readiness probe for eligible nodes that were discovered from membership but were not admitted
+     * into {@code nodeVersions}/{@code circles} during the latest {@code nodesInfo()} refresh.
+     *
+     * These nodes remain eligible candidates, so we keep retry state and apply backoff before probing them again on a
+     * later rebuild.
+     *
+     * @param nodeIds eligible node IDs that should be retried later
+     */
+    private void recordDeferredNodeProbeFailures(Set<String> nodeIds) {
+        if (nodeIds == null || nodeIds.isEmpty()) {
+            return;
+        }
+        long now = clock.millis();
+        for (String nodeId : nodeIds) {
+            deferredNodeProbeStates.compute(nodeId, (id, state) -> {
+                DeferredNodeProbeState nextState = state == null ? new DeferredNodeProbeState() : state;
+                nextState.recordFailure(now);
+                return nextState;
+            });
+        }
+    }
+
+    /**
+     * Clear deferred probe state once a node is either admitted successfully or explicitly removed from membership.
+     *
+     * After clearing, the node no longer participates in deferred retry bookkeeping.
+     *
+     * @param nodeIds node IDs whose deferred retry state should be removed
+     */
+    private void clearDeferredNodeProbeStates(Set<String> nodeIds) {
+        if (nodeIds == null || nodeIds.isEmpty()) {
+            return;
+        }
+        for (String nodeId : nodeIds) {
+            deferredNodeProbeStates.remove(nodeId);
+        }
+    }
+
+    /**
+     * Remove retry state for nodes that are no longer part of the current eligible membership snapshot.
+     *
+     * This is used by the non-delta rebuild path, where we only have the latest eligible-node snapshot instead of an
+     * explicit removed-node list. Deferred state must be preserved for still-eligible nodes so they can be retried
+     * later, but it should be dropped for nodes that have already left membership to avoid useless probes.
+     *
+     * @param eligibleNodeIds node IDs from the latest eligible membership snapshot
+     */
+    private void pruneDeferredNodeProbeStates(Set<String> eligibleNodeIds) {
+        if (eligibleNodeIds == null) {
+            return;
+        }
+        for (String nodeId : new HashSet<>(deferredNodeProbeStates.keySet())) {
+            if (!eligibleNodeIds.contains(nodeId)) {
+                deferredNodeProbeStates.remove(nodeId);
+            }
+        }
+    }
+
+    /**
+     * Return the subset of candidate nodes whose deferred retry backoff has expired.
+     *
+     * Nodes with no deferred state are treated as immediately due, which lets newly discovered nodes probe right away.
+     * Nodes with deferred state are retried only when their next scheduled probe time has arrived.
+     *
+     * @param candidateNodeIds nodes discovered from current membership that may need a {@code nodesInfo()} refresh
+     * @return candidate node IDs that should be probed in this rebuild
+     */
+    private Set<String> getDueNodeIds(Set<String> candidateNodeIds) {
+        long now = clock.millis();
+        return candidateNodeIds.stream().filter(nodeId -> {
+            DeferredNodeProbeState state = deferredNodeProbeStates.get(nodeId);
+            return state == null || state.isDue(now);
+        }).collect(Collectors.toSet());
+    }
+
+    /**
+     * @return {@code true} when at least one eligible node is waiting for a deferred readiness retry
+     */
+    private boolean hasPendingDeferredNodeProbe() {
+        return !deferredNodeProbeStates.isEmpty();
+    }
+
+    /**
+     * @return {@code true} when any deferred node has reached its next scheduled retry time
+     */
+    private boolean hasDueDeferredNodeProbe() {
+        if (deferredNodeProbeStates.isEmpty()) {
+            return false;
+        }
+        long now = clock.millis();
+        return deferredNodeProbeStates.values().stream().anyMatch(state -> state.isDue(now));
+    }
+
+    private void consumeNodeChangeEvents(int size) {
+        while (size-- > 0) {
+            Boolean poll = nodeChangeEvents.poll();
+            if (poll == null) {
+                break;
+            }
+        }
+    }
+
+    private static final class DeferredNodeProbeState {
+        private int attemptCount;
+        private long nextProbeAtMillis;
+
+        /**
+         * Record a failed readiness probe and calculate the next probe time in
+         * {@code nextProbeAtMillis} from {@code DEFERRED_NODE_RETRY_DELAYS_MILLIS}.
+         *
+         * A failed probe does not retire the node. The node stays deferred until it is
+         * either admitted successfully into {@code nodeVersions}/{@code circles} or removed
+         * from eligible membership. The retry cadence is controlled by
+         * {@code DEFERRED_NODE_RETRY_DELAYS_MILLIS}: 20s, 60s, 300s, 600s, then 600s
+         * repeatedly.
+         *
+         * Time passing alone does not retry the node. A later hash-ring build pass must run.
+         * A retry happens only when a later {@code buildCircles(...)} or
+         * {@code buildCirclesForRealtime()} pass runs, the node is considered due by
+         * {@code hasDueDeferredNodeProbe()} or {@code getDueNodeIds(...)}, and
+         * {@code dataAccess.nodesInfo(...)} is sent again for that node.
+         *
+         * Typical triggers for that later build pass are:
+         * - cluster membership changes handled through {@code ClusterEventListener} or
+         *   {@code ClusterMembershipReader}
+         * - realtime call sites that invoke {@code buildCirclesForRealtime()}
+         * - connection-failure handling that invokes {@code buildCirclesForRealtime()}
+         *   when a node disappears
+         *
+         * @param now current time in milliseconds
+         */
+        private void recordFailure(long now) {
+            nextProbeAtMillis = now + DEFERRED_NODE_RETRY_DELAYS_MILLIS[Math
+                .min(attemptCount, DEFERRED_NODE_RETRY_DELAYS_MILLIS.length - 1)];
+            attemptCount++;
+        }
+
+        private boolean isDue(long now) {
+            return now >= nextProbeAtMillis;
+        }
     }
 }

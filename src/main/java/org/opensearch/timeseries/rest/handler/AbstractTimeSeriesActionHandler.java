@@ -8,7 +8,7 @@ package org.opensearch.timeseries.rest.handler;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
 import static org.opensearch.timeseries.constant.CommonMessages.CATEGORICAL_FIELD_TYPE_ERR_MSG;
 import static org.opensearch.timeseries.constant.CommonMessages.TIMESTAMP_VALIDATION_FAILED;
-import static org.opensearch.timeseries.indices.IndexManagement.getScripts;
+import static org.opensearch.timeseries.util.IndexResourceLoader.getScripts;
 import static org.opensearch.timeseries.util.ParseUtils.parseAggregators;
 import static org.opensearch.timeseries.util.RestHandlerUtils.XCONTENT_WITH_TYPE;
 import static org.opensearch.timeseries.util.RestHandlerUtils.isExceptionCausedByInvalidQuery;
@@ -35,9 +35,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
-import org.opensearch.action.admin.indices.mapping.get.GetFieldMappingsAction;
 import org.opensearch.action.admin.indices.mapping.get.GetFieldMappingsRequest;
-import org.opensearch.action.admin.indices.mapping.get.GetFieldMappingsResponse;
 import org.opensearch.action.admin.indices.settings.put.UpdateSettingsRequest;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
@@ -54,7 +52,6 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.UUIDs;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.commons.authuser.User;
@@ -73,12 +70,15 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.search.aggregations.AggregatorFactories;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.FieldMappingsView;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Feature;
@@ -87,16 +87,16 @@ import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
 import org.opensearch.timeseries.model.ValidationAspect;
 import org.opensearch.timeseries.model.ValidationIssueType;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.util.CrossClusterConfigUtils;
+import org.opensearch.timeseries.util.DataPlaneServiceUtils;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.RestHandlerUtils;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import com.google.common.collect.Sets;
 
@@ -122,10 +122,16 @@ import com.google.common.collect.Sets;
  * Usage of this class requires extending it to implement the abstract methods, which include but are not limited to
  * configuration validation, indexing logic, and model validation. Implementers will benefit from the common utilities
  * and framework provided by this class, focusing on the unique logic pertinent to their specific time series task.
- * 
+ *
  * @param <T> the response type that extends ActionResponse
+ * @param <IndexType> the time series index enum type
+ * @param <DataManagementType> the data management implementation type
+ * @param <TaskCacheManagerType> the task cache manager type
+ * @param <TaskTypeEnum> the task type enum
+ * @param <TaskClass> the time series task type
+ * @param <TaskManagerType> the task manager type
  */
-public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>>
+public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>>
     implements
         Processor<T> {
 
@@ -134,6 +140,8 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     public static final String NAME_REGEX = "[a-zA-Z0-9._-]+";
     public static final Integer MAX_NAME_SIZE = 64;
     public static final String CATEGORY_NOT_FOUND_ERR_MSG = "Can't find the categorical field %s in index %s";
+    public static final String AOSS_FLATTEN_CUSTOM_RESULT_INDEX_UNSUPPORTED =
+        "flatten_custom_result_index is not supported on AOSS data plane";
 
     public static String INVALID_NAME_SIZE = "Name should be shortened. The maximum limit is "
         + AbstractTimeSeriesActionHandler.MAX_NAME_SIZE
@@ -146,14 +154,13 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         .collect(Collectors.toSet());
 
     protected final Config config;
-    protected final IndexManagement<IndexType> timeSeriesIndices;
+    protected final DataManagementType timeSeriesIndices;
+    protected final DataAccess dataAccess;
     protected final boolean isDryRun;
-    protected final Client client;
     protected final String id;
-    protected final SecurityClientUtil clientUtil;
     protected final User user;
     protected final RestRequest.Method method;
-    protected final ConfigUpdateConfirmer<IndexType, IndexManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType> handler;
+    protected final ConfigUpdateConfirmer<IndexType, DataManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType> handler;
     protected final ClusterService clusterService;
     protected final NamedXContentRegistry xContentRegistry;
     protected final TimeValue requestTimeout;
@@ -167,6 +174,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     protected final AnalysisType context;
     protected final List<TaskTypeEnum> batchTasks;
     protected final boolean canUpdateEverything;
+    protected final RunContext runContext;
 
     protected final Integer maxSingleStreamConfigs;
     protected final Integer maxHCConfigs;
@@ -178,11 +186,9 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
 
     public AbstractTimeSeriesActionHandler(
         Config config,
-        IndexManagement<IndexType> timeSeriesIndices,
+        DataManagementType timeSeriesIndices,
         boolean isDryRun,
-        Client client,
         String id,
-        SecurityClientUtil clientUtil,
         User user,
         RestRequest.Method method,
         ClusterService clusterService,
@@ -205,14 +211,15 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         Clock clock,
         Settings settings,
         ValidationAspect configValidationAspect,
-        String configIndexName
+        String configIndexName,
+        DataAccess dataAccess,
+        RunContext runContext
     ) {
         this.config = config;
-        this.timeSeriesIndices = timeSeriesIndices;
+        this.timeSeriesIndices = Objects.requireNonNull(timeSeriesIndices, "timeSeriesIndices must not be null");
+        this.dataAccess = Objects.requireNonNull(dataAccess, "metadataAccess must not be null");
         this.isDryRun = isDryRun;
-        this.client = client;
         this.id = id == null ? "" : id;
-        this.clientUtil = clientUtil;
         this.user = user;
         this.method = method;
         this.clusterService = clusterService;
@@ -232,10 +239,11 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         this.maxHCConfigs = maxHCConfigs;
         this.clock = clock;
         this.settings = settings;
-        this.handler = new ConfigUpdateConfirmer<>(taskManager, transportService);
+        this.handler = new ConfigUpdateConfirmer<>(taskManager, transportService, timeSeriesIndices);
         this.configValidationAspect = configValidationAspect;
         this.breakingUIChange = false;
         this.configIndexName = configIndexName;
+        this.runContext = Objects.requireNonNull(runContext, "runContext must not be null");
     }
 
     /**
@@ -258,39 +266,65 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
      */
     @Override
     public void start(ActionListener<T> listener) {
+        if (isAossUnsupportedFlatteningRequested()) {
+            listener.onFailure(new OpenSearchStatusException(AOSS_FLATTEN_CUSTOM_RESULT_INDEX_UNSUPPORTED, RestStatus.BAD_REQUEST));
+            return;
+        }
+
         String resultIndexOrAlias = config.getCustomResultIndexOrAlias();
+        logger
+            .info(
+                "Starting {} handler for config {} tenant {} custom result index {} dryRun={}",
+                method,
+                config.getId(),
+                config.getTenantId(),
+                resultIndexOrAlias,
+                isDryRun
+            );
         // use default detector result index which is system index
         if (resultIndexOrAlias == null) {
             createOrUpdateConfig(listener);
             return;
         }
         if (this.isDryRun) {
-            if (timeSeriesIndices.doesIndexExist(resultIndexOrAlias) || timeSeriesIndices.doesAliasExist(resultIndexOrAlias)) {
-                timeSeriesIndices
-                    .validateResultIndexAndExecute(
-                        resultIndexOrAlias,
-                        () -> createOrUpdateConfig(listener),
-                        false,
-                        ActionListener.wrap(r -> createOrUpdateConfig(listener), ex -> {
-                            logger.error(ex);
-                            listener.onFailure(createValidationException(ex.getMessage(), ValidationIssueType.RESULT_INDEX));
-                            return;
-                        })
-                    );
-                return;
-            } else {
+            timeSeriesIndices.doesResultIndexOrAliasExists(resultIndexOrAlias, ActionListener.wrap(exists -> {
+                if (exists) {
+                    timeSeriesIndices
+                        .validateResultIndexAndExecute(
+                            resultIndexOrAlias,
+                            () -> createOrUpdateConfig(listener),
+                            false,
+                            ActionListener.wrap(r -> createOrUpdateConfig(listener), ex -> {
+                                logger.error(ex);
+                                listener.onFailure(createValidationException(ex.getMessage(), ValidationIssueType.RESULT_INDEX));
+                                return;
+                            }),
+                            config.getTenantId(),
+                            config.getDataSourceId()
+                        );
+                    return;
+                }
                 createOrUpdateConfig(listener);
-                return;
-            }
+            }, listener::onFailure), config.getTenantId(), config.getDataSourceId());
+            return;
         }
         // use custom result index if not validating and resultIndex not null
-        timeSeriesIndices.initCustomResultIndexAndExecute(resultIndexOrAlias, () -> createOrUpdateConfig(listener), listener);
+        logger
+            .info("Initializing custom result index {} for config {} tenant {}", resultIndexOrAlias, config.getId(), config.getTenantId());
+        timeSeriesIndices
+            .initCustomResultIndexAndExecute(
+                resultIndexOrAlias,
+                () -> createOrUpdateConfig(listener),
+                listener,
+                config.getTenantId(),
+                config.getDataSourceId()
+            );
     }
 
     // if isDryRun is true then this method is being executed through Validation API meaning actual
     // index won't be created, only validation checks will be executed throughout the class
     private void createOrUpdateConfig(ActionListener<T> listener) {
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
+        runContext.runWithSystemAuth(() -> {
             if (!timeSeriesIndices.doesConfigIndexExist() && !this.isDryRun) {
                 logger.info("Config Indices do not exist");
                 timeSeriesIndices
@@ -305,10 +339,16 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                 logger.info("DryRun variable " + this.isDryRun);
                 validateName(this.isDryRun, listener);
             }
-        } catch (Exception e) {
-            logger.error("Failed to create or update forecaster " + id, e);
-            listener.onFailure(e);
-        }
+        }, exception -> {
+            logger.error("Failed to create or update forecaster " + id, exception);
+            listener.onFailure(exception);
+        });
+    }
+
+    private boolean isAossUnsupportedFlatteningRequested() {
+        return DataPlaneServiceUtils.isAossDataPlane(settings)
+            && config.getCustomResultIndexOrAlias() != null
+            && config.getFlattenResultIndexMapping();
     }
 
     protected void validateName(boolean indexingDryRun, ActionListener<T> listener) {
@@ -344,12 +384,10 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
             GetFieldMappingsRequest getMappingsRequestForIndex = new GetFieldMappingsRequest();
             getMappingsRequestForIndex.indices((clusterIndicesEntry.getValue().toArray(new String[0]))).fields(givenTimeField);
             getMappingsRequestForIndex.indicesOptions(IndicesOptions.strictExpand());
-            Client targetClusterClient = CrossClusterConfigUtils.getClientForCluster(clusterIndicesEntry.getKey(), client, clusterService);
-            ActionListener<GetFieldMappingsResponse> getMappingResponseListener = ActionListener.wrap(getMappingsResponse -> {
+            ActionListener<FieldMappingsView> getMappingResponseListener = ActionListener.wrap(getMappingsResponse -> {
                 boolean foundField = false;
-                Map<String, Map<String, GetFieldMappingsResponse.FieldMappingMetadata>> mappingsByIndex = getMappingsResponse.mappings();
-                for (Map.Entry<String, Map<String, GetFieldMappingsResponse.FieldMappingMetadata>> mappingsByField : mappingsByIndex
-                    .entrySet()) {
+                Map<String, Map<String, FieldMappingsView.FieldMapping>> mappingsByIndex = getMappingsResponse.mappings();
+                for (Map.Entry<String, Map<String, FieldMappingsView.FieldMapping>> mappingsByField : mappingsByIndex.entrySet()) {
                     if (mappingsByField.getValue().isEmpty()) {
                         multiGetMappingResponseListener
                             .onFailure(
@@ -367,10 +405,8 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                             );
                         return;
                     }
-                    for (Map.Entry<String, GetFieldMappingsResponse.FieldMappingMetadata> field2Metadata : mappingsByField
-                        .getValue()
-                        .entrySet()) {
-                        GetFieldMappingsResponse.FieldMappingMetadata fieldMetadata = field2Metadata.getValue();
+                    for (Map.Entry<String, FieldMappingsView.FieldMapping> field2Metadata : mappingsByField.getValue().entrySet()) {
+                        FieldMappingsView.FieldMapping fieldMetadata = field2Metadata.getValue();
                         if (fieldMetadata != null) {
                             // sourceAsMap returns sth like {host2={type=keyword}} with host2 being a nested field
                             Map<String, Object> fieldMap = fieldMetadata.sourceAsMap();
@@ -416,12 +452,12 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                 logger.error(errorMessage, e);
                 multiGetMappingResponseListener.onFailure(new IllegalArgumentException(errorMessage, e));
             });
-            clientUtil
-                .executeWithInjectedSecurity(
-                    GetFieldMappingsAction.INSTANCE,
+            dataAccess
+                .getFieldMappings(
                     getMappingsRequestForIndex,
                     user,
-                    targetClusterClient,
+                    TenantContext.user(config),
+                    clusterIndicesEntry.getKey(),
                     context,
                     getMappingResponseListener
                 );
@@ -477,14 +513,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
 
     private void handlePutRequest(boolean indexingDryRun, ActionListener<T> listener) {
         handler
-            .confirmJobRunning(
-                clusterService,
-                client,
-                id,
-                listener,
-                () -> { updateConfig(id, indexingDryRun, listener); },
-                xContentRegistry
-            );
+            .confirmJobRunning(id, config.getTenantId(), listener, () -> { updateConfig(id, indexingDryRun, listener); }, xContentRegistry);
     }
 
     private void handlePostRequest(boolean indexingDryRun, ActionListener<T> listener) {
@@ -511,7 +540,9 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
             .initFlattenedResultIndex(
                 flattenedResultIndexAlias,
                 ActionListener
-                    .wrap(initResponse -> setupIngestPipeline(flattenedResultIndexAlias, listener, onSuccess), listener::onFailure)
+                    .wrap(initResponse -> setupIngestPipeline(flattenedResultIndexAlias, listener, onSuccess), listener::onFailure),
+                config.getTenantId(),
+                config.getDataSourceId()
             );
     }
 
@@ -522,7 +553,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
             BytesReference pipelineSource = createPipelineDefinition(flattenedResultIndexAlias);
             PutPipelineRequest putPipelineRequest = new PutPipelineRequest(pipelineId, pipelineSource, XContentType.JSON);
 
-            client.admin().cluster().putPipeline(putPipelineRequest, ActionListener.wrap(putPipelineResponse -> {
+            dataAccess.putPipeline(putPipelineRequest, user, TenantContext.user(config), ActionListener.wrap(putPipelineResponse -> {
                 logger.info("Ingest pipeline created successfully for pipelineId: {}", pipelineId);
                 bindIngestPipelineWithFlattenedResultIndex(pipelineId, flattenedResultIndexAlias, listener, onSuccess);
             }, exception -> {
@@ -544,7 +575,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     ) {
         UpdateSettingsRequest updateSettingsRequest = buildUpdateSettingsRequest(flattenedResultIndexAlias, pipelineId);
 
-        client.admin().indices().updateSettings(updateSettingsRequest, ActionListener.wrap(updateSettingsResponse -> {
+        dataAccess.updateSettings(updateSettingsRequest, user, TenantContext.user(config), ActionListener.wrap(updateSettingsResponse -> {
             logger.info("Successfully updated settings for index: {} with pipeline: {}", flattenedResultIndexAlias, pipelineId);
             onSuccess.accept(listener);
         }, exception -> {
@@ -592,9 +623,10 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
 
     protected void updateConfig(String id, boolean indexingDryRun, ActionListener<T> listener) {
         GetRequest request = new GetRequest(configIndexName, id);
-        client
+        dataAccess
             .get(
                 request,
+                TenantContext.user(config),
                 ActionListener
                     .wrap(
                         response -> onGetConfigResponse(response, indexingDryRun, id, listener),
@@ -671,7 +703,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                         listener::onFailure
                     );
             }
-            handler.confirmBatchRunning(id, batchTasks, confirmBatchRunningListener);
+            handler.confirmBatchRunning(id, existingConfig.getTenantId(), batchTasks, confirmBatchRunningListener);
         } catch (Exception e) {
             String message = "Failed to parse config " + id;
             logger.error(message, e);
@@ -687,11 +719,11 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     ) {
         // The pipeline name _none specifies that the index does not have an ingest pipeline.
         UpdateSettingsRequest updateSettingsRequest = buildUpdateSettingsRequest(existingConfig.getFlattenResultIndexAlias(), "_none");
-        client
-            .admin()
-            .indices()
+        dataAccess
             .updateSettings(
                 updateSettingsRequest,
+                user,
+                TenantContext.user(existingConfig),
                 ActionListener
                     .wrap(
                         updateSettingsResponse -> deleteIngestPipeline(existingConfig, listener, id, indexingDryRun),
@@ -703,11 +735,11 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     private void deleteIngestPipeline(Config existingConfig, ActionListener<T> listener, String id, boolean indexingDryRun) {
         String pipelineId = existingConfig.getFlattenResultIndexIngestPipelineName();
 
-        client
-            .admin()
-            .cluster()
+        dataAccess
             .deletePipeline(
                 new DeletePipelineRequest(pipelineId),
+                user,
+                TenantContext.user(existingConfig),
                 ActionListener
                     .wrap(
                         deleteIngestPipelineResponse -> searchConfigInputIndices(id, indexingDryRun, listener),
@@ -722,9 +754,10 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
 
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(query).size(0).timeout(requestTimeout);
             SearchRequest searchRequest = new SearchRequest(configIndexName).source(searchSourceBuilder);
-            client
+            dataAccess
                 .search(
                     searchRequest,
+                    TenantContext.user(config),
                     ActionListener
                         .wrap(
                             response -> onSearchHCConfigResponse(response, configId, indexingDryRun, listener),
@@ -749,9 +782,10 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
 
                     SearchRequest searchRequest = new SearchRequest(configIndexName).source(searchSourceBuilder);
 
-                    client
+                    dataAccess
                         .search(
                             searchRequest,
+                            TenantContext.user(config),
                             ActionListener
                                 .wrap(
                                     response -> onSearchTotalConfigResponse(response, indexingDryRun, listener),
@@ -830,7 +864,6 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         // throws validation exception before reaching here
 
         String categoryField0 = categoryField.get(0);
-        Client targetClusterClient = CrossClusterConfigUtils.getClientForCluster(clusterIndicesEntry.getKey(), client, clusterService);
         // Create the GetFieldMappingsRequest for each index
         GetFieldMappingsRequest getMappingsRequestForIndex = new GetFieldMappingsRequest();
         getMappingsRequestForIndex
@@ -839,7 +872,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         getMappingsRequestForIndex.indicesOptions(IndicesOptions.strictExpand());
 
         // Define the listener for each getMapping request
-        ActionListener<GetFieldMappingsResponse> getMappingsListener = ActionListener.wrap(getMappingsResponse -> {
+        ActionListener<FieldMappingsView> getMappingsListener = ActionListener.wrap(getMappingsResponse -> {
             // example getMappingsResponse:
             // GetFieldMappingsResponse{mappings={server-metrics={_doc={service=FieldMappingMetadata{fullName='service',
             // source=org.opensearch.core.common.bytes.BytesArray@7ba87dbd}}}}}
@@ -848,18 +881,15 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
             // source=org.opensearch.core.common.bytes.BytesArray@8fb4de08}}}}}
             boolean foundField = false;
 
-            // Review why the change from FieldMappingMetadata to GetFieldMappingsResponse.FieldMappingMetadata
-            Map<String, Map<String, GetFieldMappingsResponse.FieldMappingMetadata>> mappingsByIndex = getMappingsResponse.mappings();
+            Map<String, Map<String, FieldMappingsView.FieldMapping>> mappingsByIndex = getMappingsResponse.mappings();
 
-            for (Map<String, GetFieldMappingsResponse.FieldMappingMetadata> mappingsByField : mappingsByIndex.values()) {
-                for (Map.Entry<String, GetFieldMappingsResponse.FieldMappingMetadata> field2Metadata : mappingsByField.entrySet()) {
+            for (Map<String, FieldMappingsView.FieldMapping> mappingsByField : mappingsByIndex.values()) {
+                for (Map.Entry<String, FieldMappingsView.FieldMapping> field2Metadata : mappingsByField.entrySet()) {
                     // example output:
                     // host_nest.host2=FieldMappingMetadata{fullName='host_nest.host2',
                     // source=org.opensearch.core.common.bytes.BytesArray@8fb4de08}
 
-                    // Review why the change from FieldMappingMetadata to GetFieldMappingsResponse.FieldMappingMetadata
-
-                    GetFieldMappingsResponse.FieldMappingMetadata fieldMetadata = field2Metadata.getValue();
+                    FieldMappingsView.FieldMapping fieldMetadata = field2Metadata.getValue();
 
                     if (fieldMetadata != null) {
                         // sourceAsMap returns sth like {host2={type=keyword}} with host2 being a nested field
@@ -906,12 +936,12 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
             logger.error(message, error);
             listener.onFailure(new IllegalArgumentException(message));
         });
-        clientUtil
-            .executeWithInjectedSecurity(
-                GetFieldMappingsAction.INSTANCE,
+        dataAccess
+            .getFieldMappings(
                 getMappingsRequestForIndex,
                 user,
-                targetClusterClient,
+                TenantContext.user(config),
+                clusterIndicesEntry.getKey(),
                 context,
                 getMappingsListener
             );
@@ -931,7 +961,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                 exception -> listener.onFailure(exception)
             );
 
-        clientUtil.asyncRequestWithInjectedSecurity(searchRequest, client::search, user, client, context, searchResponseListener);
+        dataAccess.searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config), context, searchResponseListener);
     }
 
     protected void onSearchConfigInputIndicesResponse(
@@ -953,19 +983,22 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         }
     }
 
-    protected void checkConfigNameExists(String configId, boolean indexingDryRun, ActionListener<T> listener) throws IOException {
+    protected void checkConfigNameExists(String configId, boolean indexingDryRun, String tenantId, ActionListener<T> listener)
+        throws IOException {
         if (timeSeriesIndices.doesConfigIndexExist()) {
             BoolQueryBuilder boolQueryBuilder = new BoolQueryBuilder();
             // src/main/resources/mappings/config.json#L14
-            boolQueryBuilder.must(QueryBuilders.termQuery("name.keyword", config.getName()));
+            boolQueryBuilder.must(QueryBuilders.termsQuery("name.keyword", config.getName()));
             if (StringUtils.isNotBlank(configId)) {
                 boolQueryBuilder.mustNot(QueryBuilders.termQuery(RestHandlerUtils._ID, configId));
             }
             SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQueryBuilder).timeout(requestTimeout);
             SearchRequest searchRequest = new SearchRequest(configIndexName).source(searchSourceBuilder);
-            client
+            // tenantId is added during search
+            dataAccess
                 .search(
                     searchRequest,
+                    TenantContext.user(tenantId),
                     ActionListener
                         .wrap(
                             searchResponse -> onSearchConfigNameResponse(searchResponse, config.getName(), indexingDryRun, listener),
@@ -1024,60 +1057,62 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         Config copiedConfig = copyConfig(user, config);
         IndexRequest indexRequest = new IndexRequest(configIndexName)
             .setRefreshPolicy(refreshPolicy)
-            .source(copiedConfig.toXContent(XContentFactory.jsonBuilder(), XCONTENT_WITH_TYPE))
-            .setIfSeqNo(seqNo)
-            .setIfPrimaryTerm(primaryTerm)
-            .timeout(requestTimeout);
+            .timeout(requestTimeout)
+            .source(copiedConfig.toXContent(XContentFactory.jsonBuilder(), XCONTENT_WITH_TYPE));
+
+        if (seqNo != null && primaryTerm != null) {
+            indexRequest.setIfSeqNo(seqNo);
+            indexRequest.setIfPrimaryTerm(primaryTerm);
+        }
         if (StringUtils.isNotBlank(id)) {
             indexRequest.id(id);
-        }
-        /*
-         * We only prepend "forecast-" to the document ID when the config is for a Forecaster.
-         *
-         * Rationale:
-         *  1) AD configs already existed without any enforced ID scheme.
-         *     Forecasting is new, so we can safely introduce a prefix now.
-         *
-         *  2) Forecasting and AD share a single "job index" in the plugin design because
-         *     a single plugin can only use one job index. Moreover, we have the assumption
-         *     across our code base that a "job id" equals its corresponding "config id," and
-         *     changing that assumption would be error-prone. We must keep them in the same
-         *     index but still uniquely separated.
-         *
-         *  3) We cannot merge forecasting and AD configs under the same index because
-         *   a) We do NOT allow duplicate config names, and it would be odd to force users to
-         *   avoid naming a forecaster the same as a detector considering they’re separate
-         *   functionalities in the UI.
-         *   b) A new security feature, Resource Sharing, will only apply to one "resource type"
-         *   per config index. In other words, if we try to , it complicates (or breaks) the
-         *   security model.
-         *
-         *  4) Why "forecast-" + UUIDs.randomBase64UUID() won't collide with AD docs:
-         *     - AD doc IDs are auto-generated by OpenSearch as ~128-bit Base64 strings,
-         *      whereas the forecast ID includes a 9-character ASCII prefix "forecast-"
-         *      before those Base64 characters.
-         *     - This means the **lengths** of the final IDs are different (forecast IDs
-         *       are longer by the prefix length), so a random 128-bit AD ID cannot match
-         *       the "forecast-" prefixed ID.
-         *     - Even if you ignore length, the literal ASCII prefix “forecast-” must match
-         *       byte-for-byte, which is astronomically unlikely to be produced by random
-         *       128-bit generation.
-         *
-         *  6) Using a ~25-byte document ID in OpenSearch:
-         *     - OpenSearch supports _id fields up to 512 bytes, so a 25-byte ID does not
-         *      cause technical issues.
-         *     - There's minimal overhead using IDs of this length, and it's generally not
-         *       problematic for indexing or retrieval.
-         *
-         * Overall, "forecast-" + UUIDs.randomBase64UUID() ensures forecast config docs
-         * are distinguishable from AD docs in the shared job index, while preserving
-         * a random component for uniqueness.
-         */
-        else if (config instanceof Forecaster) {
+        } else if (copiedConfig instanceof Forecaster) {
+            /*
+            * We only prepend "forecast-" to the document ID when the config is for a Forecaster.
+            *
+            * Rationale:
+            *  1) AD configs already existed without any enforced ID scheme.
+            *     Forecasting is new, so we can safely introduce a prefix now.
+            *
+            *  2) Forecasting and AD share a single "job index" in the plugin design because
+            *     a single plugin can only use one job index. Moreover, we have the assumption
+            *     across our code base that a "job id" equals its corresponding "config id," and
+            *     changing that assumption would be error-prone. We must keep them in the same
+            *     index but still uniquely separated.
+            *
+            *  3) We cannot merge forecasting and AD configs under the same index because
+            *   a) We do NOT allow duplicate config names, and it would be odd to force users to
+            *   avoid naming a forecaster the same as a detector considering they’re separate
+            *   functionalities in the UI.
+            *   b) A new security feature, Resource Sharing, will only apply to one "resource type"
+            *   per config index. In other words, if we try to , it complicates (or breaks) the
+            *   security model.
+            *
+            *  4) Why "forecast-" + UUIDs.randomBase64UUID() won't collide with AD docs:
+            *     - AD doc IDs are auto-generated by OpenSearch as ~128-bit Base64 strings,
+            *      whereas the forecast ID includes a 9-character ASCII prefix "forecast-"
+            *      before those Base64 characters.
+            *     - This means the **lengths** of the final IDs are different (forecast IDs
+            *       are longer by the prefix length), so a random 128-bit AD ID cannot match
+            *       the "forecast-" prefixed ID.
+            *     - Even if you ignore length, the literal ASCII prefix “forecast-” must match
+            *       byte-for-byte, which is astronomically unlikely to be produced by random
+            *       128-bit generation.
+            *
+            *  6) Using a ~25-byte document ID in OpenSearch:
+            *     - OpenSearch supports _id fields up to 512 bytes, so a 25-byte ID does not
+            *      cause technical issues.
+            *     - There's minimal overhead using IDs of this length, and it's generally not
+            *       problematic for indexing or retrieval.
+            *
+            * Overall, "forecast-" + UUIDs.randomBase64UUID() ensures forecast config docs
+            * are distinguishable from AD docs in the shared job index, while preserving
+            * a random component for uniqueness.
+            */
             indexRequest.id("forecast-" + UUIDs.randomBase64UUID());
         }
 
-        client.index(indexRequest, new ActionListener<IndexResponse>() {
+        dataAccess.index(indexRequest, TenantContext.user(copiedConfig), new ActionListener<IndexResponse>() {
             @Override
             public void onResponse(IndexResponse indexResponse) {
                 String errorMsg = checkShardsFailure(indexResponse);
@@ -1085,9 +1120,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                     listener.onFailure(new OpenSearchStatusException(errorMsg, indexResponse.status()));
                     return;
                 }
-
                 listener.onResponse(createIndexConfigResponse(indexResponse, copiedConfig));
-
             }
 
             @Override
@@ -1139,7 +1172,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
     // https://github.com/opensearch-project/anomaly-detection/issues/39
     protected void validateConfigFeatures(String id, boolean indexingDryRun, ActionListener<T> listener) throws IOException {
         if (config != null && (config.getFeatureAttributes() == null || config.getFeatureAttributes().isEmpty())) {
-            checkConfigNameExists(id, indexingDryRun, listener);
+            checkConfigNameExists(id, indexingDryRun, config.getTenantId(), listener);
             return;
         }
         // checking configuration/syntax error of detector features
@@ -1154,7 +1187,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
         }
         // checking runtime error from feature query
         ActionListener<MergeableList<Optional<double[]>>> validateFeatureQueriesListener = ActionListener.wrap(response -> {
-            checkConfigNameExists(id, indexingDryRun, listener);
+            checkConfigNameExists(id, indexingDryRun, config.getTenantId(), listener);
         }, exception -> { listener.onFailure(createValidationException(exception.getMessage(), ValidationIssueType.FEATURE_ATTRIBUTES)); });
         MultiResponsesDelegateActionListener<MergeableList<Optional<double[]>>> multiFeatureQueriesResponseListener =
             new MultiResponsesDelegateActionListener<MergeableList<Optional<double[]>>>(
@@ -1202,7 +1235,7 @@ public abstract class AbstractTimeSeriesActionHandler<T extends ActionResponse, 
                         .onResponse(new MergeableList<>(new ArrayList<>(Collections.singletonList(Optional.empty()))));
                 }
             });
-            clientUtil.asyncRequestWithInjectedSecurity(searchRequest, client::search, user, client, context, searchResponseListener);
+            dataAccess.searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config), context, searchResponseListener);
         }
     }
 

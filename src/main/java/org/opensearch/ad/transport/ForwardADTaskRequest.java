@@ -100,6 +100,12 @@ public class ForwardADTaskRequest extends ActionRequest {
         this.staleRunningEntities = staleRunningEntities;
     }
 
+    public static ForwardADTaskRequest fromTaskAndDetector(ADTask adTask, AnomalyDetector detector, ADTaskAction adTaskAction) {
+        ForwardADTaskRequest request = new ForwardADTaskRequest(adTask, adTaskAction);
+        request.detector = detector;
+        return request;
+    }
+
     public ForwardADTaskRequest(StreamInput in) throws IOException {
         super(in);
         this.detector = new AnomalyDetector(in);

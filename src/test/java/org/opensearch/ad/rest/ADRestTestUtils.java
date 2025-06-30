@@ -230,6 +230,7 @@ public class ADRestTestUtils {
             null,
             now,
             new IntervalTimeConfiguration(detectionIntervalInMinutes, ChronoUnit.MINUTES),
+            null,
             null
         );
 
@@ -381,6 +382,7 @@ public class ADRestTestUtils {
                 Instant.ofEpochMilli(enabledTime),
                 null,
                 Instant.ofEpochMilli(lastUpdateTime),
+                null,
                 null,
                 null,
                 null,

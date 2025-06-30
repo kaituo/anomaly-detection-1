@@ -12,13 +12,13 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.rest.RestRequest.Method;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
 
 /**
  * ValidateForecasterActionHandler extends the AbstractForecasterActionHandler to specifically handle
@@ -53,9 +53,8 @@ public class ValidateForecasterActionHandler extends AbstractForecasterActionHan
 
     public ValidateForecasterActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
-        ForecastIndexManagement forecastIndices,
+        DataAccess dataAccess,
+        ForecastDelegatingDataManagement forecastIndices,
         Config forecaster,
         TimeValue requestTimeout,
         Integer maxSingleStreamForecasters,
@@ -68,12 +67,12 @@ public class ValidateForecasterActionHandler extends AbstractForecasterActionHan
         SearchFeatureDao searchFeatureDao,
         String validationType,
         Clock clock,
-        Settings settings
+        Settings settings,
+        RunContext runContext
     ) {
         super(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             null,
             forecastIndices,
             Config.NO_ID,
@@ -94,7 +93,8 @@ public class ValidateForecasterActionHandler extends AbstractForecasterActionHan
             validationType,
             true,
             clock,
-            settings
+            settings,
+            runContext
         );
     }
 

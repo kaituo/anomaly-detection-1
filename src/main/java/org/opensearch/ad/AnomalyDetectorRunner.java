@@ -29,8 +29,8 @@ import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.EntityAnomalyResult;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.constant.CommonValue;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.Features;
@@ -69,7 +69,7 @@ public final class AnomalyDetectorRunner {
         AnomalyDetector detector,
         Instant startTime,
         Instant endTime,
-        ThreadContext.StoredContext context,
+        RunContext.RestorableContext context,
         ActionListener<List<AnomalyResult>> listener
     ) throws IOException {
         context.restore();
@@ -195,7 +195,8 @@ public final class AnomalyDetectorRunner {
                         Optional.ofNullable(entity),
                         detector.getUser(),
                         CommonValue.NO_SCHEMA_VERSION,
-                        null
+                        null,
+                        detector.getTenantId()
                     );
                     anomalyResults.add(result);
                 }

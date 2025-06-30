@@ -19,10 +19,10 @@ import org.opensearch.action.support.nodes.BaseNodesResponse;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
-import org.opensearch.core.xcontent.ToXContentFragment;
+import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
 
-public class CronResponse extends BaseNodesResponse<CronNodeResponse> implements ToXContentFragment {
+public class CronResponse extends BaseNodesResponse<CronNodeResponse> implements ToXContentObject {
     public static String NODES_JSON_KEY = "nodes";
 
     public CronResponse(StreamInput in) throws IOException {
@@ -45,11 +45,13 @@ public class CronResponse extends BaseNodesResponse<CronNodeResponse> implements
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+        builder.startObject();
         builder.startArray(NODES_JSON_KEY);
         for (CronNodeResponse nodeResp : getNodes()) {
             nodeResp.toXContent(builder, params);
         }
         builder.endArray();
+        builder.endObject();
         return builder;
     }
 }

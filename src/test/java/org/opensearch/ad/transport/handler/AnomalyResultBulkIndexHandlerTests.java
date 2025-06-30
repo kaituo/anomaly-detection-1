@@ -12,6 +12,7 @@
 package org.opensearch.ad.transport.handler;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.eq;
@@ -24,23 +25,22 @@ import static org.mockito.Mockito.when;
 import static org.opensearch.ad.constant.ADCommonName.ANOMALY_RESULT_INDEX_ALIAS;
 
 import java.io.IOException;
-import java.time.Clock;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.action.DocWriteRequest;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
-import org.opensearch.action.bulk.BulkAction;
 import org.opensearch.action.bulk.BulkItemResponse;
-import org.opensearch.action.bulk.BulkRequestBuilder;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.ad.ADUnitTestCase;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
-import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.common.lease.Releasable;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.concurrency.OpenSearchRejectedExecutionException;
@@ -49,44 +49,44 @@ import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.index.engine.VersionConflictEngineException;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
-import org.opensearch.timeseries.util.ClientUtil;
-import org.opensearch.timeseries.util.IndexUtils;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 
 import com.google.common.collect.ImmutableList;
 
 public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
 
-    private ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> bulkIndexHandler;
-    private Client client;
-    private IndexUtils indexUtils;
+    private ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADDelegatingDataManagement> bulkIndexHandler;
     private ActionListener<BulkResponse> listener;
-    private ADIndexManagement anomalyDetectionIndices;
+    private ADDelegatingDataManagement anomalyDetectionIndices;
     private String configId;
+    private DataAccess dataAccess;
+    private DiscoveryNodeSelector discoveryNodeSelector;
 
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
-        client = mock(Client.class);
+        anomalyDetectionIndices = mock(ADDelegatingDataManagement.class);
         Settings settings = Settings.EMPTY;
-        Clock clock = mock(Clock.class);
-        ThreadPool threadpool = mock(ThreadPool.class);
-        ClientUtil clientUtil = new ClientUtil(client);
-        indexUtils = mock(IndexUtils.class);
-        ClusterService clusterService = mock(ClusterService.class);
+        dataAccess = mock(DataAccess.class);
+        discoveryNodeSelector = mock(DiscoveryNodeSelector.class);
         ThreadPool threadPool = mock(ThreadPool.class);
+        setResultIndexOrAliasExists(false);
+        doAnswer(invocation -> {
+            ActionListener<BulkResponse> l = invocation.getArgument(2);
+            l.onResponse(mock(BulkResponse.class));
+            return null;
+        }).when(dataAccess).bulk(any(), any(), any());
         bulkIndexHandler = new ResultBulkIndexingHandler(
-            client,
+            dataAccess,
             settings,
             threadPool,
             ANOMALY_RESULT_INDEX_ALIAS,
             anomalyDetectionIndices,
-            clientUtil,
-            indexUtils,
-            clusterService,
+            discoveryNodeSelector,
             AnomalyDetectorSettings.AD_BACKOFF_INITIAL_DELAY,
             AnomalyDetectorSettings.AD_MAX_RETRY_FOR_BACKOFF
         );
@@ -100,51 +100,70 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
         configId = "testId";
     }
 
+    private void setResultIndexOrAliasExists(boolean... existsValues) {
+        AtomicInteger invocationCount = new AtomicInteger();
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            ActionListener<Boolean> existsListener = invocation.getArgument(1);
+            int responseIndex = Math.min(invocationCount.getAndIncrement(), existsValues.length - 1);
+            existsListener.onResponse(existsValues[responseIndex]);
+            return null;
+        }).when(anomalyDetectionIndices).doesResultIndexOrAliasExists(any(), any(), nullable(String.class), any());
+    }
+
+    private void failResultIndexOrAliasExists(Exception exception) {
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked")
+            ActionListener<Boolean> existsListener = invocation.getArgument(1);
+            existsListener.onFailure(exception);
+            return null;
+        }).when(anomalyDetectionIndices).doesResultIndexOrAliasExists(any(), any(), nullable(String.class), any());
+    }
+
     public void testNullAnomalyResults() {
-        bulkIndexHandler.bulk(null, null, null, listener);
+        bulkIndexHandler.bulk(null, null, null, null, listener);
         verify(listener, times(1)).onResponse(null);
         verify(anomalyDetectionIndices, never()).doesConfigIndexExist();
     }
 
     public void testAnomalyResultBulkIndexHandler_IndexNotExist() {
-        when(anomalyDetectionIndices.doesIndexExist("testIndex")).thenReturn(false);
-        when(anomalyDetectionIndices.doesAliasExist("testIndex")).thenReturn(false);
+        setResultIndexOrAliasExists(false);
         AnomalyResult anomalyResult = mock(AnomalyResult.class);
         when(anomalyResult.getConfigId()).thenReturn(configId);
 
-        bulkIndexHandler.bulk("testIndex", ImmutableList.of(anomalyResult), configId, listener);
-        verify(anomalyDetectionIndices, times(1)).initCustomResultIndexDirectly(eq("testIndex"), any());
+        bulkIndexHandler.bulk("testIndex", ImmutableList.of(anomalyResult), configId, null, listener);
+        verify(anomalyDetectionIndices, times(1)).initCustomResultIndexDirectly(eq("testIndex"), any(), any(), any());
     }
 
     public void testAnomalyResultBulkIndexHandler_InValidResultIndexMapping() {
-        when(anomalyDetectionIndices.doesIndexExist("testIndex")).thenReturn(true);
+        setResultIndexOrAliasExists(true);
         doAnswer(invocation -> {
             ActionListener<Boolean> listener = invocation.getArgument(1);
             listener.onResponse(false);
             return null;
-        }).when(anomalyDetectionIndices).validateResultIndexMapping(eq("testIndex"), any());
+        }).when(anomalyDetectionIndices).validateResultIndexMapping(eq("testIndex"), any(), any(), any());
 
         AnomalyResult anomalyResult = mock(AnomalyResult.class);
 
         when(anomalyResult.getConfigId()).thenReturn(configId);
 
-        bulkIndexHandler.bulk("testIndex", ImmutableList.of(anomalyResult), configId, listener);
+        bulkIndexHandler.bulk("testIndex", ImmutableList.of(anomalyResult), configId, null, listener);
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertEquals("wrong index mapping of custom result index", exceptionCaptor.getValue().getMessage());
     }
 
     public void testAnomalyResultBulkIndexHandler_FailBulkIndexAnomaly() throws IOException {
-        when(anomalyDetectionIndices.doesIndexExist("testIndex")).thenReturn(true);
+        setResultIndexOrAliasExists(true);
         doAnswer(invocation -> {
             ActionListener<Boolean> listener = invocation.getArgument(1);
             listener.onResponse(true);
             return null;
-        }).when(anomalyDetectionIndices).validateResultIndexMapping(eq("testIndex"), any());
+        }).when(anomalyDetectionIndices).validateResultIndexMapping(eq("testIndex"), any(), any(), any());
         AnomalyResult anomalyResult = mock(AnomalyResult.class);
         when(anomalyResult.getConfigId()).thenReturn(configId);
         when(anomalyResult.toXContent(any(), any())).thenThrow(new RuntimeException());
 
-        bulkIndexHandler.bulk("testIndex", ImmutableList.of(anomalyResult), configId, listener);
+        bulkIndexHandler.bulk("testIndex", ImmutableList.of(anomalyResult), configId, null, listener);
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertEquals("Failed to prepare request to bulk index results", exceptionCaptor.getValue().getMessage());
     }
@@ -155,17 +174,15 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
             listener.onResponse(new CreateIndexResponse(false, false, ANOMALY_RESULT_INDEX_ALIAS));
             return null;
         }).when(anomalyDetectionIndices).initDefaultResultIndexDirectly(any());
-        bulkIndexHandler.bulk(null, ImmutableList.of(mock(AnomalyResult.class)), configId, listener);
+        bulkIndexHandler.bulk(null, ImmutableList.of(mock(AnomalyResult.class)), configId, null, listener);
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertEquals("Creating result index with mappings call not acknowledged", exceptionCaptor.getValue().getMessage());
     }
 
     public void testWrongAnomalyResult() {
-        BulkRequestBuilder bulkRequestBuilder = new BulkRequestBuilder(client, BulkAction.INSTANCE);
-        doReturn(bulkRequestBuilder).when(client).prepareBulk();
         doReturn(true).when(anomalyDetectionIndices).doesDefaultResultIndexExist();
         doAnswer(invocation -> {
-            ActionListener<BulkResponse> listener = invocation.getArgument(1);
+            ActionListener<BulkResponse> listener = invocation.getArgument(2);
             BulkItemResponse[] bulkItemResponses = new BulkItemResponse[2];
             String indexName = ANOMALY_RESULT_INDEX_ALIAS;
             String type = "_doc";
@@ -187,27 +204,53 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
             BulkResponse bulkResponse = new BulkResponse(bulkItemResponses, 10);
             listener.onResponse(bulkResponse);
             return null;
-        }).when(client).bulk(any(), any());
-        bulkIndexHandler.bulk(null, ImmutableList.of(wrongAnomalyResult(), TestHelpers.randomAnomalyDetectResult()), configId, listener);
+        }).when(dataAccess).bulk(any(), any(), any());
+        bulkIndexHandler
+            .bulk(null, ImmutableList.of(wrongAnomalyResult(), TestHelpers.randomAnomalyDetectResult()), configId, null, listener);
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertTrue(exceptionCaptor.getValue().getMessage().contains("VersionConflictEngineException"));
     }
 
     public void testBulkSaveException() {
-        BulkRequestBuilder bulkRequestBuilder = mock(BulkRequestBuilder.class);
-        doReturn(bulkRequestBuilder).when(client).prepareBulk();
         doReturn(true).when(anomalyDetectionIndices).doesDefaultResultIndexExist();
 
         String testError = randomAlphaOfLength(5);
         doAnswer(invocation -> {
-            ActionListener<CreateIndexResponse> listener = invocation.getArgument(1);
+            ActionListener<BulkResponse> listener = invocation.getArgument(2);
             listener.onFailure(new RuntimeException(testError));
             return null;
-        }).when(client).bulk(any(), any());
+        }).when(dataAccess).bulk(any(), any(), any());
 
-        bulkIndexHandler.bulk(null, ImmutableList.of(TestHelpers.randomAnomalyDetectResult()), configId, listener);
+        bulkIndexHandler.bulk(null, ImmutableList.of(TestHelpers.randomAnomalyDetectResult()), configId, null, listener);
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertEquals(testError, exceptionCaptor.getValue().getMessage());
+    }
+
+    public void testBindsDataSourceRoutingBeforeBulkSave() {
+        doReturn(true).when(anomalyDetectionIndices).doesDefaultResultIndexExist();
+        String tenantId = "account-1:application-1:workspace-1";
+        String dataSourceId = "data-source-1";
+        AtomicBoolean routingActive = new AtomicBoolean(false);
+
+        doAnswer(invocation -> {
+            routingActive.set(true);
+            return (Releasable) () -> routingActive.set(false);
+        }).when(dataAccess).bindRouting(tenantId, dataSourceId);
+
+        doAnswer(invocation -> {
+            assertTrue(routingActive.get());
+            TenantContext tenantContext = invocation.getArgument(1);
+            assertEquals(tenantId, tenantContext.getTenantId());
+            assertEquals(dataSourceId, tenantContext.getDataSourceId());
+            ActionListener<BulkResponse> bulkListener = invocation.getArgument(2);
+            bulkListener.onResponse(mock(BulkResponse.class));
+            return null;
+        }).when(dataAccess).bulk(any(), any(), any());
+
+        bulkIndexHandler.bulk(null, ImmutableList.of(TestHelpers.randomAnomalyDetectResult()), configId, tenantId, dataSourceId, listener);
+
+        assertFalse(routingActive.get());
+        verify(dataAccess).bindRouting(eq(tenantId), eq(dataSourceId));
     }
 
     private AnomalyResult wrongAnomalyResult() {
@@ -232,6 +275,7 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
             null,
             null,
             randomDoubleBetween(1.1, 10.0, true),
+            null,
             null
         );
     }
@@ -239,9 +283,7 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
     public void testResponseIsAcknowledgedTrue() throws InterruptedException {
         String testIndex = "testIndex";
 
-        // Set up mocks for doesIndexExist and doesAliasExist
-        when(anomalyDetectionIndices.doesIndexExist(testIndex)).thenReturn(false);
-        when(anomalyDetectionIndices.doesAliasExist(testIndex)).thenReturn(false);
+        setResultIndexOrAliasExists(false);
 
         // Mock initCustomResultIndexDirectly to simulate index creation and call the listener
         doAnswer(invocation -> {
@@ -249,30 +291,28 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
             // Simulate immediate onResponse call
             listener.onResponse(new CreateIndexResponse(true, true, testIndex));
             return null;
-        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any());
+        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any(), any(), any());
 
-        AnomalyResult result = mock(AnomalyResult.class);
+        AnomalyResult result = TestHelpers.randomAnomalyDetectResult();
 
         // Call bulk method
-        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, listener);
+        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, null, listener);
 
-        // Verify that listener.onResponse is called
-        verify(client, times(1)).prepareBulk();
+        verify(dataAccess, times(1)).bulk(any(), any(), any());
     }
 
     public void testResponseIsAcknowledgedFalse() {
         String testIndex = "testIndex";
-        when(anomalyDetectionIndices.doesIndexExist(testIndex)).thenReturn(false);
-        when(anomalyDetectionIndices.doesAliasExist(testIndex)).thenReturn(false);
+        setResultIndexOrAliasExists(false);
 
         doAnswer(invocation -> {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(1);
             listener.onResponse(new CreateIndexResponse(false, false, testIndex));
             return null;
-        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any());
+        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any(), any(), any());
 
-        AnomalyResult result = mock(AnomalyResult.class);
-        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, listener);
+        AnomalyResult result = TestHelpers.randomAnomalyDetectResult();
+        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, null, listener);
 
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertEquals("Creating custom result index with mappings call not acknowledged", exceptionCaptor.getValue().getMessage());
@@ -280,32 +320,29 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
 
     public void testResourceAlreadyExistsException() {
         String testIndex = "testIndex";
-        when(anomalyDetectionIndices.doesIndexExist(testIndex)).thenReturn(false, true);
-        when(anomalyDetectionIndices.doesAliasExist(testIndex)).thenReturn(false, false);
+        setResultIndexOrAliasExists(false, true);
 
         doAnswer(invocation -> {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(1);
             listener.onFailure(new ResourceAlreadyExistsException("index already exists"));
             return null;
-        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any());
+        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any(), any(), any());
 
         doAnswer(invocation -> {
             ActionListener<Boolean> listener = invocation.getArgument(1);
             listener.onResponse(true);
             return null;
-        }).when(anomalyDetectionIndices).validateResultIndexMapping(eq(testIndex), any());
+        }).when(anomalyDetectionIndices).validateResultIndexMapping(eq(testIndex), any(), any(), any());
 
-        AnomalyResult result = mock(AnomalyResult.class);
-        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, listener);
+        AnomalyResult result = TestHelpers.randomAnomalyDetectResult();
+        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, null, listener);
 
-        // Verify that listener.onResponse is called
-        verify(client, times(1)).prepareBulk();
+        verify(dataAccess, times(1)).bulk(any(), any(), any());
     }
 
     public void testOtherException() {
         String testIndex = "testIndex";
-        when(anomalyDetectionIndices.doesIndexExist(testIndex)).thenReturn(false);
-        when(anomalyDetectionIndices.doesAliasExist(testIndex)).thenReturn(false);
+        setResultIndexOrAliasExists(false);
 
         Exception testException = new OpenSearchRejectedExecutionException("Test exception");
 
@@ -313,10 +350,10 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(1);
             listener.onFailure(testException);
             return null;
-        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any());
+        }).when(anomalyDetectionIndices).initCustomResultIndexDirectly(eq(testIndex), any(), any(), any());
 
         AnomalyResult result = mock(AnomalyResult.class);
-        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, listener);
+        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, null, listener);
 
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
         assertEquals(testException, exceptionCaptor.getValue());
@@ -326,13 +363,12 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
         String testIndex = "testIndex";
         TimeSeriesException testException = new TimeSeriesException("Test TimeSeriesException");
 
-        // Mock doesIndexExist to throw TimeSeriesException
-        when(anomalyDetectionIndices.doesIndexExist(testIndex)).thenThrow(testException);
+        failResultIndexOrAliasExists(testException);
 
         AnomalyResult result = mock(AnomalyResult.class);
 
         // Call bulk method
-        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, listener);
+        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, null, listener);
 
         // Verify that listener.onFailure is called with the TimeSeriesException
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
@@ -343,13 +379,12 @@ public class AnomalyResultBulkIndexHandlerTests extends ADUnitTestCase {
         String testIndex = "testIndex";
         NullPointerException testException = new NullPointerException("Test NullPointerException");
 
-        // Mock doesIndexExist to throw NullPointerException
-        when(anomalyDetectionIndices.doesIndexExist(testIndex)).thenThrow(testException);
+        failResultIndexOrAliasExists(testException);
 
         AnomalyResult result = mock(AnomalyResult.class);
 
         // Call bulk method
-        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, listener);
+        bulkIndexHandler.bulk(testIndex, ImmutableList.of(result), configId, null, listener);
 
         // Verify that listener.onFailure is called with a TimeSeriesException wrapping the original exception
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());

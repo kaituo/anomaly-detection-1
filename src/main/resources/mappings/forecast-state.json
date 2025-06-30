@@ -20,6 +20,9 @@
     "stopped_by": {
       "type": "keyword"
     },
+    "tenant_id": {
+      "type": "keyword"
+    },
     "forecaster_id": {
       "type": "keyword"
     },

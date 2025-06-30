@@ -16,25 +16,25 @@ import org.opensearch.action.support.nodes.TransportNodesAction;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.caching.CacheProvider;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.ratelimit.CheckpointWriteWorker;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.transport.TransportService;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public class BaseDeleteModelTransportAction<RCFModelType extends ThresholdedRandomCutForest, CacheType extends TimeSeriesCache<RCFModelType>, CacheProviderType extends CacheProvider<RCFModelType, CacheType>, TaskCacheManagerType extends TaskCacheManager, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, IndexableResultType extends IndexableResult, ModelColdStartType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>>
+public class BaseDeleteModelTransportAction<RCFModelType extends ThresholdedRandomCutForest, CacheType extends TimeSeriesCache<RCFModelType>, CacheProviderType extends CacheProvider<RCFModelType, CacheType>, TaskCacheManagerType extends TaskCacheManager, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType>, IndexableResultType extends IndexableResult, ModelColdStartType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, IndexableResultType>>
     extends TransportNodesAction<DeleteModelRequest, DeleteModelResponse, DeleteModelNodeRequest, DeleteModelNodeResponse> {
 
     private static final Logger LOG = LogManager.getLogger(BaseDeleteModelTransportAction.class);
-    private NodeStateManager nodeStateManager;
+    private StateManager nodeStateManager;
     private CacheProviderType cache;
     private TaskCacheManagerType adTaskCacheManager;
     private ModelColdStartType coldStarter;
@@ -44,7 +44,7 @@ public class BaseDeleteModelTransportAction<RCFModelType extends ThresholdedRand
         ClusterService clusterService,
         TransportService transportService,
         ActionFilters actionFilters,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         CacheProviderType cache,
         TaskCacheManagerType taskCacheManager,
         ModelColdStartType coldStarter,
@@ -98,12 +98,14 @@ public class BaseDeleteModelTransportAction<RCFModelType extends ThresholdedRand
     protected DeleteModelNodeResponse nodeOperation(DeleteModelNodeRequest request) {
 
         String configID = request.getConfigID();
+        String tenantId = request.getTenantId();
         LOG.info("Delete model for {}", configID);
-        nodeStateManager.clear(configID);
+        nodeStateManager.markConfigStateCleared(tenantId, configID);
+        nodeStateManager.clear(tenantId, configID);
 
-        cache.get().clear(configID);
+        cache.get().clear(tenantId, configID);
 
-        coldStarter.clear(configID);
+        coldStarter.clear(tenantId, configID);
 
         // delete realtime task cache
         adTaskCacheManager.removeRealtimeTaskCache(configID);

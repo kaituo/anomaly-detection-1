@@ -15,6 +15,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -114,7 +115,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
         ForwardADTaskRequest request = new ForwardADTaskRequest(adTask, NEXT_ENTITY);
         forwardADTaskTransportAction.doExecute(task, request, listener);
         verify(adTaskManager, times(1)).runNextEntityForHCADHistorical(any(), any(), any());
-        verify(adTaskManager, times(1)).updateADHCDetectorTask(any(), any(), any());
+        verify(adTaskManager, times(1)).updateADHCDetectorTask(any(), any(), any(), nullable(String.class));
     }
 
     public void testPushBackEntityForSingleEntityDetector() throws IOException {

@@ -10,6 +10,7 @@
  */
 
 
+import groovy.json.JsonSlurper
 import org.opensearch.gradle.testclusters.OpenSearchCluster
 
 import javax.net.ssl.HostnameVerifier
@@ -37,7 +38,7 @@ buildscript {
     ext {
         opensearch_group = "org.opensearch"
         isSnapshot = "true" == System.getProperty("build.snapshot", "true")
-        opensearch_version = System.getProperty("opensearch.version", "3.4.0-SNAPSHOT")
+        opensearch_version = System.getProperty("opensearch.version", "3.3.0-SNAPSHOT")
         buildVersionQualifier = System.getProperty("build.version_qualifier", "")
         // 3.0.0-SNAPSHOT -> 3.0.0.0-SNAPSHOT
         version_tokens = opensearch_version.tokenize('-')
@@ -49,8 +50,12 @@ buildscript {
         }
         if (isSnapshot) {
             opensearch_build += "-SNAPSHOT"
+        } else {
+            opensearch_build = opensearch_build.replace("-SNAPSHOT","")
         }
+
         opensearch_no_snapshot = opensearch_version.replace("-SNAPSHOT","")
+        opensearch_distribution_version = isSnapshot ? opensearch_version : opensearch_no_snapshot
         js_resource_folder = "src/test/resources/job-scheduler"
         common_utils_version = System.getProperty("common_utils.version", opensearch_build)
         job_scheduler_version = System.getProperty("job_scheduler.version", opensearch_build)
@@ -65,6 +70,7 @@ buildscript {
         bwcJobSchedulerPath = bwcFilePath + "job-scheduler/"
         bwcAnomalyDetectionPath = bwcFilePath + "anomaly-detection/"
         jacksonVersion = "2.18.2"
+        awsSdkVersion = "2.32.29"
         // gradle build won't print logs during test by default unless there is a failure.
         // It is useful to record intermediately information like prediction precision and recall.
         // This option turn on log printing during tests.
@@ -89,6 +95,29 @@ plugins {
     id 'java-library'
     id 'org.gradle.test-retry' version '1.6.0'
     id "de.undercouch.download" version "5.6.0"
+    // important to use latest version 1.17
+    // lower versions of io.spring.dependency-management plugin is known to use
+    // the deprecated Gradle API LenientConfiguration.getArtifacts(Spec).
+    // With Gradle 8.10.2 this method logs a deprecation warning and fails the build.
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+// opensearch.build is needed to use the version catalog from OpenSearch’s gradle/libs.versions.toml
+apply plugin: 'opensearch.build'
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'opensearch.opensearchplugin'
+apply plugin: 'opensearch.testclusters'
+apply plugin: 'base'
+apply plugin: 'jacoco'
+apply plugin: 'eclipse'
+apply plugin: 'opensearch.pluginzip'
+apply plugin: 'opensearch.java-agent'
+
+dependencyManagement {
+    imports {
+        mavenBom("software.amazon.awssdk:bom:${awsSdkVersion}")
+    }
 }
 
 tasks.withType(JavaCompile) {
@@ -109,6 +138,7 @@ tasks.withType(Test) {
 }
 tasks.withType(Javadoc) {
     options.encoding = 'UTF-8'
+    options.addStringOption('Xdoclint:all,-missing', '-quiet')
 }
 tasks.withType(AbstractArchiveTask).configureEach {
     preserveFileTimestamps = false
@@ -163,6 +193,7 @@ dependencies {
 
 
     implementation "org.jacoco:org.jacoco.agent:0.8.13"
+    testImplementation "org.jacoco:org.jacoco.core:0.8.13"
     implementation ("org.jacoco:org.jacoco.ant:0.8.13") {
         exclude group: 'org.ow2.asm', module: 'asm-commons'
         exclude group: 'org.ow2.asm', module: 'asm'
@@ -192,17 +223,67 @@ dependencies {
     testImplementation 'org.reflections:reflections:0.10.2'
 
     testImplementation "org.opensearch.test:framework:${opensearch_version}"
-}
 
-apply plugin: 'java'
-apply plugin: 'idea'
-apply plugin: 'opensearch.opensearchplugin'
-apply plugin: 'opensearch.testclusters'
-apply plugin: 'base'
-apply plugin: 'jacoco'
-apply plugin: 'eclipse'
-apply plugin: 'opensearch.pluginzip'
-apply plugin: 'opensearch.java-agent'
+    // Use the AWS SDK BOM so individual modules don't need version numbers
+    implementation 'software.amazon.awssdk:servicediscovery'
+    implementation 'software.amazon.awssdk:dynamodb'
+    implementation 'software.amazon.awssdk:eventbridge'
+    implementation 'software.amazon.awssdk:scheduler'
+    implementation 'software.amazon.awssdk:sts'
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:cloudwatch'
+    implementation 'software.amazon.awssdk:regions'
+    implementation 'software.amazon.awssdk:aws-core'
+    implementation 'software.amazon.awssdk:sdk-core'
+    implementation 'software.amazon.awssdk:url-connection-client'
+    implementation 'software.amazon.awssdk:auth'
+    implementation 'software.amazon.awssdk:http-auth-spi'
+    implementation 'software.amazon.awssdk:http-auth-aws'
+    implementation 'software.amazon.awssdk:http-auth'
+    implementation 'software.amazon.awssdk:utils'
+    implementation 'software.amazon.awssdk:http-client-spi'
+    implementation 'software.amazon.awssdk:identity-spi'
+    implementation 'software.amazon.awssdk:aws-json-protocol'
+    implementation 'software.amazon.awssdk:aws-query-protocol'
+    implementation 'software.amazon.awssdk:aws-xml-protocol'
+    implementation 'software.amazon.awssdk:retries-spi'
+    implementation 'software.amazon.awssdk:retries'
+    implementation 'software.amazon.awssdk:profiles'
+    implementation 'software.amazon.awssdk:endpoints-spi'
+    implementation 'software.amazon.awssdk:json-utils'
+    implementation 'software.amazon.awssdk:third-party-jackson-core'
+    implementation 'software.amazon.awssdk:netty-nio-client'
+    implementation 'software.amazon.awssdk:metrics-spi'
+    implementation 'software.amazon.awssdk:protocol-core'
+    implementation 'software.amazon.awssdk:checksums'
+    implementation 'software.amazon.awssdk:checksums-spi'
+    implementation 'software.amazon.awssdk:s3'
+    testImplementation 'software.amazon.awssdk:ecs'
+    testImplementation 'software.amazon.awssdk:ec2'
+    testImplementation 'software.amazon.awssdk:iam'
+    testImplementation 'software.amazon.awssdk:opensearchserverless'
+    testImplementation 'software.amazon.awssdk:cloudwatchlogs'
+    testImplementation 'software.amazon.awssdk:applicationautoscaling'
+    implementation "io.netty:netty-transport:${versions.netty}"
+    implementation "io.netty:netty-buffer:${versions.netty}"
+    implementation "io.netty:netty-common:${versions.netty}"
+    implementation "io.netty:netty-resolver:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-classes-macos:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-native-macos:${versions.netty}"
+    implementation "io.netty:netty-handler:${versions.netty}"
+    implementation "io.netty:netty-codec-http2:${versions.netty}"
+    implementation "io.netty:netty-codec-http:${versions.netty}"
+    implementation "io.netty:netty-codec:${versions.netty}"
+    implementation "io.netty:netty-transport-native-unix-common:${versions.netty}"
+    // ddb zero-etl opensearch client
+    api ("org.opensearch:opensearch-remote-metadata-sdk:${opensearch_build}")
+    implementation ("org.opensearch:opensearch-remote-metadata-sdk-ddb-client:${opensearch_build}") {
+        // OpenSearch already provides BouncyCastle on the host/test classpath; keeping the SDK's
+        // transitive copy causes jar hell during OpenSearchTestCase bootstrap.
+        exclude group: 'org.bouncycastle', module: 'bcprov-jdk18on'
+    }
+}
 
 ext {
     isSnapshot = "true" == System.getProperty("build.snapshot", "true")
@@ -260,6 +341,12 @@ configurations.all {
         force "commons-logging:commons-logging:${versions.commonslogging}"
         force "org.apache.httpcomponents.core5:httpcore5:${versions.httpcore5}"
         force "org.apache.httpcomponents.client5:httpclient5:${versions.httpclient5}"
+        // pins the conflicting transitive dependencies introduced by the remote metadata SDK so we
+        // stay on a single AWS/Jackson/Dafny version set.
+        force "org.apache.httpcomponents:httpcore:4.4.16"
+        force "commons-codec:commons-codec:1.18.0"
+        force "jakarta.json:jakarta.json-api:2.1.3"
+        force "software.amazon.awssdk:bom:${awsSdkVersion}"
 
         force "org.mockito:mockito-core:5.14.2"
         force "org.objenesis:objenesis:3.4"
@@ -267,9 +354,14 @@ configurations.all {
         force "net.bytebuddy:byte-buddy-agent:1.15.10"
         force "com.google.code.gson:gson:2.11.0"
         force "junit:junit:4.13.2"
+        // resolves the dependency clash introduced by opensearch-remote-metadata-sdk
+        // (which pulled in SLF4J 2.0.17 while other components still referenced 1.7.36).
+        force "org.slf4j:slf4j-api:2.0.17"
 
         force "com.google.guava:guava:33.4.5-jre" // CVE for 31.1
         force("com.fasterxml.jackson.core:jackson-core:${jacksonVersion}")
+        force "com.fasterxml.jackson.dataformat:jackson-dataformat-cbor:${jacksonVersion}"
+        force "org.dafny:DafnyRuntime:4.9.0"
         force "org.eclipse.platform:org.eclipse.core.runtime:3.29.0" // CVE for < 3.29.0
         force "org.ow2.asm:asm:9.7.1"
     }
@@ -316,6 +408,7 @@ tasks.named('forbiddenApisMain').configure {
     // Only enable limited check because AD code has too many violations.
     replaceSignatureFiles 'jdk-signatures'
     signaturesFiles += files('src/forbidden/ad-signatures.txt')
+    suppressAnnotations.add('org.opensearch.timeseries.annotation.SuppressForbidden')
 }
 
 //Adds custom file that only has some of the checks for testApis checks since too many violations
@@ -346,6 +439,7 @@ test {
         failOnPassedAfterRetry = false
     }
     include '**/*Tests.class'
+    include '**/SingleNodeCoordinatorModelHashRingIT.class'
     systemProperty 'tests.security.manager', 'false'
 
     if (System.getProperty("model-benchmark") == null || System.getProperty("model-benchmark") == "false") {
@@ -422,6 +516,10 @@ integTest {
         }
     }
 
+    filter {
+        excludeTestsMatching "org.opensearch.ad.rest.MultiTenant*IT"
+    }
+
     // The 'doFirst' delays till execution time.
     doFirst {
         // Tell the test JVM if the cluster JVM is running under a debugger so that tests can
@@ -430,6 +528,13 @@ integTest {
         systemProperty 'cluster.debug', isDebuggingCluster
         // Set number of nodes system property to be used in tests
         systemProperty 'cluster.number_of_nodes', "${_numNodes}"
+        if (System.getProperty("tests.model.rest.cluster") == null || System.getProperty("tests.model.rest.cluster").isBlank()) {
+            String modelRestCluster = System.getProperty("tests.rest.cluster")
+            if (modelRestCluster == null || modelRestCluster.isBlank()) {
+                modelRestCluster = testClusters.integTest.allHttpSocketURI.join(",")
+            }
+            systemProperty 'tests.model.rest.cluster', modelRestCluster
+        }
         // There seems to be an issue when running multi node run or integ tasks with unicast_hosts
         // not being written, the waitForAllConditions ensures it's written
         getClusters().forEach { cluster ->
@@ -477,15 +582,23 @@ def securityEnabled = System.getProperty("security", "false") == "true" || Syste
 
 testClusters.integTest {
     testDistribution = "ARCHIVE"
+    version = opensearch_distribution_version
     // Cluster shrink exception thrown if we try to set numberOfNodes to 1, so only apply if > 1
     if (_numNodes > 1) numberOfNodes = _numNodes
     configureClusterPlugins(delegate, jobSchedulerFile, securityPluginFile, securityEnabled)
     nodes.each { it.jvmArgs("-Xms1g", "-Xmx1g") }
+
+    // Tell Gradle to forward credentials to the forked OpenSearch node JVM:
+    // this allows us to set the env-vars using export before gradle is run
+    environment 'AWS_ACCESS_KEY_ID', System.getenv().getOrDefault('AWS_ACCESS_KEY_ID', 'integration_test_access_key')
+    environment 'AWS_SECRET_ACCESS_KEY', System.getenv().getOrDefault('AWS_SECRET_ACCESS_KEY', 'integration_test_secret_access_key')
+    environment 'AWS_SESSION_TOKEN', System.getenv().getOrDefault('AWS_SESSION_TOKEN', 'integration_test_session_token')
 }
 
 testClusters {
     leaderCluster {
         testDistribution = "ARCHIVE"
+        version = opensearch_distribution_version
         setting 'path.repo', file("${buildDir}/leaderCluster/repo").absolutePath
         setting 'discovery.type', 'single-node'
         // Add custom attribute to identify this cluster
@@ -495,11 +608,935 @@ testClusters {
 
     followCluster {
         testDistribution = "ARCHIVE"
+        version = opensearch_distribution_version
         setting 'path.repo', file("${buildDir}/followCluster/repo").absolutePath
         setting 'discovery.type', 'single-node'
         // Add custom attribute to identify this cluster
         setting 'node.attr.cluster_role', 'follower'
         configureClusterPlugins(delegate, jobSchedulerFile, securityPluginFile, securityEnabled)
+    }
+}
+
+ext.multiTenantAwsProfileSettingsCache = null
+ext.multiTenantAwsCredentialsCache = null
+ext.multiTenantAwsProfileRefreshThread = null
+ext.multiTenantAwsCredentialsServer = null
+ext.multiTenantAwsCredentialsServerExecutor = null
+ext.multiTenantAwsCredentialsServerUri = null
+ext.dualNodeMultiTenantCloudMapService = "dual-node-local-it-${UUID.randomUUID()}".toString()
+ext.multiTenantAwsTestSettingDefaults = [
+    'plugins.timeseries.cloud_map_namespace'                                 : 'demo.local',
+    'plugins.timeseries.cloud_map_service'                                   : 'echo-dns',
+    'plugins.timeseries.cloud_map_table_name'                                : 'hash_ring',
+    'plugins.timeseries.opensearch_port'                                     : '9201',
+    'plugins.timeseries.sqs.account_ids'                                     : '[793040377150]',
+    'plugins.anomaly_detection.remote_metadata_endpoint'                     : 'https://rctj7pzvxsnylg9gqwf6.us-west-2.aoss.amazonaws.com',
+    'plugins.anomaly_detection.s3_checkpoint_bucket'                         : 'opensearch-ad',
+    'plugins.anomaly_detection.scheduler_group'                              : 'ad',
+    'plugins.anomaly_detection.event_bridge.sqs_delivery_role_name'           : 'SchedulerToSQSRole',
+    'plugins.anomaly_detection.checkpoint_store_factory_class'               : 'org.opensearch.ad.ml.ADS3CheckpointStoreFactory',
+    'plugins.anomaly_detection.config_document_store_factory_class'          : 'org.opensearch.timeseries.client.RemoteMetadataConfigDocumentStoreFactory',
+    'plugins.anomaly_detection.data_source_endpoint_resolver_factory_class'  : 'org.opensearch.timeseries.rest.handler.store.endpoint.DefaultDataSourceEndpointResolverFactory',
+    'plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class': 'org.opensearch.timeseries.rest.handler.store.endpoint.DefaultDataSourceEndpointResolverFactory',
+    'plugins.timeseries.dataplane.endpoint.context_key'                      : 'data-source-url'
+]
+
+def hasNonBlankValue(String value) {
+    return value != null && !value.isBlank()
+}
+
+def multiTenantAwsProfileName() {
+    def systemProfile = System.getProperty('aws.profile')
+    if (hasNonBlankValue(systemProfile)) {
+        return systemProfile
+    }
+    def envProfile = System.getenv('AWS_PROFILE')
+    return hasNonBlankValue(envProfile) ? envProfile : 'default'
+}
+
+def hasExplicitMultiTenantAwsProfile() {
+    return hasNonBlankValue(System.getProperty('aws.profile')) || hasNonBlankValue(System.getenv('AWS_PROFILE'))
+}
+
+def defaultMultiTenantAwsTestSetting(String settingKey) {
+    return project.ext.multiTenantAwsTestSettingDefaults[settingKey]
+}
+
+def defaultMultiTenantRemoteMetadataServiceName() {
+    def endpoint = resolveOpenSearchTestSetting(
+        'plugins.anomaly_detection.remote_metadata_endpoint',
+        'tests.multiTenant.remoteMetadataEndpoint',
+        'MULTI_TENANT_REMOTE_METADATA_ENDPOINT',
+        defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.remote_metadata_endpoint')
+    )
+    return endpoint != null && endpoint.contains('.aoss.') ? 'aoss' : 'es'
+}
+
+def defaultMultiTenantDataSourceEndpointResolverFactory() {
+    def endpoint = resolveOpenSearchTestSetting(
+        'plugins.timeseries.dataplane.endpoint',
+        'tests.multiTenant.customerDataEndpoint',
+        'MULTI_TENANT_CUSTOMER_DATA_ENDPOINT'
+    )
+    return hasNonBlankValue(endpoint)
+        ? 'org.opensearch.timeseries.rest.handler.store.endpoint.StaticDataSourceEndpointResolverFactory'
+        : defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.data_source_endpoint_resolver_factory_class')
+}
+
+def defaultMultiTenantApiDataSourceEndpointResolverFactory() {
+    def endpoint = resolveOpenSearchTestSetting(
+        'plugins.timeseries.api_dataplane.endpoint',
+        'tests.multiTenant.apiDataEndpoint',
+        'MULTI_TENANT_API_DATA_ENDPOINT'
+    )
+    return hasNonBlankValue(endpoint)
+        ? 'org.opensearch.timeseries.rest.handler.store.endpoint.StaticApiDataSourceEndpointResolverFactory'
+        : defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class')
+}
+
+def isMultiTenantAwsTaskRequested() {
+    def requestedTaskNames = gradle.startParameter.taskNames
+    if (requestedTaskNames.isEmpty()) {
+        return false
+    }
+    return requestedTaskNames.any { taskName ->
+        taskName == 'dualNodeMultiTenantIntegTest'
+            || taskName.endsWith(':dualNodeMultiTenantIntegTest')
+            || taskName == 'threeRoleMultiTenantIntegTest'
+            || taskName.endsWith(':threeRoleMultiTenantIntegTest')
+    }
+}
+
+def hasMultiTenantAwsCredentialsConfigured() {
+    def accessKeyId = System.getenv('AWS_ACCESS_KEY_ID')
+    def secretAccessKey = System.getenv('AWS_SECRET_ACCESS_KEY')
+    if (hasNonBlankValue(accessKeyId) && hasNonBlankValue(secretAccessKey)) {
+        return true
+    }
+
+    def profileName = multiTenantAwsProfileName()
+    def credentialProcess = readAwsProfileSettings(profileName)['credential_process']
+    return hasNonBlankValue(credentialProcess) || hasAwsProfileConfigured(profileName)
+}
+
+def isMultiTenantAwsTaskConfigured() {
+    return [
+        resolveOpenSearchTestSetting(
+            'plugins.anomaly_detection.remote_metadata_endpoint',
+            'tests.multiTenant.remoteMetadataEndpoint',
+            'MULTI_TENANT_REMOTE_METADATA_ENDPOINT'
+        ),
+        resolveOpenSearchTestSetting(
+            'plugins.anomaly_detection.s3_checkpoint_bucket',
+            'tests.multiTenant.adS3CheckpointBucket',
+            'MULTI_TENANT_AD_S3_CHECKPOINT_BUCKET'
+        )
+    ].every { value -> hasNonBlankValue(value) } && hasMultiTenantAwsCredentialsConfigured()
+}
+
+def shouldRunMultiTenantAwsTask() {
+    return isMultiTenantAwsTaskRequested() || isMultiTenantAwsTaskConfigured()
+}
+
+def resolveMultiTenantSetting(String propertyName, String envName, String defaultValue = null) {
+    if (propertyName != null && !propertyName.isBlank()) {
+        def projectValue = project.findProperty(propertyName)?.toString()
+        if (projectValue != null && !projectValue.isBlank()) {
+            return projectValue
+        }
+
+        def systemValue = System.getProperty(propertyName)
+        if (systemValue != null && !systemValue.isBlank()) {
+            return systemValue
+        }
+    }
+
+    if (envName != null && !envName.isBlank()) {
+        def envValue = System.getenv(envName)
+        if (envValue != null && !envValue.isBlank()) {
+            return envValue
+        }
+    }
+
+    return defaultValue
+}
+
+def resolveOpenSearchTestSetting(String settingKey, String propertyName = null, String envName = null, String defaultValue = null) {
+    def testPropertyValue = System.getProperty("tests.opensearch.${settingKey}")
+    if (testPropertyValue != null && !testPropertyValue.isBlank()) {
+        return testPropertyValue
+    }
+
+    return resolveMultiTenantSetting(propertyName, envName, defaultValue)
+}
+
+def threeRoleAossCustomerEndpoint() {
+    return resolveOpenSearchTestSetting(
+        'plugins.timeseries.dataplane.endpoint',
+        'tests.multiTenant.customerDataEndpoint',
+        'MULTI_TENANT_CUSTOMER_DATA_ENDPOINT',
+        'https://rctj7pzvxsnylg9gqwf6.us-west-2.aoss.amazonaws.com'
+    )
+}
+
+def threeRoleAossApiEndpoint() {
+    return resolveOpenSearchTestSetting(
+        'plugins.timeseries.api_dataplane.endpoint',
+        'tests.multiTenant.apiDataEndpoint',
+        'MULTI_TENANT_API_DATA_ENDPOINT',
+        threeRoleAossCustomerEndpoint()
+    )
+}
+
+def threeRoleCloudMapService() {
+    return resolveOpenSearchTestSetting(
+        'plugins.timeseries.cloud_map_service',
+        null,
+        null,
+        'three-role-aoss-it'
+    )
+}
+
+def dualNodeCloudMapService() {
+    return resolveOpenSearchTestSetting(
+        'plugins.timeseries.cloud_map_service',
+        null,
+        null,
+        project.ext.dualNodeMultiTenantCloudMapService
+    )
+}
+
+def dualNodeClusterSettings() {
+    return [
+        'plugins.timeseries.cloud_map_service': dualNodeCloudMapService()
+    ]
+}
+
+def threeRoleAossClusterSettings() {
+    return [
+        'plugins.timeseries.opensearch_port'                                    : '9211',
+        'plugins.timeseries.dataplane.endpoint'                                 : threeRoleAossCustomerEndpoint(),
+        'plugins.timeseries.api_dataplane.endpoint'                             : threeRoleAossApiEndpoint(),
+        'plugins.timeseries.cloud_map_service'                                  : threeRoleCloudMapService(),
+        'plugins.anomaly_detection.data_source_endpoint_resolver_factory_class' : 'org.opensearch.timeseries.rest.handler.store.endpoint.StaticDataSourceEndpointResolverFactory',
+        'plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class': 'org.opensearch.timeseries.rest.handler.store.endpoint.StaticApiDataSourceEndpointResolverFactory'
+    ]
+}
+
+def requireMultiTenantSetting(String propertyName, String envName, String description, String defaultValue = null) {
+    def value = resolveMultiTenantSetting(propertyName, envName, defaultValue)
+    if ((value == null || value.isBlank()) && isMultiTenantAwsTaskRequested()) {
+        throw new GradleException(
+            "Missing ${description} for AWS-backed multi-tenant integration tests. "
+                + "Set -P${propertyName}=... or ${envName}."
+        )
+    }
+    return value ?: ""
+}
+
+def requireOpenSearchTestSetting(String settingKey, String propertyName = null, String envName = null, String description, String defaultValue = null) {
+    def value = resolveOpenSearchTestSetting(settingKey, propertyName, envName, defaultValue)
+    if ((value == null || value.isBlank()) && isMultiTenantAwsTaskRequested()) {
+        throw new GradleException(
+            "Missing ${description} for AWS-backed multi-tenant integration tests. "
+                + "Set -Dtests.opensearch.${settingKey}=..., -P${propertyName}=..., or ${envName}."
+        )
+    }
+    return value ?: ""
+}
+
+def readAwsProfileSettings(String profileName = multiTenantAwsProfileName()) {
+    if (project.ext.multiTenantAwsProfileSettingsCache == null) {
+        project.ext.multiTenantAwsProfileSettingsCache = [:]
+    }
+    if (project.ext.multiTenantAwsProfileSettingsCache.containsKey(profileName)) {
+        return project.ext.multiTenantAwsProfileSettingsCache[profileName]
+    }
+
+    File configFile = file(System.getenv('AWS_CONFIG_FILE') ?: "${System.getProperty('user.home')}/.aws/config")
+    File credentialsFile = file(System.getenv('AWS_SHARED_CREDENTIALS_FILE') ?: "${System.getProperty('user.home')}/.aws/credentials")
+    Map<String, String> profileSettings = [:]
+    profileSettings.putAll(readAwsProfileFile(configFile, profileName, true))
+    profileSettings.putAll(readAwsProfileFile(credentialsFile, profileName, false))
+
+    project.ext.multiTenantAwsProfileSettingsCache[profileName] = profileSettings
+    return project.ext.multiTenantAwsProfileSettingsCache[profileName]
+}
+
+def readDefaultAwsProfileSettings() {
+    return readAwsProfileSettings('default')
+}
+
+def readAwsProfileFile(File profileFile, String profileName, boolean configFile) {
+    if (!profileFile.exists()) {
+        return [:]
+    }
+    def profileSettings = [:]
+    boolean inRequestedProfile = false
+    profileFile.eachLine(StandardCharsets.UTF_8.name()) { rawLine ->
+        String line = rawLine.trim()
+        if (line.isEmpty() || line.startsWith('#') || line.startsWith(';')) {
+            return
+        }
+
+        if (line.startsWith('[') && line.endsWith(']')) {
+            String section = line.substring(1, line.length() - 1).trim()
+            inRequestedProfile = awsProfileSectionMatches(section, profileName, configFile)
+            return
+        }
+
+        if (!inRequestedProfile) {
+            return
+        }
+
+        int separatorIndex = line.indexOf('=')
+        if (separatorIndex <= 0) {
+            return
+        }
+
+        String key = line.substring(0, separatorIndex).trim()
+        String value = line.substring(separatorIndex + 1).trim()
+        profileSettings[key] = value
+    }
+    return profileSettings
+}
+
+def awsProfileSectionMatches(String section, String profileName, boolean configFile) {
+    if (profileName == 'default') {
+        return section == 'default' || section == 'profile default'
+    }
+    return section == profileName || (configFile && section == "profile ${profileName}")
+}
+
+def hasAwsProfileConfigured(String profileName = multiTenantAwsProfileName()) {
+    File configFile = file(System.getenv('AWS_CONFIG_FILE') ?: "${System.getProperty('user.home')}/.aws/config")
+    File credentialsFile = file(System.getenv('AWS_SHARED_CREDENTIALS_FILE') ?: "${System.getProperty('user.home')}/.aws/credentials")
+    return hasAwsProfileSection(configFile, profileName, true) || hasAwsProfileSection(credentialsFile, profileName, false)
+}
+
+def hasDefaultAwsProfileConfigured() {
+    return hasAwsProfileConfigured('default')
+}
+
+def hasAwsProfileSection(File profileFile, String profileName, boolean configFile) {
+    if (!profileFile.exists()) {
+        return false
+    }
+    boolean found = false
+    profileFile.eachLine(StandardCharsets.UTF_8.name()) { rawLine ->
+        String line = rawLine.trim()
+        if (line.startsWith('[') && line.endsWith(']')) {
+            String section = line.substring(1, line.length() - 1).trim()
+            if (awsProfileSectionMatches(section, profileName, configFile)) {
+                found = true
+            }
+        }
+    }
+    return found
+}
+
+def multiTenantAwsCredentialRefreshSkew() {
+    return java.time.Duration.ofMinutes(5)
+}
+
+def multiTenantAwsCredentialExpiration(Map<String, String> awsCredentials) {
+    if (!hasNonBlankValue(awsCredentials.expiration)) {
+        return null
+    }
+    try {
+        return java.time.Instant.parse(awsCredentials.expiration)
+    } catch (Exception e) {
+        logger.warn("Ignoring unparsable AWS credential expiration [{}].", awsCredentials.expiration)
+        return null
+    }
+}
+
+def cachedMultiTenantAwsCredentials(boolean allowNearExpiration = false) {
+    Map<String, String> awsCredentials = project.ext.multiTenantAwsCredentialsCache as Map<String, String>
+    if (awsCredentials == null || awsCredentials.isEmpty()) {
+        return [:]
+    }
+
+    def expiration = multiTenantAwsCredentialExpiration(awsCredentials)
+    if (expiration == null) {
+        return awsCredentials
+    }
+
+    def threshold = allowNearExpiration ? java.time.Instant.now() : java.time.Instant.now().plus(multiTenantAwsCredentialRefreshSkew())
+    return expiration.isAfter(threshold) ? awsCredentials : [:]
+}
+
+def cacheMultiTenantAwsCredentials(Map<String, String> awsCredentials) {
+    if (awsCredentials != null && !awsCredentials.isEmpty()) {
+        project.ext.multiTenantAwsCredentialsCache = new LinkedHashMap<String, String>(awsCredentials)
+    }
+    return awsCredentials
+}
+
+def resolveMultiTenantAwsCredentials() {
+    def accessKeyId = System.getenv('AWS_ACCESS_KEY_ID')
+    def secretAccessKey = System.getenv('AWS_SECRET_ACCESS_KEY')
+    def sessionToken = System.getenv('AWS_SESSION_TOKEN')
+    if (
+        !hasExplicitMultiTenantAwsProfile()
+            && accessKeyId != null
+            && !accessKeyId.isBlank()
+            && secretAccessKey != null
+            && !secretAccessKey.isBlank()
+    ) {
+        return cacheMultiTenantAwsCredentials([
+            accessKeyId    : accessKeyId,
+            secretAccessKey: secretAccessKey,
+            sessionToken   : sessionToken ?: "",
+            expiration     : ""
+        ])
+    }
+
+    if (!shouldRunMultiTenantAwsTask()) {
+        return [:]
+    }
+
+    def profileName = multiTenantAwsProfileName()
+    def profileSettings = readAwsProfileSettings(profileName)
+    def credentialProcess = profileSettings['credential_process']
+    if (credentialProcess == null || credentialProcess.isBlank()) {
+        def profileAccessKeyId = profileSettings['aws_access_key_id']
+        def profileSecretAccessKey = profileSettings['aws_secret_access_key']
+        if (
+            profileAccessKeyId != null
+                && !profileAccessKeyId.toString().isBlank()
+                && profileSecretAccessKey != null
+                && !profileSecretAccessKey.toString().isBlank()
+        ) {
+            return cacheMultiTenantAwsCredentials([
+                accessKeyId    : profileAccessKeyId.toString(),
+                secretAccessKey: profileSecretAccessKey.toString(),
+                sessionToken   : (profileSettings['aws_session_token'] ?: "").toString(),
+                expiration     : (profileSettings['expiration'] ?: "").toString()
+            ])
+        }
+
+        if (hasAwsProfileConfigured(profileName)) {
+            return [:]
+        } else {
+            throw new GradleException(
+                "Missing AWS credentials for AWS-backed multi-tenant integration tests. "
+                    + "Export AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or configure the AWS profile [${profileName}]."
+            )
+        }
+    }
+
+    def process = new ProcessBuilder('/bin/zsh', '-lc', credentialProcess).redirectErrorStream(true).start()
+    def output = process.inputStream.getText(StandardCharsets.UTF_8.name())
+    if (!process.waitFor(60, TimeUnit.SECONDS)) {
+        process.destroyForcibly()
+        throw new GradleException("Timed out while resolving AWS credentials from the AWS profile [${profileName}] credential_process.")
+    }
+    if (process.exitValue() != 0) {
+        throw new GradleException(
+            "Failed to resolve AWS credentials from the AWS profile [${profileName}] credential_process. Output: ${output.trim()}"
+        )
+    }
+
+    def parsed = new JsonSlurper().parseText(output)
+    accessKeyId = parsed.AccessKeyId ?: parsed.accessKeyId
+    secretAccessKey = parsed.SecretAccessKey ?: parsed.secretAccessKey
+    sessionToken = parsed.SessionToken ?: parsed.sessionToken ?: ""
+    def expiration = parsed.Expiration ?: parsed.expiration ?: ""
+    if (accessKeyId == null || accessKeyId.toString().isBlank() || secretAccessKey == null || secretAccessKey.toString().isBlank()) {
+        throw new GradleException("AWS profile [${profileName}] credential_process did not return AccessKeyId/SecretAccessKey.")
+    }
+
+    return cacheMultiTenantAwsCredentials([
+        accessKeyId    : accessKeyId.toString(),
+        secretAccessKey: secretAccessKey.toString(),
+        sessionToken   : sessionToken.toString(),
+        expiration     : expiration.toString()
+    ])
+}
+
+def shouldUseMultiTenantAwsCredentialsEndpoint() {
+    return shouldRunMultiTenantAwsTask()
+}
+
+def resolveMultiTenantAwsCredentialsForEndpoint() {
+    Map<String, String> cachedCredentials = cachedMultiTenantAwsCredentials(false)
+    if (!cachedCredentials.isEmpty()) {
+        return cachedCredentials
+    }
+
+    try {
+        return resolveMultiTenantAwsCredentials()
+    } catch (Exception e) {
+        cachedCredentials = cachedMultiTenantAwsCredentials(true)
+        if (!cachedCredentials.isEmpty()) {
+            logger.warn("Failed to refresh AWS credentials for the local multi-tenant test cluster; serving cached credentials until expiration.")
+            return cachedCredentials
+        }
+        throw e
+    }
+}
+
+def multiTenantAwsCredentialsEndpointResponse(Map<String, String> awsCredentials) {
+    def expiration = hasNonBlankValue(awsCredentials.expiration)
+        ? awsCredentials.expiration
+        : java.time.Instant.now().plus(java.time.Duration.ofHours(1)).toString()
+    def response = [
+        AccessKeyId    : awsCredentials.accessKeyId,
+        SecretAccessKey: awsCredentials.secretAccessKey,
+        Expiration     : expiration
+    ]
+    if (hasNonBlankValue(awsCredentials.sessionToken)) {
+        response.Token = awsCredentials.sessionToken
+    }
+    return groovy.json.JsonOutput.toJson(response)
+}
+
+def multiTenantAwsCredentialsErrorResponse() {
+    return groovy.json.JsonOutput.toJson([Code: 'CredentialsUnavailable', Message: 'AWS credentials are unavailable'])
+}
+
+def multiTenantAwsCredentialsServerUri() {
+    if (!shouldUseMultiTenantAwsCredentialsEndpoint()) {
+        return ""
+    }
+    if (hasNonBlankValue(project.ext.multiTenantAwsCredentialsServerUri as String)) {
+        return project.ext.multiTenantAwsCredentialsServerUri
+    }
+
+    def server = com.sun.net.httpserver.HttpServer.create(
+        new java.net.InetSocketAddress(java.net.InetAddress.getByName('127.0.0.1'), 0),
+        0
+    )
+    def executor = java.util.concurrent.Executors.newSingleThreadExecutor({ Runnable runnable ->
+        Thread thread = new Thread(runnable, 'multi-tenant-aws-credentials-endpoint')
+        thread.daemon = true
+        return thread
+    } as java.util.concurrent.ThreadFactory)
+    server.executor = executor
+    server.createContext('/credentials') { exchange ->
+        int statusCode = 200
+        byte[] responseBytes
+        try {
+            if (exchange.requestMethod != 'GET') {
+                statusCode = 405
+                responseBytes = multiTenantAwsCredentialsErrorResponse().getBytes(StandardCharsets.UTF_8)
+            } else {
+                Map<String, String> awsCredentials = resolveMultiTenantAwsCredentialsForEndpoint()
+                if (awsCredentials.isEmpty()) {
+                    statusCode = 404
+                    responseBytes = multiTenantAwsCredentialsErrorResponse().getBytes(StandardCharsets.UTF_8)
+                } else {
+                    responseBytes = multiTenantAwsCredentialsEndpointResponse(awsCredentials).getBytes(StandardCharsets.UTF_8)
+                }
+            }
+        } catch (Exception e) {
+            statusCode = 500
+            logger.warn('Failed to resolve AWS credentials for the local multi-tenant test cluster.')
+            responseBytes = multiTenantAwsCredentialsErrorResponse().getBytes(StandardCharsets.UTF_8)
+        }
+
+        exchange.responseHeaders.set('Content-Type', 'application/json')
+        exchange.sendResponseHeaders(statusCode, responseBytes.length)
+        exchange.responseBody.write(responseBytes)
+        exchange.close()
+    }
+    server.start()
+
+    project.ext.multiTenantAwsCredentialsServer = server
+    project.ext.multiTenantAwsCredentialsServerExecutor = executor
+    project.ext.multiTenantAwsCredentialsServerUri = "http://127.0.0.1:${server.address.port}/credentials"
+    return project.ext.multiTenantAwsCredentialsServerUri
+}
+
+def stopMultiTenantAwsCredentialsServer() {
+    def server = project.ext.multiTenantAwsCredentialsServer
+    if (server != null) {
+        server.stop(0)
+        project.ext.multiTenantAwsCredentialsServer = null
+    }
+    def executor = project.ext.multiTenantAwsCredentialsServerExecutor
+    if (executor != null) {
+        executor.shutdownNow()
+        project.ext.multiTenantAwsCredentialsServerExecutor = null
+    }
+    project.ext.multiTenantAwsCredentialsServerUri = null
+}
+
+def resolveMultiTenantAwsCredentialsForLocalJvm() {
+    return shouldUseGeneratedMultiTenantAwsProfile()
+        ? resolveMultiTenantAwsCredentials()
+        : (hasExplicitMultiTenantAwsProfile() ? [:] : resolveMultiTenantAwsCredentials())
+}
+
+def shouldUseGeneratedMultiTenantAwsProfile() {
+    if (!hasExplicitMultiTenantAwsProfile()) {
+        return false
+    }
+    def credentialProcess = readAwsProfileSettings(multiTenantAwsProfileName())['credential_process']
+    return hasNonBlankValue(credentialProcess)
+}
+
+def generatedMultiTenantAwsProfileDir() {
+    return file("${buildDir}/tmp/multi-tenant-aws-profile")
+}
+
+def generatedMultiTenantAwsConfigFile() {
+    return new File(generatedMultiTenantAwsProfileDir(), "config")
+}
+
+def generatedMultiTenantAwsCredentialsFile() {
+    return new File(generatedMultiTenantAwsProfileDir(), "credentials")
+}
+
+def generatedMultiTenantAwsProfileFiles() {
+    if (!shouldUseGeneratedMultiTenantAwsProfile()) {
+        return [:]
+    }
+    return [
+        configFile     : generatedMultiTenantAwsConfigFile().absolutePath,
+        credentialsFile: generatedMultiTenantAwsCredentialsFile().absolutePath
+    ]
+}
+
+def writeGeneratedMultiTenantAwsProfile(Map<String, String> awsCredentials) {
+    def profileName = multiTenantAwsProfileName()
+    def profileDir = generatedMultiTenantAwsProfileDir()
+    profileDir.mkdirs()
+
+    generatedMultiTenantAwsConfigFile().setText(
+        "[profile ${profileName}]\nregion = ${resolveMultiTenantAwsRegion()}\n",
+        StandardCharsets.UTF_8.name()
+    )
+
+    def credentialsBody = new StringBuilder()
+    credentialsBody.append("[${profileName}]\n")
+    credentialsBody.append("aws_access_key_id = ${awsCredentials.accessKeyId}\n")
+    credentialsBody.append("aws_secret_access_key = ${awsCredentials.secretAccessKey}\n")
+    if (hasNonBlankValue(awsCredentials.sessionToken)) {
+        credentialsBody.append("aws_session_token = ${awsCredentials.sessionToken}\n")
+    }
+    generatedMultiTenantAwsCredentialsFile().setText(credentialsBody.toString(), StandardCharsets.UTF_8.name())
+}
+
+def refreshGeneratedMultiTenantAwsProfile() {
+    if (!shouldUseGeneratedMultiTenantAwsProfile()) {
+        return [:]
+    }
+
+    Map<String, String> awsCredentials = resolveMultiTenantAwsCredentials()
+    writeGeneratedMultiTenantAwsProfile(awsCredentials)
+    return generatedMultiTenantAwsProfileFiles()
+}
+
+def startGeneratedMultiTenantAwsProfileRefresh() {
+    if (!shouldUseGeneratedMultiTenantAwsProfile()) {
+        return [:]
+    }
+
+    def generatedProfile = refreshGeneratedMultiTenantAwsProfile()
+    def refreshIntervalSeconds = Math
+        .max(1L, (System.getProperty('aws.profile.refresh_interval_seconds') ?: '300').toLong())
+
+    Thread currentThread = project.ext.multiTenantAwsProfileRefreshThread as Thread
+    if (currentThread == null || !currentThread.isAlive()) {
+        Thread refreshThread = new Thread({
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    Thread.sleep(TimeUnit.SECONDS.toMillis(refreshIntervalSeconds))
+                    refreshGeneratedMultiTenantAwsProfile()
+                    logger.lifecycle("Refreshed generated AWS credentials for profile [${multiTenantAwsProfileName()}].")
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt()
+                } catch (Exception e) {
+                    logger.warn("Failed to refresh generated AWS credentials for profile [${multiTenantAwsProfileName()}].", e)
+                }
+            }
+        } as Runnable, "multi-tenant-aws-profile-refresh")
+        refreshThread.daemon = true
+        refreshThread.start()
+        project.ext.multiTenantAwsProfileRefreshThread = refreshThread
+    }
+
+    return generatedProfile
+}
+
+def stopGeneratedMultiTenantAwsProfileRefresh() {
+    Thread refreshThread = project.ext.multiTenantAwsProfileRefreshThread as Thread
+    if (refreshThread != null) {
+        refreshThread.interrupt()
+        project.ext.multiTenantAwsProfileRefreshThread = null
+    }
+}
+
+def resolveMultiTenantAwsRegion() {
+    return resolveOpenSearchTestSetting(
+        'plugins.timeseries.region',
+        'tests.multiTenant.awsRegion',
+        'MULTI_TENANT_AWS_REGION',
+        System.getenv('AWS_REGION') ?: System.getenv('AWS_DEFAULT_REGION') ?: readAwsProfileSettings()['region'] ?: 'us-west-2'
+    )
+}
+
+def configureLocalMultiTenantCluster(
+    cluster,
+    clusterDirName,
+    httpPort,
+    transportPort,
+    nodeRoles,
+    jobSchedulerFile,
+    securityPluginFile,
+    securityEnabled,
+    extraSettings = [:]
+) {
+    String awsRegion = resolveMultiTenantAwsRegion()
+    Map<String, String> awsCredentials = resolveMultiTenantAwsCredentialsForLocalJvm()
+
+    cluster.testDistribution = "ARCHIVE"
+    cluster.version = opensearch_distribution_version
+    cluster.setting 'path.repo', file("${buildDir}/${clusterDirName}/repo").absolutePath
+    cluster.setting 'discovery.type', 'single-node'
+    cluster.singleNode().setHttpPort("${httpPort}")
+    cluster.singleNode().setTransportPort("${transportPort}")
+    cluster.setting 'plugins.timeseries.node.roles', nodeRoles
+    cluster.setting 'plugins.anomaly_detection.multi_tenancy.enabled', 'true'
+    cluster.setting 'plugins.anomaly_detection.event_bridge_cell_id_from_header', 'true'
+    cluster.setting(
+        'plugins.timeseries.internal_api_shared_secret',
+        resolveOpenSearchTestSetting(
+            'plugins.timeseries.internal_api_shared_secret',
+            null,
+            null,
+            'integration-test-internal-token'
+        )
+    )
+    cluster.setting 'plugins.timeseries.cluster_membership_reader_ttl', '1s'
+    cluster.setting 'plugins.timeseries.region', awsRegion
+    cluster.setting(
+        'plugins.anomaly_detection.remote_metadata_endpoint',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.remote_metadata_endpoint',
+            'tests.multiTenant.remoteMetadataEndpoint',
+            'MULTI_TENANT_REMOTE_METADATA_ENDPOINT',
+            'remote metadata endpoint',
+            defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.remote_metadata_endpoint')
+        )
+    )
+    cluster.setting(
+        'plugins.anomaly_detection.remote_metadata_service_name',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.remote_metadata_service_name',
+            'tests.multiTenant.remoteMetadataServiceName',
+            'MULTI_TENANT_REMOTE_METADATA_SERVICE_NAME',
+            'remote metadata service name',
+            defaultMultiTenantRemoteMetadataServiceName()
+        )
+    )
+    cluster.setting(
+        'plugins.anomaly_detection.s3_checkpoint_bucket',
+        requireOpenSearchTestSetting(
+            'plugins.anomaly_detection.s3_checkpoint_bucket',
+            'tests.multiTenant.adS3CheckpointBucket',
+            'MULTI_TENANT_AD_S3_CHECKPOINT_BUCKET',
+            'AD S3 checkpoint bucket',
+            defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.s3_checkpoint_bucket')
+        )
+    )
+    def schedulerGroup = resolveOpenSearchTestSetting(
+        'plugins.anomaly_detection.scheduler_group',
+        'tests.multiTenant.adSchedulerGroup',
+        'MULTI_TENANT_AD_SCHEDULER_GROUP',
+        defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.scheduler_group')
+    )
+    if (schedulerGroup != null && !schedulerGroup.isBlank()) {
+        cluster.setting 'plugins.anomaly_detection.scheduler_group', schedulerGroup
+    }
+    [
+        'plugins.anomaly_detection.event_bridge.schedule_management_role_name',
+        'plugins.anomaly_detection.event_bridge.sqs_delivery_role_name'
+    ].each { settingKey ->
+        def settingValue = resolveOpenSearchTestSetting(settingKey, null, null, defaultMultiTenantAwsTestSetting(settingKey))
+        if (settingValue != null && !settingValue.isBlank()) {
+            cluster.setting settingKey, settingValue
+        }
+    }
+    def cloudMapNamespace = resolveOpenSearchTestSetting(
+        'plugins.timeseries.cloud_map_namespace',
+        null,
+        null,
+        defaultMultiTenantAwsTestSetting('plugins.timeseries.cloud_map_namespace')
+    )
+    if (cloudMapNamespace != null && !cloudMapNamespace.isBlank()) {
+        cluster.setting 'plugins.timeseries.cloud_map_namespace', cloudMapNamespace
+    }
+    def cloudMapService = resolveOpenSearchTestSetting(
+        'plugins.timeseries.cloud_map_service',
+        null,
+        null,
+        defaultMultiTenantAwsTestSetting('plugins.timeseries.cloud_map_service')
+    )
+    if (cloudMapService != null && !cloudMapService.isBlank()) {
+        cluster.setting 'plugins.timeseries.cloud_map_service', cloudMapService
+    }
+    def cloudMapTableName = resolveOpenSearchTestSetting(
+        'plugins.timeseries.cloud_map_table_name',
+        null,
+        null,
+        defaultMultiTenantAwsTestSetting('plugins.timeseries.cloud_map_table_name')
+    )
+    if (cloudMapTableName != null && !cloudMapTableName.isBlank()) {
+        cluster.setting 'plugins.timeseries.cloud_map_table_name', cloudMapTableName
+    }
+    def openSearchPort = resolveOpenSearchTestSetting(
+        'plugins.timeseries.opensearch_port',
+        null,
+        null,
+        defaultMultiTenantAwsTestSetting('plugins.timeseries.opensearch_port')
+    )
+    if (openSearchPort != null && !openSearchPort.isBlank()) {
+        cluster.setting 'plugins.timeseries.opensearch_port', openSearchPort
+    }
+    def sqsAccountIds = resolveOpenSearchTestSetting(
+        'plugins.timeseries.sqs.account_ids',
+        null,
+        null,
+        defaultMultiTenantAwsTestSetting('plugins.timeseries.sqs.account_ids')
+    )
+    if (sqsAccountIds != null && !sqsAccountIds.isBlank()) {
+        cluster.setting 'plugins.timeseries.sqs.account_ids', sqsAccountIds
+    }
+    [
+        'plugins.anomaly_detection.checkpoint_store_factory_class',
+        'plugins.anomaly_detection.config_document_store_factory_class',
+        'plugins.anomaly_detection.checkpoint_ttl',
+        'plugins.anomaly_detection.daily_s3_cleanup_interval',
+        'plugins.timeseries.dataplane.endpoint',
+        'plugins.timeseries.api_dataplane.endpoint',
+        'plugins.timeseries.dataplane.endpoint.context_key'
+    ].each { settingKey ->
+        def settingValue = resolveOpenSearchTestSetting(settingKey, null, null, defaultMultiTenantAwsTestSetting(settingKey))
+        if (settingValue != null && !settingValue.isBlank()) {
+            cluster.setting settingKey, settingValue
+        }
+    }
+    def dataSourceResolverFactory = resolveOpenSearchTestSetting(
+        'plugins.anomaly_detection.data_source_endpoint_resolver_factory_class',
+        null,
+        null,
+        defaultMultiTenantDataSourceEndpointResolverFactory()
+    )
+    if (dataSourceResolverFactory != null && !dataSourceResolverFactory.isBlank()) {
+        cluster.setting 'plugins.anomaly_detection.data_source_endpoint_resolver_factory_class', dataSourceResolverFactory
+    }
+    def apiDataSourceResolverFactory = resolveOpenSearchTestSetting(
+        'plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class',
+        null,
+        null,
+        defaultMultiTenantApiDataSourceEndpointResolverFactory()
+    )
+    if (apiDataSourceResolverFactory != null && !apiDataSourceResolverFactory.isBlank()) {
+        cluster.setting 'plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class', apiDataSourceResolverFactory
+    }
+    extraSettings.each { key, value -> cluster.setting key, value }
+    configureClusterPlugins(cluster, jobSchedulerFile, securityPluginFile, securityEnabled)
+    cluster.nodes.each { it.jvmArgs("-Xms1g", "-Xmx1g") }
+
+    cluster.environment 'AWS_REGION', awsRegion
+    cluster.environment 'AWS_DEFAULT_REGION', awsRegion
+    String credentialsEndpoint = multiTenantAwsCredentialsServerUri()
+    if (hasNonBlankValue(credentialsEndpoint)) {
+        cluster.environment 'AWS_PROFILE', ''
+        cluster.environment 'AWS_DEFAULT_PROFILE', ''
+        cluster.environment 'AWS_ACCESS_KEY_ID', ''
+        cluster.environment 'AWS_SECRET_ACCESS_KEY', ''
+        cluster.environment 'AWS_SESSION_TOKEN', ''
+        cluster.environment 'AWS_CONTAINER_CREDENTIALS_FULL_URI', credentialsEndpoint
+    } else if (!awsCredentials.isEmpty()) {
+        cluster.environment 'AWS_PROFILE', ''
+        cluster.environment 'AWS_ACCESS_KEY_ID', awsCredentials.accessKeyId
+        cluster.environment 'AWS_SECRET_ACCESS_KEY', awsCredentials.secretAccessKey
+        if (awsCredentials.sessionToken != null && !awsCredentials.sessionToken.isBlank()) {
+            cluster.environment 'AWS_SESSION_TOKEN', awsCredentials.sessionToken
+        }
+    } else {
+        cluster.environment 'AWS_PROFILE', multiTenantAwsProfileName()
+        def generatedProfileFiles = generatedMultiTenantAwsProfileFiles()
+        if (!generatedProfileFiles.isEmpty()) {
+            cluster.environment 'AWS_CONFIG_FILE', generatedProfileFiles.configFile
+            cluster.environment 'AWS_SHARED_CREDENTIALS_FILE', generatedProfileFiles.credentialsFile
+        }
+    }
+}
+
+testClusters {
+    multiTenantModelCluster {
+        configureLocalMultiTenantCluster(
+            delegate,
+            'multiTenantModelCluster',
+            9201,
+            9301,
+            'model',
+            jobSchedulerFile,
+            securityPluginFile,
+            securityEnabled,
+            dualNodeClusterSettings()
+        )
+    }
+
+    multiTenantCoordinatorCluster {
+        configureLocalMultiTenantCluster(
+            delegate,
+            'multiTenantCoordinatorCluster',
+            9200,
+            9300,
+            'master,coordinator',
+            jobSchedulerFile,
+            securityPluginFile,
+            securityEnabled,
+            dualNodeClusterSettings()
+        )
+    }
+
+    threeRoleMultiTenantMasterCluster {
+        configureLocalMultiTenantCluster(
+            delegate,
+            'threeRoleMultiTenantMasterCluster',
+            9212,
+            9312,
+            'master',
+            jobSchedulerFile,
+            securityPluginFile,
+            securityEnabled,
+            threeRoleAossClusterSettings()
+        )
+    }
+
+    threeRoleMultiTenantCoordinatorCluster {
+        configureLocalMultiTenantCluster(
+            delegate,
+            'threeRoleMultiTenantCoordinatorCluster',
+            9210,
+            9310,
+            'coordinator',
+            jobSchedulerFile,
+            securityPluginFile,
+            securityEnabled,
+            threeRoleAossClusterSettings()
+        )
+    }
+
+    threeRoleMultiTenantModelCluster {
+        configureLocalMultiTenantCluster(
+            delegate,
+            'threeRoleMultiTenantModelCluster',
+            9211,
+            9311,
+            'model',
+            jobSchedulerFile,
+            securityPluginFile,
+            securityEnabled,
+            threeRoleAossClusterSettings()
+        )
     }
 }
 
@@ -782,6 +1819,527 @@ task integTestRemote(type: RestIntegTestTask) {
             excludeTestsMatching "org.opensearch.ad.e2e.BatchADSchedulingCheckpointIT"
         }
     }
+
+    filter {
+        excludeTestsMatching "org.opensearch.ad.rest.MultiTenant*IT"
+    }
+
+    if ((System.getProperty("tests.model.rest.cluster") == null || System.getProperty("tests.model.rest.cluster").isBlank())
+        && System.getProperty("tests.rest.cluster") != null
+        && System.getProperty("tests.rest.cluster").isBlank() == false) {
+        systemProperty "tests.model.rest.cluster", System.getProperty("tests.rest.cluster")
+    }
+}
+
+task dualNodeMultiTenantIntegTest(type: RestIntegTestTask) {
+    description = "Run the AWS-backed multi-tenant AD integration tests"
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    dependsOn 'bundlePlugin'
+    onlyIf { shouldRunMultiTenantAwsTask() }
+    useCluster testClusters.multiTenantCoordinatorCluster
+    useCluster testClusters.multiTenantModelCluster
+    systemProperty 'tests.security.manager', 'false'
+    systemProperty 'java.io.tmpdir', opensearch_tmp_dir.absolutePath
+    systemProperty "https", System.getProperty("https")
+    systemProperty "user", System.getProperty("user")
+    systemProperty "password", System.getProperty("password")
+    systemProperty "resource_sharing.enabled", System.getProperty("resource_sharing.enabled")
+    filter {
+        includeTestsMatching "org.opensearch.ad.rest.MultiTenant*IT"
+        includeTestsMatching "org.opensearch.ad.e2e.MultiTenant*IT"
+        excludeTestsMatching "org.opensearch.ad.rest.MultiTenantThreeRole*IT"
+    }
+    nonInputProperties.systemProperty('tests.rest.cluster', "${-> testClusters.multiTenantCoordinatorCluster.allHttpSocketURI.join(",")}")
+    nonInputProperties.systemProperty('tests.model.rest.cluster', "${-> testClusters.multiTenantModelCluster.allHttpSocketURI.join(",")}")
+    nonInputProperties.systemProperty('tests.clustername', "${-> testClusters.multiTenantCoordinatorCluster.getName()}")
+    [
+        'tests.opensearch.plugins.timeseries.region'                                            : { resolveMultiTenantAwsRegion() },
+        'tests.opensearch.plugins.timeseries.cloud_map_namespace'                                : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.cloud_map_namespace',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.cloud_map_namespace')
+            )
+        },
+        'tests.opensearch.plugins.timeseries.cloud_map_service'                                  : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.cloud_map_service',
+                null,
+                null,
+                dualNodeCloudMapService()
+            )
+        },
+        'tests.opensearch.plugins.timeseries.cloud_map_table_name'                               : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.cloud_map_table_name',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.cloud_map_table_name')
+            )
+        },
+        'tests.opensearch.plugins.timeseries.opensearch_port'                                    : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.opensearch_port',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.opensearch_port')
+            )
+        },
+        'tests.opensearch.plugins.timeseries.sqs.account_ids'                                    : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.sqs.account_ids',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.sqs.account_ids')
+            )
+        },
+        'tests.opensearch.plugins.timeseries.internal_api_shared_secret'                         : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.internal_api_shared_secret',
+                null,
+                null,
+                'integration-test-internal-token'
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.remote_metadata_endpoint'                    : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.remote_metadata_endpoint',
+                'tests.multiTenant.remoteMetadataEndpoint',
+                'MULTI_TENANT_REMOTE_METADATA_ENDPOINT',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.remote_metadata_endpoint')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.remote_metadata_service_name'                : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.remote_metadata_service_name',
+                'tests.multiTenant.remoteMetadataServiceName',
+                'MULTI_TENANT_REMOTE_METADATA_SERVICE_NAME',
+                defaultMultiTenantRemoteMetadataServiceName()
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.s3_checkpoint_bucket'                        : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.s3_checkpoint_bucket',
+                'tests.multiTenant.adS3CheckpointBucket',
+                'MULTI_TENANT_AD_S3_CHECKPOINT_BUCKET',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.s3_checkpoint_bucket')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.scheduler_group'                             : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.scheduler_group',
+                'tests.multiTenant.adSchedulerGroup',
+                'MULTI_TENANT_AD_SCHEDULER_GROUP',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.scheduler_group')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.event_bridge.schedule_management_role_name'  : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.event_bridge.schedule_management_role_name',
+                'tests.multiTenant.adScheduleManagementRoleName',
+                'MULTI_TENANT_AD_SCHEDULE_MANAGEMENT_ROLE_NAME',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.event_bridge.schedule_management_role_name')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.event_bridge.sqs_delivery_role_name'         : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.event_bridge.sqs_delivery_role_name',
+                'tests.multiTenant.adSqsDeliveryRoleName',
+                'MULTI_TENANT_AD_SQS_DELIVERY_ROLE_NAME',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.event_bridge.sqs_delivery_role_name')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.checkpoint_store_factory_class'              : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.checkpoint_store_factory_class',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.checkpoint_store_factory_class')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.config_document_store_factory_class'         : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.config_document_store_factory_class',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.config_document_store_factory_class')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.data_source_endpoint_resolver_factory_class' : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.data_source_endpoint_resolver_factory_class',
+                null,
+                null,
+                defaultMultiTenantDataSourceEndpointResolverFactory()
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class' : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class',
+                null,
+                null,
+                defaultMultiTenantApiDataSourceEndpointResolverFactory()
+            )
+        },
+        'tests.opensearch.plugins.timeseries.dataplane.endpoint' : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.dataplane.endpoint',
+                'tests.multiTenant.customerDataEndpoint',
+                'MULTI_TENANT_CUSTOMER_DATA_ENDPOINT'
+            )
+        },
+        'tests.opensearch.plugins.timeseries.api_dataplane.endpoint' : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.api_dataplane.endpoint',
+                'tests.multiTenant.apiDataEndpoint',
+                'MULTI_TENANT_API_DATA_ENDPOINT'
+            )
+        },
+        'tests.opensearch.plugins.timeseries.dataplane.endpoint.context_key' : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.dataplane.endpoint.context_key',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.dataplane.endpoint.context_key')
+            )
+        }
+    ].each { key, valueSupplier ->
+        nonInputProperties.systemProperty(key, "${-> valueSupplier.call()}")
+    }
+
+    doFirst {
+        def generatedProfileFiles = startGeneratedMultiTenantAwsProfileRefresh()
+        if (!generatedProfileFiles.isEmpty()) {
+            systemProperty 'aws.configFile', generatedProfileFiles.configFile
+            systemProperty 'aws.sharedCredentialsFile', generatedProfileFiles.credentialsFile
+            environment 'AWS_CONFIG_FILE', generatedProfileFiles.configFile
+            environment 'AWS_SHARED_CREDENTIALS_FILE', generatedProfileFiles.credentialsFile
+        }
+        Map<String, String> awsCredentials = resolveMultiTenantAwsCredentialsForLocalJvm()
+        if (!awsCredentials.isEmpty()) {
+            systemProperty 'aws.accessKeyId', awsCredentials.accessKeyId
+            systemProperty 'aws.secretAccessKey', awsCredentials.secretAccessKey
+            if (hasNonBlankValue(awsCredentials.sessionToken)) {
+                systemProperty 'aws.sessionToken', awsCredentials.sessionToken
+            }
+        }
+        systemProperty 'aws.profile', multiTenantAwsProfileName()
+        systemProperty 'aws.region', resolveMultiTenantAwsRegion()
+        systemProperty 'aws.profile.refresh_interval_seconds', System.getProperty('aws.profile.refresh_interval_seconds') ?: '300'
+        getClusters().forEach { cluster ->
+            cluster.waitForAllConditions()
+        }
+    }
+
+    doLast {
+        stopGeneratedMultiTenantAwsProfileRefresh()
+        stopMultiTenantAwsCredentialsServer()
+    }
+}
+
+task threeRoleMultiTenantIntegTest(type: StandaloneRestIntegTestTask) {
+    description = "Run the AWS-backed multi-tenant AD integration test with separate ECS tasks for master, coordinator, and model roles"
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    dependsOn 'bundlePlugin'
+    onlyIf { shouldRunMultiTenantAwsTask() }
+    systemProperty 'tests.security.manager', 'false'
+    systemProperty 'tests.timeoutSuite', System.getProperty('tests.timeoutSuite', '7200000!')
+    systemProperty 'java.io.tmpdir', opensearch_tmp_dir.absolutePath
+    systemProperty "https", System.getProperty("https")
+    systemProperty "user", System.getProperty("user")
+    systemProperty "password", System.getProperty("password")
+    systemProperty "resource_sharing.enabled", System.getProperty("resource_sharing.enabled")
+    filter {
+        includeTestsMatching "org.opensearch.ad.rest.MultiTenantThreeRoleAossDataPlaneIT"
+    }
+    systemProperty 'tests.clustername', 'three-role-ecs-multitenant-it'
+    [
+        'tests.opensearch.plugins.timeseries.region'                                            : { resolveMultiTenantAwsRegion() },
+        'tests.opensearch.plugins.timeseries.cloud_map_namespace'                                : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.cloud_map_namespace',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.cloud_map_namespace')
+            )
+        },
+        'tests.opensearch.plugins.timeseries.cloud_map_service'                                  : { threeRoleCloudMapService() },
+        'tests.opensearch.plugins.timeseries.cloud_map_table_name'                               : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.cloud_map_table_name',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.cloud_map_table_name')
+            )
+        },
+        'tests.opensearch.plugins.timeseries.opensearch_port'                                    : {
+            resolveMultiTenantSetting('tests.multiTenant.ecs.opensearchPort', 'MULTI_TENANT_ECS_OPENSEARCH_PORT', '9200')
+        },
+        'tests.opensearch.plugins.timeseries.sqs.account_ids'                                    : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.sqs.account_ids',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.sqs.account_ids')
+            )
+        },
+        'tests.opensearch.plugins.timeseries.internal_api_shared_secret'                         : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.internal_api_shared_secret',
+                null,
+                null,
+                'integration-test-internal-token'
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.scheduler_group'                             : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.scheduler_group',
+                'tests.multiTenant.adSchedulerGroup',
+                'MULTI_TENANT_AD_SCHEDULER_GROUP',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.scheduler_group')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.sqs.queue_name'                              : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.sqs.queue_name',
+                'tests.multiTenant.adSqsQueueName',
+                'MULTI_TENANT_AD_SQS_QUEUE_NAME',
+                ''
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.event_bridge.schedule_management_role_name'  : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.event_bridge.schedule_management_role_name',
+                'tests.multiTenant.adScheduleManagementRoleName',
+                'MULTI_TENANT_AD_SCHEDULE_MANAGEMENT_ROLE_NAME',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.event_bridge.schedule_management_role_name')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.event_bridge.sqs_delivery_role_name'         : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.event_bridge.sqs_delivery_role_name',
+                'tests.multiTenant.adSqsDeliveryRoleName',
+                'MULTI_TENANT_AD_SQS_DELIVERY_ROLE_NAME',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.event_bridge.sqs_delivery_role_name')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.remote_metadata_endpoint'                    : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.remote_metadata_endpoint',
+                'tests.multiTenant.remoteMetadataEndpoint',
+                'MULTI_TENANT_REMOTE_METADATA_ENDPOINT',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.remote_metadata_endpoint')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.remote_metadata_service_name'                : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.remote_metadata_service_name',
+                'tests.multiTenant.remoteMetadataServiceName',
+                'MULTI_TENANT_REMOTE_METADATA_SERVICE_NAME',
+                defaultMultiTenantRemoteMetadataServiceName()
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.s3_checkpoint_bucket'                        : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.s3_checkpoint_bucket',
+                'tests.multiTenant.adS3CheckpointBucket',
+                'MULTI_TENANT_AD_S3_CHECKPOINT_BUCKET',
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.s3_checkpoint_bucket')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.checkpoint_store_factory_class'              : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.checkpoint_store_factory_class',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.checkpoint_store_factory_class')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.config_document_store_factory_class'         : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.config_document_store_factory_class',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.anomaly_detection.config_document_store_factory_class')
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.data_source_endpoint_resolver_factory_class' : {
+            'org.opensearch.timeseries.rest.handler.store.endpoint.StaticDataSourceEndpointResolverFactory'
+        },
+        'tests.opensearch.plugins.anomaly_detection.api_data_source_endpoint_resolver_factory_class' : {
+            'org.opensearch.timeseries.rest.handler.store.endpoint.StaticApiDataSourceEndpointResolverFactory'
+        },
+        'tests.opensearch.plugins.anomaly_detection.model_max_size_percent'                     : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.model_max_size_percent',
+                null,
+                'MULTI_TENANT_AD_MODEL_MAX_SIZE_PERCENT',
+                '0.7'
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.dedicated_cache_size'                       : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.dedicated_cache_size',
+                null,
+                'MULTI_TENANT_AD_DEDICATED_CACHE_SIZE',
+                '80'
+            )
+        },
+        'tests.opensearch.plugins.anomaly_detection.max_model_size_per_node'                    : {
+            resolveOpenSearchTestSetting(
+                'plugins.anomaly_detection.max_model_size_per_node',
+                null,
+                'MULTI_TENANT_AD_MAX_MODEL_SIZE_PER_NODE',
+                '1000'
+            )
+        },
+        'tests.opensearch.plugins.timeseries.dataplane.endpoint'                                 : { threeRoleAossCustomerEndpoint() },
+        'tests.opensearch.plugins.timeseries.api_dataplane.endpoint'                             : { threeRoleAossApiEndpoint() },
+        'tests.opensearch.plugins.timeseries.dataplane.endpoint.context_key'                     : {
+            resolveOpenSearchTestSetting(
+                'plugins.timeseries.dataplane.endpoint.context_key',
+                null,
+                null,
+                defaultMultiTenantAwsTestSetting('plugins.timeseries.dataplane.endpoint.context_key')
+            )
+        }
+    ].each { key, valueSupplier ->
+        nonInputProperties.systemProperty(key, "${-> valueSupplier.call()}")
+    }
+
+    doFirst {
+        def generatedProfileFiles = startGeneratedMultiTenantAwsProfileRefresh()
+        if (!generatedProfileFiles.isEmpty()) {
+            systemProperty 'aws.configFile', generatedProfileFiles.configFile
+            systemProperty 'aws.sharedCredentialsFile', generatedProfileFiles.credentialsFile
+            environment 'AWS_CONFIG_FILE', generatedProfileFiles.configFile
+            environment 'AWS_SHARED_CREDENTIALS_FILE', generatedProfileFiles.credentialsFile
+        }
+        [
+            'tests.multiTenant.ecs.cluster'           : ['MULTI_TENANT_ECS_CLUSTER', null],
+            'tests.multiTenant.ecs.taskDefinition'    : ['MULTI_TENANT_ECS_TASK_DEFINITION', null],
+            'tests.multiTenant.ecs.subnets'           : ['MULTI_TENANT_ECS_SUBNETS', null],
+            'tests.multiTenant.ecs.securityGroups'    : ['MULTI_TENANT_ECS_SECURITY_GROUPS', null],
+            'tests.multiTenant.ecs.containerName'       : ['MULTI_TENANT_ECS_CONTAINER_NAME', null],
+            'tests.multiTenant.ecs.launchType'          : ['MULTI_TENANT_ECS_LAUNCH_TYPE', 'FARGATE'],
+            'tests.multiTenant.ecs.assignPublicIp'      : ['MULTI_TENANT_ECS_ASSIGN_PUBLIC_IP', 'ENABLED'],
+            'tests.multiTenant.ecs.endpointAddressType' : ['MULTI_TENANT_ECS_ENDPOINT_ADDRESS_TYPE', 'public'],
+            'tests.multiTenant.ecs.opensearchPort'      : ['MULTI_TENANT_ECS_OPENSEARCH_PORT', '9200'],
+            'tests.multiTenant.ecs.image'               : ['MULTI_TENANT_ECS_IMAGE', 'opensearchproject/opensearch:3.3.0'],
+            'tests.multiTenant.ecs.model.opensearchJavaOpts': [
+                'MULTI_TENANT_ECS_MODEL_OPENSEARCH_JAVA_OPTS',
+                '-Xms1g -Xmx1g -XX:NewSize=128m -XX:MaxNewSize=128m -XX:MaxGCPauseMillis=50 -XX:-G1UseAdaptiveIHOP -XX:InitiatingHeapOccupancyPercent=30'
+            ],
+            'tests.multiTenant.ecs.cpu'                 : ['MULTI_TENANT_ECS_CPU', '2048'],
+            'tests.multiTenant.ecs.memory'              : ['MULTI_TENANT_ECS_MEMORY', '4096'],
+            'tests.multiTenant.ecs.executionRoleArn'    : ['MULTI_TENANT_ECS_EXECUTION_ROLE_ARN', null],
+            'tests.multiTenant.ecs.taskRoleArn'         : ['MULTI_TENANT_ECS_TASK_ROLE_ARN', null],
+            'tests.multiTenant.ecs.adPluginZip'         : ['MULTI_TENANT_ECS_AD_PLUGIN_ZIP', null],
+            'tests.multiTenant.ecs.jobSchedulerPluginZip': ['MULTI_TENANT_ECS_JOB_SCHEDULER_PLUGIN_ZIP', null],
+            'tests.multiTenant.ecs.cloudMapServiceName' : ['MULTI_TENANT_ECS_CLOUD_MAP_SERVICE', null],
+            'tests.multiTenant.ecs.createCloudMapService': ['MULTI_TENANT_ECS_CREATE_CLOUD_MAP_SERVICE', 'true'],
+            'tests.multiTenant.ecs.stopTasksOnCompletion': ['MULTI_TENANT_ECS_STOP_TASKS_ON_COMPLETION', 'true'],
+            'tests.multiTenant.ecs.enableExecuteCommand': ['MULTI_TENANT_ECS_ENABLE_EXECUTE_COMMAND', 'true'],
+            'tests.multiTenant.ecs.propagateAwsCredentials': ['MULTI_TENANT_ECS_PROPAGATE_AWS_CREDENTIALS', null],
+            'tests.multiTenant.ecs.createTaskRole': ['MULTI_TENANT_ECS_CREATE_TASK_ROLE', 'true'],
+            'tests.multiTenant.ecs.manageTaskRoleApplicationPolicy': ['MULTI_TENANT_ECS_MANAGE_TASK_ROLE_APPLICATION_POLICY', 'true'],
+            'tests.multiTenant.ecs.manageAossAccessPolicy': ['MULTI_TENANT_ECS_MANAGE_AOSS_ACCESS_POLICY', 'true'],
+            'tests.multiTenant.ecs.aossAccessPolicyName': ['MULTI_TENANT_ECS_AOSS_ACCESS_POLICY_NAME', null],
+            'tests.multiTenant.ecs.allowedCidr'       : ['MULTI_TENANT_ECS_ALLOWED_CIDR', 'auto'],
+            'tests.multiTenant.ecs.createEventBridgeRoles': ['MULTI_TENANT_ECS_CREATE_EVENT_BRIDGE_ROLES', 'true'],
+            'tests.multiTenant.ecs.autoScaling.enabled': ['MULTI_TENANT_ECS_AUTOSCALING_ENABLED', 'true'],
+            'tests.multiTenant.ecs.autoScaling.minCapacity': ['MULTI_TENANT_ECS_AUTOSCALING_MIN_CAPACITY', '1'],
+            'tests.multiTenant.ecs.autoScaling.maxCapacity': ['MULTI_TENANT_ECS_AUTOSCALING_MAX_CAPACITY', '3'],
+            'tests.multiTenant.ecs.autoScaling.targetHeapPercent': ['MULTI_TENANT_ECS_AUTOSCALING_TARGET_HEAP_PERCENT', '60'],
+            'tests.multiTenant.ecs.autoScaling.coordinator.targetDeletedArrivedRatio': [
+                'MULTI_TENANT_ECS_AUTOSCALING_COORDINATOR_TARGET_DELETED_ARRIVED_RATIO',
+                '1'
+            ],
+            'tests.multiTenant.ecs.autoScaling.coordinator.targetBacklogDeletedRatio': [
+                'MULTI_TENANT_ECS_AUTOSCALING_COORDINATOR_TARGET_BACKLOG_DELETED_RATIO',
+                '1'
+            ],
+            'tests.multiTenant.ecs.autoScaling.scaleInCooldown': ['MULTI_TENANT_ECS_AUTOSCALING_SCALE_IN_COOLDOWN', '300'],
+            'tests.multiTenant.ecs.autoScaling.scaleOutCooldown': ['MULTI_TENANT_ECS_AUTOSCALING_SCALE_OUT_COOLDOWN', '60'],
+            'tests.multiTenant.ecs.autoScaling.metricNamespace': ['MULTI_TENANT_ECS_AUTOSCALING_METRIC_NAMESPACE', 'OpenSearch/AnomalyDetection'],
+            'tests.multiTenant.ecs.autoScaling.predictive.enabled': ['MULTI_TENANT_ECS_PREDICTIVE_SCALING_ENABLED', 'true'],
+            'tests.multiTenant.ecs.autoScaling.predictive.mode': ['MULTI_TENANT_ECS_PREDICTIVE_SCALING_MODE', 'ForecastAndScale'],
+            'tests.multiTenant.ecs.autoScaling.predictive.schedulingBufferSeconds': ['MULTI_TENANT_ECS_PREDICTIVE_SCALING_BUFFER_SECONDS', '900'],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.enabled': ['MULTI_TENANT_ECS_AUTOSCALING_VERIFY_SCALE_ENABLED', 'true'],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.scaleInTimeoutMinutes': [
+                'MULTI_TENANT_ECS_AUTOSCALING_VERIFY_SCALE_IN_TIMEOUT_MINUTES',
+                '75'
+            ],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.workload.detectorCount': [
+                'MULTI_TENANT_ECS_AUTOSCALING_VERIFY_WORKLOAD_DETECTOR_COUNT',
+                '10'
+            ],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.workload.entityCount': [
+                'MULTI_TENANT_ECS_AUTOSCALING_VERIFY_WORKLOAD_ENTITY_COUNT',
+                '1500'
+            ],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.workload.historyIntervals': [
+                'MULTI_TENANT_ECS_AUTOSCALING_VERIFY_WORKLOAD_HISTORY_INTERVALS',
+                '260'
+            ],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.workload.messagesPerDetector': [
+                'MULTI_TENANT_ECS_AUTOSCALING_VERIFY_WORKLOAD_MESSAGES_PER_DETECTOR',
+                '240'
+            ],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.workload.bulkBatchSize': [
+                'MULTI_TENANT_ECS_AUTOSCALING_VERIFY_WORKLOAD_BULK_BATCH_SIZE',
+                '2000'
+            ],
+            'tests.multiTenant.ecs.autoScaling.verifyScale.workload.burstDurationSeconds': [
+                'MULTI_TENANT_ECS_AUTOSCALING_VERIFY_WORKLOAD_BURST_DURATION_SECONDS',
+                '180'
+            ]
+        ].each { key, config ->
+            def value = resolveMultiTenantSetting(key, config[0], config[1])
+            if (value != null && !value.isBlank()) {
+                systemProperty key, value
+            }
+        }
+        if (!hasNonBlankValue(System.getProperty('tests.multiTenant.ecs.adPluginZip'))) {
+            systemProperty 'tests.multiTenant.ecs.adPluginZip', tasks.bundlePlugin.archiveFile.get().asFile.absolutePath
+        }
+        if (!hasNonBlankValue(System.getProperty('tests.multiTenant.ecs.jobSchedulerPluginZip'))) {
+            systemProperty 'tests.multiTenant.ecs.jobSchedulerPluginZip', jobSchedulerFile.call().asFile.absolutePath
+        }
+        Map<String, String> awsCredentials = resolveMultiTenantAwsCredentialsForLocalJvm()
+        if (!awsCredentials.isEmpty()) {
+            systemProperty 'aws.accessKeyId', awsCredentials.accessKeyId
+            systemProperty 'aws.secretAccessKey', awsCredentials.secretAccessKey
+            if (hasNonBlankValue(awsCredentials.sessionToken)) {
+                systemProperty 'aws.sessionToken', awsCredentials.sessionToken
+            }
+        }
+        systemProperty 'aws.profile', multiTenantAwsProfileName()
+        systemProperty 'aws.region', resolveMultiTenantAwsRegion()
+        systemProperty 'aws.profile.refresh_interval_seconds', System.getProperty('aws.profile.refresh_interval_seconds') ?: '300'
+    }
+
+    doLast {
+        stopGeneratedMultiTenantAwsProfileRefresh()
+        stopMultiTenantAwsCredentialsServer()
+    }
+}
+
+gradle.buildFinished {
+    stopGeneratedMultiTenantAwsProfileRefresh()
+    stopMultiTenantAwsCredentialsServer()
+}
+
+// wired dualNodeMultiTenantIntegTest into check so that build includes check
+def releaseRequested = gradle.startParameter.taskNames.any { taskName ->
+    taskName == "release" || taskName.endsWith(":release")
+}
+
+if (!releaseRequested) {
+    tasks.named("check").configure { dependsOn(dualNodeMultiTenantIntegTest) }
 }
 
 configurations {
@@ -811,7 +2369,7 @@ ext.resolvebwcZipFile = { pluginId ->
     testClusters {
         "${baseName}$i" {
             testDistribution = "ARCHIVE"
-            versions = [bwcVersionShort, opensearch_version]
+            versions = [bwcVersionShort, opensearch_distribution_version]
             numberOfNodes = 3
             plugin(provider(resolvebwcZipFile("opensearch-job-scheduler")))
             plugin(provider(new Callable<RegularFile>(){
@@ -1004,13 +2562,12 @@ run {
 
 evaluationDependsOnChildren()
 
+// bundlePlugin creates the zip -> release unpacks that zip and copies the files into ../build/plugins/anomaly-detection
 task release(type: Copy, group: 'build') {
-    dependsOn allprojects*.tasks.build
-    from(zipTree(project.tasks.bundlePlugin.outputs.files.getSingleFile()))
-    into "build/plugins/opensearch-anomaly-detection"
+    dependsOn assemble
+    from(zipTree(bundlePlugin.getArchiveFile()))
+    into "../build/plugins/anomaly-detection"
     includeEmptyDirs = false
-    // ES versions < 6.3 have a top-level opensearch directory inside the plugin zip which we need to remove
-    eachFile { it.path = it.path - "opensearch/" }
 }
 
 def usingRemoteCluster = System.properties.containsKey('tests.rest.cluster') || System.properties.containsKey('tests.cluster')
@@ -1022,7 +2579,7 @@ if (!usingRemoteCluster && !usingMultiNode) {
 
 List<String> jacocoExclusions = [
         // code for configuration, settings, etc is excluded from coverage
-        'org.opensearch.timeseries.TimeSeriesAnalyticsPlugin',
+        'org.opensearch.timeseries.TimeSeriesAnalyticsPlugin*',
 
         // rest layer is tested in integration testing mostly, difficult to mock all of it
         'org.opensearch.ad.rest.*',
@@ -1042,7 +2599,6 @@ List<String> jacocoExclusions = [
 
         // TODO: add test coverage (kaituo)
         'org.opensearch.forecast.*',
-        'org.opensearch.ad.transport.ADHCImputeRequest',
         'org.opensearch.timeseries.transport.BaseDeleteConfigTransportAction.1',
         'org.opensearch.timeseries.transport.BaseSuggestConfigParamTransportAction',
         'org.opensearch.timeseries.rest.AbstractSearchAction.1',
@@ -1055,12 +2611,85 @@ List<String> jacocoExclusions = [
         'org.opensearch.timeseries.ratelimit.RateLimitedRequestWorker',
         'org.opensearch.timeseries.util.TimeUtil',
         'org.opensearch.ad.transport.ADHCImputeTransportAction',
+
+        // TODO: add coverage for recent multi-tenancy / SDK / infra classes
+        'org.opensearch.ad.sqs.ADSQSService*',
+        'org.opensearch.ad.client.HttpNodeCommunicator*',
+        'org.opensearch.ad.client.ADHttpNodeCommunicator*',
+        'org.opensearch.ad.client.TransportNodeCommunicator*',
+        'org.opensearch.ad.ADDataManagement*',
+        'org.opensearch.timeseries.util.SafeSecurityInjector*',
+        'org.opensearch.timeseries.util.SDKNodeFilter*',
+        'org.opensearch.timeseries.util.SecurityUtil*',
+        'org.opensearch.timeseries.util.SdkClientProvider*',
+        'org.opensearch.timeseries.util.TransportUtil*',
+        'org.opensearch.timeseries.util.StringUtil*',
+        'org.opensearch.timeseries.util.SDKIndexOperations*',
+        'org.opensearch.timeseries.util.TenantAwareHelper*',
+        'org.opensearch.timeseries.util.BulkUtil*',
+        'org.opensearch.timeseries.rest.handler.store.spi.DefaultDataSourceEndpointResolver*',
+        'org.opensearch.timeseries.rest.handler.store.SDKDataManagement*',
+        'org.opensearch.timeseries.rest.handler.store.endpoint.ThreadContextEndpointResolverFactory*',
+        'org.opensearch.timeseries.rest.handler.store.endpoint.StaticDataSourceEndpointResolverFactory*',
+        'org.opensearch.timeseries.rest.handler.store.endpoint.StaticApiDataSourceEndpointResolverFactory*',
+        'org.opensearch.timeseries.executor.SQSConsumerContributor*',
+        'org.opensearch.timeseries.executor.CloudMapWatcherContributor*',
+        'org.opensearch.timeseries.cluster.CloudMapWatcherTask*',
+        'org.opensearch.timeseries.cluster.ClusterMembershipReader*',
+        'org.opensearch.timeseries.cluster.SQSConsumerTask*',
+        'org.opensearch.timeseries.cluster.MultiTenantMaintenanceScheduler*',
+        'org.opensearch.timeseries.cluster.ClusterMembershipReaderTask*',
+        'org.opensearch.timeseries.cluster.CloudMapWatcher*',
+        'org.opensearch.timeseries.client.FieldMappingsView*',
+        'org.opensearch.timeseries.client.SdkDataAccess*',
+        'org.opensearch.timeseries.client.RestClientProvider*',
+        'org.opensearch.timeseries.client.SigningRestClientProvider*',
+        'org.opensearch.timeseries.client.DataPlaneClientFactory*',
+        'org.opensearch.timeseries.client.DataPlaneClientFactoryContext*',
+        'org.opensearch.timeseries.client.AwsSigV4RequestInterceptor*',
+        'org.opensearch.timeseries.client.AossDirectSigningClientFactory*',
+        'org.opensearch.timeseries.client.SecurityHeaderInjector*',
+        'org.opensearch.timeseries.client.RemoteMetadataConfigDocumentStore*',
+        'org.opensearch.ad.cluster.ADSQSConsumerTask*',
+        'org.opensearch.timeseries.rest.handler.EventBridgeHandler*',
+        'org.opensearch.ad.transport.ADHCImputeNodesResponse*',
+        'org.opensearch.ad.transport.DeleteAnomalyDetectorMutliTenantTransportAction*',
+        'org.opensearch.timeseries.common.exception.InternalFailure*',
+        'org.opensearch.ad.ml.ADS3CheckpointDao*',
+        'org.opensearch.timeseries.sqs.SQSService*',
+        'org.opensearch.timeseries.CleanState*',
+        'org.opensearch.timeseries.rest.RestCronAction*',
+        'org.opensearch.timeseries.ml.S3CheckpointDao*',
+        'org.opensearch.timeseries.ml.SingleStreamModelIdMapper*',
+        'org.opensearch.timeseries.ratelimit.CheckpointWriteWorker*',
+        'org.opensearch.timeseries.ratelimit.ResultWriteWorker*',
+        'org.opensearch.timeseries.transport.ResultBulkResponse*',
+        'org.opensearch.timeseries.transport.handler.IndexMemoryPressureAwareResultHandler*',
+        'org.opensearch.timeseries.transport.BaseValidateConfigTransportAction*',
+        'org.opensearch.timeseries.cluster.diskcleanup.BaseModelCheckpointIndexRetention*',
+        'org.opensearch.timeseries.cluster.diskcleanup.S3ModelCheckpointRetention*',
+        'org.opensearch.timeseries.cloudwatch.HeapUsageMetricPublisher*',
+        'org.opensearch.timeseries.cloudwatch.SqsMetricPublisher*',
+        'org.opensearch.ad.executor.ADModelContributor*',
+        'org.opensearch.ad.executor.ADCoordinatorContributor*',
+        'org.opensearch.ad.indices.ADIndexManagement*',
+        'org.opensearch.ad.indices.ADIndex*',
+        'org.opensearch.ad.sqs.ADEventBridgeTargetResolver*',
+        'org.opensearch.ad.cluster.diskcleanup.ADCheckpointIndexRetention*',
+        'org.opensearch.ad.transport.ADHCImputeRequest*',
+        'org.opensearch.ad.transport.IndexAnomalyDetectorResponse*',
+        'org.opensearch.timeseries.model.ConfigValidationIssue*',
+        'org.opensearch.timeseries.ml.CheckpointDao*',
+        'org.opensearch.timeseries.transport.JobResponse*',
+        'org.opensearch.timeseries.transport.SuggestConfigParamResponse*',
+        'org.opensearch.timeseries.transport.ValidateConfigResponse*',
+        'org.opensearch.timeseries.util.DateUtils*',
 ]
 
 
 jacocoTestCoverageVerification {
     dependsOn(jacocoTestReport)
-    executionData.from = [integTest.jacoco.destinationFile, test.jacoco.destinationFile]
+    executionData.from = [integTest.jacoco.destinationFile, test.jacoco.destinationFile, dualNodeMultiTenantIntegTest.jacoco.destinationFile]
     violationRules {
         rule {
             element = 'CLASS'
@@ -1082,8 +2711,10 @@ jacocoTestCoverageVerification {
     }
 }
 
-check.dependsOn jacocoTestCoverageVerification
-jacocoTestCoverageVerification.dependsOn jacocoTestReport
+if (!releaseRequested) {
+    check.dependsOn jacocoTestCoverageVerification
+    jacocoTestCoverageVerification.dependsOn jacocoTestReport
+}
 
 compileJava.options.compilerArgs << "-Xlint:-deprecation,-rawtypes,-serial,-try,-unchecked"
 
@@ -1194,5 +2825,322 @@ tasks.withType(AbstractPublishToMaven) {
     }
     onlyIf("Publishing only ZIP distributions") {
         predicate.get()
+    }
+}
+
+// ====== Inputs you can override with -P ======
+def osVersion      = opensearch_distribution_version
+def httpPort       = (findProperty('httpPort') ?: '9201').toString()
+def transportPort  = (findProperty('transportPort') ?: '9301').toString()
+
+// Always use the Linux "min" distro; choose arch by host JVM arch
+def hostArch   = System.getProperty('os.arch').toLowerCase()
+def linuxArch  = (hostArch.contains('aarch64') || hostArch.contains('arm64')) ? 'arm64' : 'x64'
+def osPlatform = "linux-${linuxArch}"  // always Linux
+
+// Extra OpenSearch node settings (-E k=v,k=v) and JVM args for the process
+def extraSettings  = (findProperty('extraSettings') ?: '').toString()
+def osJavaOpts     = (findProperty('osJavaOpts') ?: '').toString()
+
+def parseRunAtPortsSettings = { String raw ->
+    def settings = new LinkedHashMap<String, String>()
+    if (!raw) {
+        return settings
+    }
+
+    raw.split(/\s*,\s*/).findAll { it }.each { kv ->
+        def parts = kv.split(/\s*=\s*/, 2)
+        if (parts.size() != 2 || parts[0].trim().isEmpty()) {
+            throw new GradleException("Invalid setting '${kv}'. Expected key=value.")
+        }
+        settings[parts[0].trim()] = parts[1]
+    }
+    return settings
+}
+
+def collectTestOpenSearchSettings = {
+    def settings = new LinkedHashMap<String, String>()
+    System.properties
+        .findAll { entry -> entry.key.toString().startsWith('tests.opensearch.') }
+        .sort { a, b -> a.key.toString() <=> b.key.toString() }
+        .each { entry ->
+            def key = entry.key.toString().substring('tests.opensearch.'.length())
+            settings[key] = entry.value.toString()
+        }
+    return settings
+}
+
+// Where OpenSearch should take its JDK from (CRITICAL on macOS!)
+def osJavaHome = (findProperty('osJavaHome')
+        ?: System.getenv('OPENSEARCH_JAVA_HOME')
+        ?: System.getenv('JAVA_HOME')
+        ?: System.getProperty('java.home')).toString()
+if (!new File(osJavaHome).exists()) {
+    throw new GradleException("OPENSEARCH_JAVA_HOME not found. Set -PosJavaHome=<your JDK> or export JAVA_HOME/OPENSEARCH_JAVA_HOME.")
+}
+
+// Dependent plugins (install first). AD needs Job Scheduler.
+def depPluginsCsv  = (findProperty('depPlugins') ?: 'opensearch-job-scheduler').toString()
+// Optional: override plugin URLs, e.g. CI/BWC
+def depPluginUrls  = (findProperty('depPluginUrls') ?: '').toString()
+// Force reinstall deps too
+def forceReinstallDeps = (findProperty('forceReinstallDeps') ?: 'false').toString().toBoolean()
+
+// AD plugin version scheme: <osVersion>.<patch>[ -SNAPSHOT ]
+def isSnapshot = osVersion.endsWith('-SNAPSHOT')
+def baseVer    = isSnapshot ? osVersion.replace('-SNAPSHOT','') : osVersion
+def patch      = (findProperty('pluginPatch') ?: '0').toString()
+def pluginVer  = isSnapshot ? "${baseVer}.${patch}-SNAPSHOT" : "${baseVer}.${patch}"
+
+// ====== Linux-min distro URLs only ======
+def archiveExt = 'tar.gz'
+def defaultReleaseUrl  = "https://artifacts.opensearch.org/releases/core/opensearch/${osVersion}/opensearch-min-${osVersion}-${osPlatform}.${archiveExt}"
+def defaultSnapshotUrl = "https://artifacts.opensearch.org/snapshots/core/opensearch/${osVersion}/opensearch-min-${osVersion}-${osPlatform}-latest.${archiveExt}"
+
+// Allow explicit override (URL or local file)
+def osDistUrlProp  = (findProperty('osDistUrl')  ?: '').toString()
+def osDistFileProp = (findProperty('osDistFile') ?: '').toString()
+
+// ====== Layout ======
+def cacheDir  = layout.buildDirectory.dir("run/cache").get().asFile
+def tarDest   = new File(cacheDir, "opensearch-dist.${archiveExt}")
+def osRootDir = layout.buildDirectory.dir("run/os").get().asFile
+
+// --- Download Linux-min distro ---
+tasks.register('prepareOpenSearchTar') {
+    outputs.file(tarDest)
+    doLast {
+        cacheDir.mkdirs()
+        if (osDistFileProp) {
+            copy {
+                from file(osDistFileProp)
+                into cacheDir
+                rename { "opensearch-dist.${archiveExt}" }
+            }
+        } else {
+            def url = osDistUrlProp ?: (isSnapshot ? defaultSnapshotUrl : defaultReleaseUrl)
+            println "Downloading OpenSearch (Linux-min) from: ${url}"
+            ant.get(src: url, dest: tarDest, verbose: true, usetimestamp: true)
+        }
+    }
+}
+
+// --- Unpack and ensure scripts are executable ---
+tasks.register('unpackOpenSearch', Copy) {
+    dependsOn 'prepareOpenSearchTar'
+    from { tarTree(resources.gzip(tarDest)) }
+    into osRootDir
+    doLast {
+        def children = osRootDir.listFiles() ?: [] as File[]
+        println "Unpacked into: ${osRootDir}"
+        println "Contents: ${children.collect{it.name}}"
+        // Make sure scripts are executable (macOS sometimes strips exec bits)
+        def root = osRootDir.listFiles().find { it.isDirectory() && it.name.toLowerCase().startsWith("opensearch") }
+        if (root) {
+            ["bin/opensearch", "bin/opensearch-plugin"].each { rel ->
+                def f = new File(root, rel)
+                if (f.exists()) {
+                    f.setExecutable(true, true)
+                }
+            }
+        }
+    }
+}
+
+// --- Helper: locate OpenSearch home (works for min / non-min) ---
+def findOpenSearchHome = {
+    if (!osRootDir.exists()) osRootDir.mkdirs()
+    def cands = osRootDir.listFiles()?.findAll { it.isDirectory() && it.name.toLowerCase().startsWith("opensearch") } ?: []
+    if (cands.isEmpty()) {
+        throw new GradleException("No 'opensearch*' directory under ${osRootDir}. " +
+            "Expected something like 'opensearch-3.x.y'.")
+    }
+    return cands.sort { -it.lastModified() }[0]
+}
+
+// Try explicit override → Gradle resolution (uses repositories order) → Maven coords → Maven Central URL → artifacts site → (optional) CI
+
+def pluginUrlFor = { String pluginName ->
+    // 1) explicit per-plugin override: -PdepPluginUrls="name=url,name2=url2"
+    if (depPluginUrls) {
+        def map = depPluginUrls.split(/\s*,\s*/).findResults {
+            def m = it.split(/\s*=\s*/, 2)
+            (m.size() == 2) ? [(m[0]): m[1]] : null
+        }.inject([:]) { acc, m -> acc << m }
+        if (map[pluginName]) return [ map[pluginName] ]
+    }
+
+    def baseVerShort = baseVer.split('\\.')[0..1].join('.') // e.g., 3.2
+    def candidates = []
+
+    // 2) Resolve via Gradle first (respects repositories order: mavenLocal() → CI snapshots → mavenCentral() → ...)
+    try {
+        def dep = dependencies.create("org.opensearch.plugin:${pluginName}:${pluginVer}@zip")
+        def cfg = configurations.detachedConfiguration(dep)
+        cfg.transitive = false
+        def artifact = cfg.resolvedConfiguration.resolvedArtifacts.find { it.name.startsWith(pluginName) }
+        if (artifact?.file?.exists()) {
+            candidates << "file:${artifact.file.absolutePath}"
+        }
+    } catch (Exception ignored) {
+        // Fall back to other candidates below
+    }
+
+    // 3) Maven coordinates (opensearch-plugin can fetch from Maven Central)
+    candidates << "org.opensearch.plugin:${pluginName}:${pluginVer}"
+
+    // 4) Direct Maven Central URL (repo1)
+    candidates << "https://repo1.maven.org/maven2/org/opensearch/plugin/${pluginName}/${pluginVer}/${pluginName}-${pluginVer}.zip"
+
+    // 5) Official artifacts site (releases or snapshots)
+    if (isSnapshot) {
+        candidates << "https://artifacts.opensearch.org/snapshots/plugins/${pluginName}/${osVersion}/${pluginName}-${pluginVer}.zip"
+    } else {
+        candidates << "https://artifacts.opensearch.org/releases/plugins/${pluginName}/${baseVer}/${pluginName}-${pluginVer}.zip"
+    }
+
+    // 6) CI mirror
+    // e.g., https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/3.4.0/latest/linux/x64/tar/builds/opensearch/plugins/opensearch-job-scheduler-3.4.0.0.zip
+    candidates << "https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/${baseVer}/latest/linux/x64/tar/builds/opensearch/plugins/${pluginName}-${pluginVer}.zip"
+
+    return candidates
+}
+
+// --- Install dependency plugins (Job Scheduler first) ---
+tasks.register('installDepPlugins') {
+    dependsOn 'unpackOpenSearch'
+    mustRunAfter 'clean'
+    doLast {
+        def root = findOpenSearchHome()
+        def depNames = depPluginsCsv.split(/\s*,\s*/).findAll { it }
+
+        depNames.each { pluginName ->
+            if (forceReinstallDeps) {
+                exec {
+                    workingDir root
+                    ignoreExitValue = true
+                    environment "OPENSEARCH_JAVA_HOME", osJavaHome
+                    commandLine "./bin/opensearch-plugin", "remove", pluginName
+                }
+            } else if (new File(root, "plugins/${pluginName}").exists()) {
+                println "Dependency plugin already present: ${pluginName} — skipping."
+                return
+            }
+
+            def installed = false
+            def tried = []
+            pluginUrlFor(pluginName).each { ref ->
+                if (installed) return
+                tried << ref
+                def res = exec {
+                    workingDir root
+                    ignoreExitValue = true
+                    environment "OPENSEARCH_JAVA_HOME", osJavaHome
+                    commandLine "./bin/opensearch-plugin", "install", "--batch", ref
+                }
+                if (res.exitValue == 0) {
+                    println "Installed dependency plugin: ${pluginName} via ${ref}"
+                    installed = true
+                } else {
+                    println "Install attempt failed for ${pluginName} via ${ref} (trying next)"
+                }
+            }
+            if (!installed) throw new GradleException("Failed to install dependency plugin ${pluginName}. Tried: ${tried}")
+        }
+    }
+}
+
+// --- Always reinstall AD (remove if exists, then install fresh ZIP) ---
+tasks.register('installPlugin') {
+    dependsOn 'bundlePlugin', 'installDepPlugins'
+    mustRunAfter 'clean'
+    doLast {
+        def root = findOpenSearchHome()
+        // remove if present
+        exec {
+            workingDir root
+            ignoreExitValue = true
+            environment "OPENSEARCH_JAVA_HOME", osJavaHome
+            commandLine "./bin/opensearch-plugin", "remove", "opensearch-anomaly-detection"
+        }
+        File pluginZip = tasks.named('bundlePlugin').get().archiveFile.get().asFile
+        if (!pluginZip.exists()) throw new GradleException("Plugin zip not found: ${pluginZip}")
+        exec {
+            workingDir root
+            environment "OPENSEARCH_JAVA_HOME", osJavaHome
+            commandLine "./bin/opensearch-plugin", "install", "--batch", "file:${pluginZip.absolutePath}"
+        }
+        println "Installed AD plugin from ${pluginZip.name}"
+    }
+}
+
+// --- Run OpenSearch single-node on explicit ports (Linux/macOS) ---
+tasks.register('runAtPorts', Exec) {
+    group = "opensearch"
+    description = "Run OpenSearch (Linux-min) single-node with this plugin on custom HTTP/transport ports (Linux/macOS)"
+    dependsOn 'bundlePlugin', 'installPlugin'
+    mustRunAfter 'clean'
+    doFirst {
+        def root = findOpenSearchHome()
+        workingDir root
+        def forwardedTestSettings = collectTestOpenSearchSettings()
+        def mergedSettings = new LinkedHashMap<String, String>(forwardedTestSettings)
+        mergedSettings.putAll(parseRunAtPortsSettings(extraSettings))
+        def cmd = ["./bin/opensearch",
+            "-E", "discovery.type=single-node",
+            "-E", "http.port=${httpPort}",
+            "-E", "transport.port=${transportPort}"]
+        if (!mergedSettings.isEmpty()) {
+            mergedSettings.each { key, value -> cmd += ["-E", "${key}=${value}"] }
+        }
+        commandLine cmd
+        // Force use of host JDK (mac must not try to use the Linux JDK inside the tarball)
+        environment "OPENSEARCH_JAVA_HOME", osJavaHome
+        if (osJavaOpts) environment "OPENSEARCH_JAVA_OPTS", osJavaOpts
+
+        println "OpenSearch home       : ${root}"
+        println "HTTP / Transport ports: ${httpPort} / ${transportPort}"
+        println "OPENSEARCH_JAVA_HOME  : ${osJavaHome}"
+        if (!forwardedTestSettings.isEmpty()) {
+            println "Forwarded -Dtests.*   : ${forwardedTestSettings.collect { key, value -> "${key}=${value}" }.join(', ')}"
+        }
+        if (extraSettings) println "Extra -E              : ${extraSettings}"
+        if (osJavaOpts)   println "OPENSEARCH_JAVA_OPTS  : ${osJavaOpts}"
+        println "Starting OpenSearch (single-node)... (Ctrl+C to stop)"
+    }
+}
+
+// Create gradle cache by resolving all the project dependencies, used by brazil-gradle
+ 
+void resolveConfiguration(configuration) {
+  if (configuration.canBeResolved && isResolveableConfiguration(configuration)) {
+      configuration.resolve()
+  }
+}
+ 
+boolean isResolveableConfiguration(configuration) {
+    def nonResolveableConfigurations = ['loggerUsagePlugin']
+    def dependency_list = configuration.allDependencies
+    for(dep in dependency_list){
+        if("${dep.group}:${dep.name}" == "org.opensearch.distribution.integ-test-zip:opensearch"){
+            println("Skipping configuration: ${configuration.getName()} because it contains dependency ${dep.group}:${dep.name}:${dep.version}")
+            return false
+        }
+    }
+    if (nonResolveableConfigurations.contains(configuration.getName())) {
+        return false
+    }
+    return true
+}
+ 
+allprojects {
+    tasks.register('resolveAllDependencies') {
+        doLast {
+            project.rootProject.allprojects.each { subProject ->
+                subProject.configurations.each { configuration ->
+                    resolveConfiguration(configuration)
+                }
+            }
+        }
     }
 }

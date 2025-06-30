@@ -19,6 +19,7 @@ import static org.opensearch.commons.ConfigConstants.OPENSEARCH_SECURITY_SSL_HTT
 import static org.opensearch.commons.ConfigConstants.OPENSEARCH_SECURITY_SSL_HTTP_KEYSTORE_PASSWORD;
 import static org.opensearch.commons.ConfigConstants.OPENSEARCH_SECURITY_SSL_HTTP_PEMCERT_FILEPATH;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -64,6 +65,7 @@ import org.apache.hc.core5.ssl.SSLContextBuilder;
 import org.apache.hc.core5.util.Timeout;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Logger;
+import org.jacoco.core.tools.ExecFileLoader;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.opensearch.client.Request;
@@ -169,6 +171,9 @@ public abstract class ODFERestTestCase extends OpenSearchRestTestCase {
     @SuppressWarnings("unchecked")
     @After
     protected void wipeAllODFEIndices() throws IOException {
+        if (shouldWipeAllODFEIndices() == false) {
+            return;
+        }
         Response response = adminClient().performRequest(new Request("GET", "/_cat/indices?format=json&expand_wildcards=all"));
         MediaType xContentType = MediaType.fromMediaType(response.getEntity().getContentType());
         try (
@@ -198,6 +203,10 @@ public abstract class ODFERestTestCase extends OpenSearchRestTestCase {
                 }
             }
         }
+    }
+
+    protected boolean shouldWipeAllODFEIndices() {
+        return true;
     }
 
     protected static void configureHttpsClient(RestClientBuilder builder, Settings settings) throws IOException {
@@ -267,18 +276,37 @@ public abstract class ODFERestTestCase extends OpenSearchRestTestCase {
             return;
         }
 
-        String serverUrl = System.getProperty("jmx.serviceUrl");
-        if (serverUrl == null) {
+        String serverUrls = System.getProperty("jmx.serviceUrl");
+        if (serverUrls == null) {
             LOG.error("Failed to dump coverage because JMX Service URL is null");
             throw new IllegalArgumentException("JMX Service URL is null");
         }
 
-        try (JMXConnector connector = JMXConnectorFactory.connect(new JMXServiceURL(serverUrl))) {
-            IProxy proxy = MBeanServerInvocationHandler
-                .newProxyInstance(connector.getMBeanServerConnection(), new ObjectName("org.jacoco:type=Runtime"), IProxy.class, false);
+        String execFile = System.getProperty("jacoco.exec.file");
+        Path path = org.opensearch.core.common.Strings.isNullOrEmpty(execFile)
+            ? Path.of(Path.of(jacocoBuildPath, "integTest.exec").toFile().getCanonicalPath())
+            : Path.of(execFile).toAbsolutePath();
 
-            Path path = Path.of(Path.of(jacocoBuildPath, "integTest.exec").toFile().getCanonicalPath());
-            Files.write(path, proxy.getExecutionData(false));
+        ExecFileLoader execFileLoader = new ExecFileLoader();
+        try {
+            for (String serverUrl : serverUrls.split(",")) {
+                String trimmedUrl = serverUrl.trim();
+                if (trimmedUrl.isEmpty()) {
+                    continue;
+                }
+                try (JMXConnector connector = JMXConnectorFactory.connect(new JMXServiceURL(trimmedUrl))) {
+                    IProxy proxy = MBeanServerInvocationHandler
+                        .newProxyInstance(
+                            connector.getMBeanServerConnection(),
+                            new ObjectName("org.jacoco:type=Runtime"),
+                            IProxy.class,
+                            false
+                        );
+                    execFileLoader.load(new ByteArrayInputStream(proxy.getExecutionData(false)));
+                }
+            }
+            Files.createDirectories(path.getParent());
+            execFileLoader.save(path.toFile(), false);
         } catch (Exception ex) {
             LOG.error("Failed to dump coverage: ", ex);
             throw new RuntimeException("Failed to dump coverage: " + ex);

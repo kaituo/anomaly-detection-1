@@ -68,6 +68,13 @@ public class StatsNodesResponse extends BaseNodesResponse<StatsNodeResponse> imp
 
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+        builder.startObject();
+        toXContentFragment(builder, params);
+        builder.endObject();
+        return builder;
+    }
+
+    public XContentBuilder toXContentFragment(XContentBuilder builder, Params params) throws IOException {
         String nodeId;
         DiscoveryNode node;
         builder.startObject(NODES_KEY);

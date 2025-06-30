@@ -11,6 +11,7 @@
 
 package org.opensearch.ad.stats;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -34,8 +35,6 @@ import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
-import org.opensearch.ad.ml.ADModelManager;
-import org.opensearch.ad.ml.HybridThresholdingModel;
 import org.opensearch.ad.stats.suppliers.ADModelsOnNodeSupplier;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -49,7 +48,6 @@ import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
 import org.opensearch.timeseries.stats.suppliers.IndexStatusSupplier;
 import org.opensearch.timeseries.util.IndexUtils;
 
-import com.amazon.randomcutforest.RandomCutForest;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 import test.org.opensearch.ad.util.MLUtil;
@@ -59,16 +57,12 @@ public class ADStatsTests extends OpenSearchTestCase {
 
     private Map<String, TimeSeriesStat<?>> statsMap;
     private ADStats adStats;
-    private RandomCutForest rcf;
-    private HybridThresholdingModel thresholdingModel;
+    private ThresholdedRandomCutForest trcf;
     private String clusterStatName1, clusterStatName2;
     private String nodeStatName1, nodeStatName2;
 
     @Mock
     private Clock clock;
-
-    @Mock
-    private ADModelManager modelManager;
 
     @Mock
     private ADCacheProvider cacheProvider;
@@ -78,16 +72,16 @@ public class ADStatsTests extends OpenSearchTestCase {
         MockitoAnnotations.initMocks(this);
 
         // sampleSize * numberOfTrees has to be larger than 1. Otherwise, RCF reports errors.
-        rcf = RandomCutForest.builder().dimensions(1).sampleSize(2).numberOfTrees(1).build();
-        thresholdingModel = new HybridThresholdingModel(1e-8, 1e-5, 200, 10_000, 2, 5_000_000);
+        trcf = mock(ThresholdedRandomCutForest.class);
 
-        List<ModelState<?>> modelsInformation = new ArrayList<>(
+        List<ModelState<ThresholdedRandomCutForest>> modelsInformation = new ArrayList<>(
             Arrays
                 .asList(
                     new ModelState<>(
-                        rcf,
+                        trcf,
                         "rcf-model-1",
                         "detector-1",
+                        null,
                         ModelManager.ModelType.RCF.getName(),
                         clock,
                         0f,
@@ -95,30 +89,11 @@ public class ADStatsTests extends OpenSearchTestCase {
                         new ArrayDeque<>()
                     ),
                     new ModelState<>(
-                        thresholdingModel,
-                        "thr-model-1",
-                        "detector-1",
-                        ModelManager.ModelType.RCF.getName(),
-                        clock,
-                        0f,
-                        Optional.empty(),
-                        new ArrayDeque<>()
-                    ),
-                    new ModelState<>(
-                        rcf,
+                        trcf,
                         "rcf-model-2",
-                        "detector-2",
-                        ModelManager.ModelType.THRESHOLD.getName(),
-                        clock,
-                        0f,
-                        Optional.empty(),
-                        new ArrayDeque<>()
-                    ),
-                    new ModelState<>(
-                        thresholdingModel,
-                        "thr-model-2",
-                        "detector-2",
-                        ModelManager.ModelType.THRESHOLD.getName(),
+                        "detector-1",
+                        null,
+                        ModelManager.ModelType.RCF.getName(),
                         clock,
                         0f,
                         Optional.empty(),
@@ -126,8 +101,6 @@ public class ADStatsTests extends OpenSearchTestCase {
                     )
                 )
         );
-
-        when(modelManager.getAllModels()).thenReturn(modelsInformation);
 
         ModelState<ThresholdedRandomCutForest> entityModel1 = MLUtil
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
@@ -137,11 +110,12 @@ public class ADStatsTests extends OpenSearchTestCase {
         List<ModelState<ThresholdedRandomCutForest>> entityModelsInformation = new ArrayList<>(Arrays.asList(entityModel1, entityModel2));
         ADPriorityCache cache = mock(ADPriorityCache.class);
         when(cacheProvider.get()).thenReturn(cache);
-        when(cache.getAllModels()).thenReturn(entityModelsInformation);
+        when(cache.getAllModels())
+            .thenReturn(new ArrayList<>(Arrays.asList(modelsInformation.get(0), modelsInformation.get(1), entityModel1, entityModel2)));
 
         IndexUtils indexUtils = mock(IndexUtils.class);
 
-        when(indexUtils.getIndexHealthStatus(anyString())).thenReturn("yellow");
+        when(indexUtils.getIndexHealthStatus(any(), anyString())).thenReturn("yellow");
 
         clusterStatName1 = "clusterStat1";
         clusterStatName2 = "clusterStat2";
@@ -160,10 +134,7 @@ public class ADStatsTests extends OpenSearchTestCase {
         statsMap = new HashMap<String, TimeSeriesStat<?>>() {
             {
                 put(nodeStatName1, new TimeSeriesStat<>(false, new CounterSupplier()));
-                put(
-                    nodeStatName2,
-                    new TimeSeriesStat<>(false, new ADModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService))
-                );
+                put(nodeStatName2, new TimeSeriesStat<>(false, new ADModelsOnNodeSupplier(cacheProvider, settings, clusterService)));
                 put(clusterStatName1, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index1")));
                 put(clusterStatName2, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index2")));
             }

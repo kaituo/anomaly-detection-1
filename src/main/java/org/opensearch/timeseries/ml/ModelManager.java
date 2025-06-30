@@ -12,8 +12,10 @@
 package org.opensearch.timeseries.ml;
 
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -21,19 +23,21 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.util.DataUtil;
 
 import com.amazon.randomcutforest.RandomCutForest;
 import com.amazon.randomcutforest.parkservices.AnomalyDescriptor;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>> {
+public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, IndexableResultType>> {
 
     private static final Logger LOG = LogManager.getLogger(ModelManager.class);
 
@@ -62,6 +66,8 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
     protected final Clock clock;
     protected FeatureManager featureManager;
     protected final CheckpointDaoType checkpointDao;
+    protected final StateManager nodeStateManager;
+    protected final AnalysisType analysisType;
 
     public ModelManager(
         int rcfNumTrees,
@@ -71,7 +77,9 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         MemoryTracker memoryTracker,
         Clock clock,
         FeatureManager featureManager,
-        CheckpointDaoType checkpointDao
+        CheckpointDaoType checkpointDao,
+        StateManager nodeStateManager,
+        AnalysisType analysisType
     ) {
         this.rcfNumTrees = rcfNumTrees;
         this.rcfNumSamplesInTree = rcfNumSamplesInTree;
@@ -81,6 +89,8 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         this.clock = clock;
         this.featureManager = featureManager;
         this.checkpointDao = checkpointDao;
+        this.nodeStateManager = nodeStateManager;
+        this.analysisType = analysisType;
     }
 
     public IntermediateResultType getResult(
@@ -107,26 +117,90 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         return result;
     }
 
-    public void clearModels(String detectorId, Map<String, ?> models, ActionListener<Void> listener) {
-        Iterator<String> id = models.keySet().iterator();
-        clearModelForIterator(detectorId, models, id, listener);
+    public void clearModels(String detectorId, String tenantId, Map<String, ?> models, ActionListener<Void> listener) {
+        List<String> modelIdsToDelete = new ArrayList<>();
+        for (Map.Entry<String, ?> modelEntry : models.entrySet()) {
+            String modelId = modelEntry.getKey();
+            if (isModelForConfig(detectorId, tenantId, modelId, modelEntry.getValue())) {
+                modelIdsToDelete.add(modelId);
+            }
+        }
+
+        if (modelIdsToDelete.isEmpty()) {
+            listener.onResponse(null);
+            return;
+        }
+
+        for (String modelId : modelIdsToDelete) {
+            models.remove(modelId);
+        }
+
+        nodeStateManager.getConfig(detectorId, tenantId, analysisType, false, ActionListener.wrap(config -> {
+            if (config.isPresent()) {
+                clearCheckpointForIterator(config.get(), modelIdsToDelete.iterator(), listener);
+            } else {
+                LOG.debug("Skipping checkpoint deletion for [{}] because the config no longer exists", detectorId);
+                listener.onResponse(null);
+            }
+        }, e -> {
+            LOG
+                .warn(
+                    new ParameterizedMessage(
+                        "Removed in-memory models for [{}] but failed to load config for checkpoint deletion",
+                        detectorId
+                    ),
+                    e
+                );
+            listener.onResponse(null);
+        }));
     }
 
-    protected void clearModelForIterator(String detectorId, Map<String, ?> models, Iterator<String> idIter, ActionListener<Void> listener) {
+    private void clearCheckpointForIterator(Config config, Iterator<String> idIter, ActionListener<Void> listener) {
         if (idIter.hasNext()) {
             String modelId = idIter.next();
-            if (SingleStreamModelIdMapper.getConfigIdForModelId(modelId).equals(detectorId)) {
-                models.remove(modelId);
-                checkpointDao
-                    .deleteModelCheckpoint(
-                        modelId,
-                        ActionListener.wrap(r -> clearModelForIterator(detectorId, models, idIter, listener), listener::onFailure)
-                    );
-            } else {
-                clearModelForIterator(detectorId, models, idIter, listener);
-            }
+            checkpointDao
+                .deleteModelCheckpoint(
+                    config,
+                    modelId,
+                    ActionListener.wrap(r -> clearCheckpointForIterator(config, idIter, listener), listener::onFailure)
+                );
         } else {
             listener.onResponse(null);
+        }
+    }
+
+    private boolean isModelForConfig(String detectorId, String tenantId, String modelId, Object modelState) {
+        if (modelState instanceof ModelState<?> state && state.getConfigId() != null) {
+            if (detectorId.equals(state.getConfigId()) == false) {
+                return false;
+            }
+            return tenantMatches(tenantId, state.getTenantId());
+        }
+
+        return modelIdMatchesConfig(detectorId, modelId);
+    }
+
+    private boolean tenantMatches(String expectedTenantId, String modelTenantId) {
+        if (expectedTenantId == null || expectedTenantId.isEmpty()) {
+            return true;
+        }
+        if (modelTenantId == null || modelTenantId.isEmpty()) {
+            return true;
+        }
+        return expectedTenantId.equals(modelTenantId);
+    }
+
+    private boolean modelIdMatchesConfig(String detectorId, String modelId) {
+        try {
+            return detectorId.equals(SingleStreamModelIdMapper.getConfigIdForModelId(modelId));
+        } catch (IllegalArgumentException e) {
+            String entityModelInfix = "_entity_";
+            int entityModelInfixPosition = modelId.lastIndexOf(entityModelInfix);
+            if (entityModelInfixPosition <= 0 || entityModelInfixPosition + entityModelInfix.length() >= modelId.length()) {
+                LOG.debug("Skipping unrecognized model id [{}] while clearing [{}]", modelId, detectorId, e);
+                return false;
+            }
+            return detectorId.equals(modelId.substring(0, entityModelInfixPosition));
         }
     }
 
@@ -147,11 +221,14 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
                         double[] unProcessedPoint = unProcessedSample.getValueList();
                         int[] missingIndices = DataUtil.generateMissingIndicesArray(unProcessedPoint);
                         rcfModel.process(unProcessedPoint, unProcessedSample.getDataEndTime().getEpochSecond(), missingIndices);
+                        modelState.setLastProcessedDataEndTime(unProcessedSample.getDataEndTime());
                     }
                     modelState.clearSamples();
                 }
 
-                return score(sample, config, rcfModel);
+                IntermediateResultType result = score(sample, config, rcfModel);
+                modelState.setLastProcessedDataEndTime(sample.getDataEndTime());
+                return result;
             }
         } catch (Exception e) {
             LOG

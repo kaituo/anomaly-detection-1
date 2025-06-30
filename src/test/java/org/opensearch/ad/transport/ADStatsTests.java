@@ -88,7 +88,7 @@ public class ADStatsTests extends OpenSearchTestCase {
         StatsNodeRequest adStatsNodeRequest1 = new StatsNodeRequest();
         assertNull("ADStatsNodeRequest default constructor failed", adStatsNodeRequest1.getADStatsRequest());
 
-        StatsRequest adStatsRequest = new StatsRequest(new String[0]);
+        StatsRequest adStatsRequest = new StatsRequest(null, new String[0]);
         StatsNodeRequest adStatsNodeRequest2 = new StatsNodeRequest(adStatsRequest);
         assertEquals("ADStatsNodeRequest has the wrong ADStatsRequest", adStatsNodeRequest2.getADStatsRequest(), adStatsRequest);
 
@@ -150,8 +150,9 @@ public class ADStatsTests extends OpenSearchTestCase {
         when(clock.instant()).thenReturn(Instant.now());
         ModelState<ThresholdedRandomCutForest> state = new ModelState<ThresholdedRandomCutForest>(
             null,
-            entity.getModelId(detectorId).get(),
+            entity.getModelId(null, detectorId).get(),
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0.1f,
@@ -192,7 +193,12 @@ public class ADStatsTests extends OpenSearchTestCase {
                     }
                 }
             } else {
-                assertEquals("toXContent does not work", JsonDeserializer.getTextValue(json, stat.getKey()), stat.getValue());
+                JsonElement value = JsonDeserializer.getChildNode(json, stat.getKey());
+                if (CommonName.TENANT_ID_FIELD.equals(stat.getKey()) && stat.getValue() == null) {
+                    assertTrue("toXContent does not work", value != null && value.isJsonNull());
+                } else {
+                    assertEquals("toXContent does not work", JsonDeserializer.getTextValue(json, stat.getKey()), stat.getValue());
+                }
             }
         }
     }
@@ -200,7 +206,7 @@ public class ADStatsTests extends OpenSearchTestCase {
     @Test
     public void testADStatsRequest() throws IOException {
         List<String> allStats = Arrays.stream(StatNames.values()).map(StatNames::getName).collect(Collectors.toList());
-        StatsRequest adStatsRequest = new StatsRequest(new String[0]);
+        StatsRequest adStatsRequest = new StatsRequest(null, new String[0]);
 
         // Test clear()
         adStatsRequest.clear();
@@ -242,7 +248,7 @@ public class ADStatsTests extends OpenSearchTestCase {
 
         // Test toXContent
         XContentBuilder builder = jsonBuilder();
-        adStatsNodesResponse.toXContent(builder.startObject(), ToXContent.EMPTY_PARAMS).endObject();
+        adStatsNodesResponse.toXContent(builder, ToXContent.EMPTY_PARAMS);
         String json = builder.toString();
 
         logger.info("JSON: " + json);
@@ -267,7 +273,7 @@ public class ADStatsTests extends OpenSearchTestCase {
         StatsNodesResponse readRequest = new StatsNodesResponse(streamInput);
 
         builder = jsonBuilder();
-        String readJson = readRequest.toXContent(builder.startObject(), ToXContent.EMPTY_PARAMS).endObject().toString();
+        String readJson = readRequest.toXContent(builder, ToXContent.EMPTY_PARAMS).toString();
         assertEquals("Serialization fails", readJson, json);
     }
 }

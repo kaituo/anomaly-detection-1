@@ -7,6 +7,7 @@ package org.opensearch.timeseries.transport;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.TimeUnit;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -18,7 +19,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.caching.CacheBuffer;
 import org.opensearch.timeseries.caching.CacheProvider;
@@ -27,9 +28,8 @@ import org.opensearch.timeseries.caching.TimeSeriesCache;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.IntermediateResult;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -49,6 +49,7 @@ import org.opensearch.timeseries.ratelimit.FeatureRequest;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.ratelimit.ResultWriteRequest;
 import org.opensearch.timeseries.ratelimit.SaveResultStrategy;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.util.ActionListenerExecutor;
@@ -57,14 +58,14 @@ import org.opensearch.transport.TransportService;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class AbstractSingleStreamResultTransportAction<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, CheckpointMaintainerType extends CheckpointMaintainWorker, CacheBufferType extends CacheBuffer<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType>, PriorityCacheType extends PriorityCache<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType, CacheBufferType>, CacheProviderType extends CacheProvider<RCFModelType, PriorityCacheType>, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointDaoType, ColdStarterType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>, CheckpointReadWorkerType extends CheckpointReadWorker<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, ModelManagerType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType>, ResultWriteRequestType extends ResultWriteRequest<ResultType>, ColdEntityWorkerType extends ColdEntityWorker<RCFModelType, ResultType, IndexType, IndexManagementType, CheckpointDaoType, RCFResultType, ModelManagerType, CheckpointWriterType, ColdStarterType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType, CheckpointReadWorkerType>>
+public abstract class AbstractSingleStreamResultTransportAction<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType>, CheckpointMaintainerType extends CheckpointMaintainWorker, CacheBufferType extends CacheBuffer<RCFModelType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType>, PriorityCacheType extends PriorityCache<RCFModelType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType, CacheBufferType>, CacheProviderType extends CacheProvider<RCFModelType, PriorityCacheType>, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointDaoType, ColdStarterType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>, CheckpointReadWorkerType extends CheckpointReadWorker<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, ModelManagerType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType>, ResultWriteRequestType extends ResultWriteRequest<ResultType>, ColdEntityWorkerType extends ColdEntityWorker<RCFModelType, ResultType, IndexType, DataManagementType, CheckpointDaoType, RCFResultType, ModelManagerType, CheckpointWriterType, ColdStarterType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType, CheckpointReadWorkerType>>
     extends HandledTransportAction<SingleStreamResultRequest, AcknowledgedResponse> {
 
     private static final Logger LOG = LogManager.getLogger(AbstractSingleStreamResultTransportAction.class);
 
     protected CircuitBreakerService circuitBreakerService;
     protected CacheProviderType cache;
-    protected final NodeStateManager stateManager;
+    protected final StateManager stateManager;
     protected CheckpointReadWorkerType checkpointReadQueue;
     protected AnalysisType analysisType;
     private InferencerType inferencer;
@@ -77,7 +78,7 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
         ActionFilters actionFilters,
         CircuitBreakerService circuitBreakerService,
         CacheProviderType cache,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         CheckpointReadWorkerType checkpointReadQueue,
         String resultAction,
         AnalysisType analysisType,
@@ -100,6 +101,7 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
 
     @Override
     protected void doExecute(Task task, SingleStreamResultRequest request, ActionListener<AcknowledgedResponse> listener) {
+        final long requestStartNanos = System.nanoTime();
         if (circuitBreakerService.isOpen()) {
             listener.onFailure(new LimitExceededException(request.getConfigId(), CommonMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
             return;
@@ -107,6 +109,16 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
 
         try {
             String configId = request.getConfigId();
+            LOG
+                .info(
+                    "single stream request received config={} model={} taskId={} start={} end={} tenant={}",
+                    configId,
+                    request.getModelId(),
+                    request.getTaskId(),
+                    request.getStart(),
+                    request.getEnd(),
+                    request.getTenantId()
+                );
 
             Optional<Exception> previousException = stateManager.fetchExceptionAndClear(configId);
 
@@ -128,9 +140,10 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
             stateManager
                 .getConfig(
                     configId,
+                    request.getTenantId(),
                     analysisType,
                     request.getTaskId() == null,
-                    onGetConfig(listener, configId, request, previousException)
+                    onGetConfig(listener, configId, request, previousException, requestStartNanos)
                 );
         } catch (Exception exception) {
             LOG.error("fail to get result", exception);
@@ -142,7 +155,8 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
         ActionListener<AcknowledgedResponse> listener,
         String configId,
         SingleStreamResultRequest request,
-        Optional<Exception> prevException
+        Optional<Exception> prevException,
+        long requestStartNanos
     ) {
         return ActionListenerExecutor.wrap(configOptional -> {
             if (!configOptional.isPresent()) {
@@ -151,11 +165,29 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
             }
 
             Config config = configOptional.get();
+            LOG
+                .info(
+                    "single stream config fetch complete config={} model={} taskId={} elapsedMs={}",
+                    configId,
+                    request.getModelId(),
+                    request.getTaskId(),
+                    elapsedMillis(requestStartNanos)
+                );
 
             String modelId = request.getModelId();
             double[] datapoint = request.getDataPoint();
             ModelState<RCFModelType> modelState = cache.get().get(modelId, config);
             if (modelState == null) {
+                LOG
+                    .info(
+                        "single stream cache miss config={} model={} taskId={} start={} end={} longFrequency={}",
+                        configId,
+                        modelId,
+                        request.getTaskId(),
+                        request.getStart(),
+                        request.getEnd(),
+                        config.isLongFrequency()
+                    );
                 FeatureRequest featureRequest = new FeatureRequest(
                     System.currentTimeMillis() + config.getInferredFrequencyInMilliseconds(),
                     configId,
@@ -163,17 +195,41 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
                     request.getModelId(),
                     datapoint,
                     request.getStart(),
-                    request.getTaskId()
+                    request.getTaskId(),
+                    config.getTenantId(),
+                    config,
+                    request.getRequestTimeMillis()
                 );
                 // cache miss
                 if (config.isLongFrequency()) {
+                    LOG.info("queueing cold entity request config={} model={}", configId, modelId);
                     coldEntityQueue.put(featureRequest);
                 } else {
+                    LOG.info("queueing checkpoint read config={} model={}", configId, modelId);
                     checkpointReadQueue.put(featureRequest);
                 }
 
+                LOG
+                    .info(
+                        "single stream cache miss queued config={} model={} taskId={} totalElapsedMs={}",
+                        configId,
+                        modelId,
+                        request.getTaskId(),
+                        elapsedMillis(requestStartNanos)
+                    );
                 sendResponse(listener, prevException);
             } else {
+                int sampleCount = modelState.getSamples() == null ? 0 : modelState.getSamples().size();
+                LOG
+                    .info(
+                        "single stream cache hit config={} model={} taskId={} lastUsed={} samplesBuffered={}",
+                        configId,
+                        modelId,
+                        request.getTaskId(),
+                        modelState.getLastUsedTime(),
+                        sampleCount
+                    );
+                long inferencerStartNanos = System.nanoTime();
                 inferencer
                     .process(
                         new Sample(datapoint, Instant.ofEpochMilli(request.getStart()), Instant.ofEpochMilli(request.getEnd())),
@@ -181,8 +237,32 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
                         config,
                         request.getTaskId(),
                         ActionListener.wrap(r -> {
+                            LOG
+                                .info(
+                                    "single stream inference listener success config={} model={} taskId={} result={} inferencerElapsedMs={} totalElapsedMs={}",
+                                    configId,
+                                    modelId,
+                                    request.getTaskId(),
+                                    r,
+                                    elapsedMillis(inferencerStartNanos),
+                                    elapsedMillis(requestStartNanos)
+                                );
                             sendResponse(listener, prevException);
-                        }, e -> { listener.onFailure(e); })
+                        }, e -> {
+                            LOG
+                                .error(
+                                    new ParameterizedMessage(
+                                        "single stream inference listener failure config={} model={} taskId={} inferencerElapsedMs={} totalElapsedMs={}",
+                                        configId,
+                                        modelId,
+                                        request.getTaskId(),
+                                        elapsedMillis(inferencerStartNanos),
+                                        elapsedMillis(requestStartNanos)
+                                    ),
+                                    e
+                                );
+                            listener.onFailure(e);
+                        })
                     );
             }
         }, exception -> {
@@ -196,8 +276,25 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
                     ),
                     exception
                 );
+            LOG
+                .info(
+                    "single stream config fetch failed config={} model={} taskId={} totalElapsedMs={}",
+                    configId,
+                    request.getModelId(),
+                    request.getTaskId(),
+                    elapsedMillis(requestStartNanos)
+                );
             listener.onFailure(exception);
         }, threadPool.executor(threadPoolName));
+    }
+
+    public ActionListener<Optional<? extends Config>> onGetConfig(
+        ActionListener<AcknowledgedResponse> listener,
+        String configId,
+        SingleStreamResultRequest request,
+        Optional<Exception> prevException
+    ) {
+        return onGetConfig(listener, configId, request, prevException, System.nanoTime());
     }
 
     private void sendResponse(ActionListener<AcknowledgedResponse> listener, Optional<Exception> prevException) {
@@ -210,4 +307,8 @@ public abstract class AbstractSingleStreamResultTransportAction<RCFModelType ext
     }
 
     public abstract ResultWriteRequestType createResultWriteRequest(Config config, ResultType result);
+
+    private static long elapsedMillis(long startNanos) {
+        return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNanos);
+    }
 }

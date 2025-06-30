@@ -99,6 +99,7 @@ public class AnomalyDetectionClientTests {
             "",
             "",
             false,
+            null,
             null
         );
         assertEquals(profileResponse, anomalyDetectionClient.getDetectorProfile(profileRequest).actionGet());
@@ -114,7 +115,8 @@ public class AnomalyDetectionClientTests {
             10,
             5,
             org.opensearch.common.unit.TimeValue.timeValueSeconds(30),
-            2
+            2,
+            null
         );
         assertEquals(validateResponse, anomalyDetectionClient.validateAnomalyDetector(validateRequest).actionGet());
     }

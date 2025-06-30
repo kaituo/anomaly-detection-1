@@ -45,6 +45,7 @@ import org.opensearch.rest.action.RestResponseListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -67,6 +68,7 @@ public class RestIndexForecasterAction extends AbstractForecasterAction {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ForecastEnabledSetting.isForecastEnabled()) {
             throw new IllegalStateException(ForecastCommonMessages.DISABLED_ERR_MSG);
@@ -92,6 +94,8 @@ public class RestIndexForecasterAction extends AbstractForecasterAction {
                 forecasterId = Config.NO_ID;
             }
 
+            boolean multiTenancyEnabled = ForecastEnabledSetting.isForecastMultiTenancyEnabled(settings);
+            String tenantId = multiTenancyEnabled ? TenantAwareHelper.getTenantID(multiTenancyEnabled, request) : null;
             IndexForecasterRequest indexForecasterRequest = new IndexForecasterRequest(
                 forecasterId,
                 seqNo,
@@ -103,7 +107,8 @@ public class RestIndexForecasterAction extends AbstractForecasterAction {
                 maxSingleStreamForecasters,
                 maxHCForecasters,
                 maxForecastFeatures,
-                maxCategoricalFields
+                maxCategoricalFields,
+                tenantId
             );
 
             return channel -> client
