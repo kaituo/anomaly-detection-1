@@ -26,7 +26,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.mockito.ArgumentCaptor;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -34,6 +33,7 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.forecast.client.ForecastNodeCommunicator;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.settings.ForecastSettings;
@@ -47,6 +47,7 @@ import org.opensearch.threadpool.Scheduler.ScheduledCancellable;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.InternalFailure;
 import org.opensearch.timeseries.dataprocessor.ImputationMethod;
@@ -58,9 +59,8 @@ import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.timeseries.task.TaskCacheManager;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ResultProcessorTests extends OpenSearchTestCase {
 
@@ -78,7 +78,6 @@ public class ResultProcessorTests extends OpenSearchTestCase {
 
         TestForecastResultProcessor(
             Setting<TimeValue> requestTimeoutSetting,
-            String entityResultAction,
             StatNames hcRequestCountStat,
             Settings settings,
             ClusterService clusterService,
@@ -89,17 +88,16 @@ public class ResultProcessorTests extends OpenSearchTestCase {
             ForecastStats stats,
             ForecastTaskManager taskManager,
             NamedXContentRegistry xContentRegistry,
-            Client client,
-            SecurityClientUtil clientUtil,
-            IndexNameExpressionResolver indexNameExpressionResolver,
+            DataAccess dataAccess,
             Class<ForecastResultResponse> transportResultResponseClazz,
             FeatureManager featureManager,
             AnalysisType analysisType,
-            boolean runOnce
+            boolean runOnce,
+            DiscoveryNodeSelector discoveryNodeSelector,
+            ForecastNodeCommunicator nodeCommunicator
         ) {
             super(
                 requestTimeoutSetting,
-                entityResultAction,
                 hcRequestCountStat,
                 settings,
                 clusterService,
@@ -110,18 +108,18 @@ public class ResultProcessorTests extends OpenSearchTestCase {
                 stats,
                 taskManager,
                 xContentRegistry,
-                client,
-                clientUtil,
-                indexNameExpressionResolver,
+                dataAccess,
                 transportResultResponseClazz,
                 featureManager,
                 analysisType,
-                runOnce
+                runOnce,
+                discoveryNodeSelector,
+                nodeCommunicator
             );
         }
 
         @Override
-        protected void imputeHC(long start, long end, String configId, String taskId) {
+        protected void imputeHC(long start, long end, String configId, String tenantId, String taskId) {
             imputeCalled = true;               // record invocation
         }
 
@@ -173,7 +171,6 @@ public class ResultProcessorTests extends OpenSearchTestCase {
 
         TestForecastResultProcessor baseProcessor = new TestForecastResultProcessor(
             ForecastSettings.FORECAST_REQUEST_TIMEOUT,
-            entityResultAction,
             StatNames.FORECAST_HC_EXECUTE_REQUEST_COUNT,
             Settings.EMPTY,
             clusterService,
@@ -184,13 +181,13 @@ public class ResultProcessorTests extends OpenSearchTestCase {
             stats,
             taskManager,
             NamedXContentRegistry.EMPTY,
-            mock(Client.class),
-            mock(org.opensearch.timeseries.util.SecurityClientUtil.class),
-            mock(IndexNameExpressionResolver.class),
+            mock(DataAccess.class),
             ForecastResultResponse.class,
             mock(FeatureManager.class),
             AnalysisType.FORECAST,
-            false
+            false,
+            mock(DiscoveryNodeSelector.class),
+            mock(ForecastNodeCommunicator.class)
         );
         resultProcessor = spy(baseProcessor);
     }

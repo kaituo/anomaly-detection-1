@@ -13,9 +13,11 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.transport.client.Client;
 import org.opensearch.transport.client.node.NodeClient;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class CrossClusterConfigUtils {
     private static final Logger logger = LogManager.getLogger(ParseUtils.class);
 
@@ -28,9 +30,7 @@ public class CrossClusterConfigUtils {
      * @return The local {@link NodeClient} for the local cluster, or a remote client for a remote cluster.
      */
     public static Client getClientForCluster(String clusterName, Client client, String localClusterName) {
-        return clusterName.contains("#local") && clusterName.split("#")[0].equals(localClusterName)
-            ? client
-            : client.getRemoteClusterClient(clusterName);
+        return isLocalCluster(clusterName, localClusterName) ? client : client.getRemoteClusterClient(clusterName);
     }
 
     /**
@@ -43,6 +43,30 @@ public class CrossClusterConfigUtils {
      */
     public static Client getClientForCluster(String clusterName, Client client, ClusterService clusterService) {
         return getClientForCluster(clusterName, client, clusterService.getClusterName().value());
+    }
+
+    /**
+     * Determines whether the provided cluster name points to the local cluster.
+     * A local cluster name is expected to be marked with the {@code #local} suffix
+     * and have the same prefix as the provided {@code localClusterName}.
+     *
+     * @param clusterName The target cluster name
+     * @param localClusterName The name of the local cluster
+     * @return true if the target is the local cluster; false otherwise
+     */
+    public static boolean isLocalCluster(String clusterName, String localClusterName) {
+        return clusterName != null && clusterName.contains("#local") && clusterName.split("#")[0].equals(localClusterName);
+    }
+
+    /**
+     * Determines whether the provided cluster name points to the local cluster using the cluster service.
+     *
+     * @param clusterName The target cluster name
+     * @param clusterService Cluster service used to resolve the local cluster name
+     * @return true if the target is the local cluster; false otherwise
+     */
+    public static boolean isLocalCluster(String clusterName, ClusterService clusterService) {
+        return isLocalCluster(clusterName, clusterService.getClusterName().value());
     }
 
     /**

@@ -17,22 +17,30 @@ import java.util.function.Predicate;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.action.support.IndicesOptions;
 import org.opensearch.cluster.ClusterState;
+import org.opensearch.cluster.block.ClusterBlockLevel;
+import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.constant.CommonName;
 
 /**
  * Util class to filter unwanted node types
  *
  */
-public class DiscoveryNodeFilterer {
+@SuppressForbidden(reason = "org.opensearch.cluster.service.ClusterService#state usage: Only meant to be used in single-tenant.")
+public class DiscoveryNodeFilterer implements DiscoveryNodeSelector {
     private static final Logger LOG = LogManager.getLogger(DiscoveryNodeFilterer.class);
     private final ClusterService clusterService;
+    private final IndexNameExpressionResolver indexNameExpressionResolver;
     private final HotDataNodePredicate eligibleNodeFilter;
 
-    public DiscoveryNodeFilterer(ClusterService clusterService) {
+    public DiscoveryNodeFilterer(ClusterService clusterService, IndexNameExpressionResolver indexNameExpressionResolver) {
         this.clusterService = clusterService;
+        this.indexNameExpressionResolver = indexNameExpressionResolver;
         eligibleNodeFilter = new HotDataNodePredicate();
     }
 
@@ -56,25 +64,8 @@ public class DiscoveryNodeFilterer {
         return eligibleNodes.toArray(new DiscoveryNode[0]);
     }
 
-    public DiscoveryNode[] getAllNodes() {
-        ClusterState state = this.clusterService.state();
-        final List<DiscoveryNode> nodes = new ArrayList<>();
-        for (DiscoveryNode node : state.nodes()) {
-            nodes.add(node);
-        }
-        return nodes.toArray(new DiscoveryNode[0]);
-    }
-
     public boolean isEligibleDataNode(DiscoveryNode node) {
         return eligibleNodeFilter.test(node);
-    }
-
-    /**
-     *
-     * @return the number of eligible data nodes
-     */
-    public int getNumberOfEligibleDataNodes() {
-        return getEligibleDataNodes().length;
     }
 
     /**
@@ -83,6 +74,37 @@ public class DiscoveryNodeFilterer {
      */
     public boolean isEligibleNode(DiscoveryNode node) {
         return eligibleNodeFilter.test(node);
+    }
+
+    @Override
+    public boolean nodeExists(String nodeId) {
+        return clusterService.state().nodes().nodeExists(nodeId);
+    }
+
+    @Override
+    public void hasGlobalBlock(ActionListener<Boolean> listener) {
+        try {
+            ClusterState state = clusterService.state();
+            boolean blocked = state.blocks().globalBlockedException(ClusterBlockLevel.READ) != null
+                || state.blocks().globalBlockedException(ClusterBlockLevel.WRITE) != null;
+            listener.onResponse(blocked);
+        } catch (Exception e) {
+            listener.onFailure(e);
+        }
+    }
+
+    @Override
+    public void hasIndicesBlock(ClusterBlockLevel level, String[] indices, ActionListener<Boolean> listener) {
+        try {
+            ClusterState state = clusterService.state();
+            // The original index might be an index expression with wildcards like "log*",
+            // so we need to expand the expression to concrete index names
+            String[] concreteIndices = indexNameExpressionResolver.concreteIndexNames(state, IndicesOptions.lenientExpandOpen(), indices);
+            boolean blocked = state.blocks().indicesBlockedException(level, concreteIndices) != null;
+            listener.onResponse(blocked);
+        } catch (Exception e) {
+            listener.onFailure(e);
+        }
     }
 
     static class HotDataNodePredicate implements Predicate<DiscoveryNode> {

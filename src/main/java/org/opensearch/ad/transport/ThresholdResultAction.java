@@ -16,6 +16,7 @@ import org.opensearch.ad.constant.ADCommonValue;
 
 public class ThresholdResultAction extends ActionType<ThresholdResultResponse> {
     // Internal Action which is not used for public facing RestAPIs.
+    // Only needed for single-tenant mode for bwc. Multi-tenant mode has no thresholding model.
     public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "threshold/result";
     public static final ThresholdResultAction INSTANCE = new ThresholdResultAction();
 

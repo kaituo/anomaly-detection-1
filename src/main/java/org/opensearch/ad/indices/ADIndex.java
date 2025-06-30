@@ -17,6 +17,7 @@ import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.ThrowingSupplierWrapper;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 
 /**
  * Represent an AD index
@@ -30,8 +31,8 @@ public enum ADIndex implements TimeSeriesIndex {
         true,
         ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getResultMappings)
     ),
-    CONFIG(ADCommonName.CONFIG_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getConfigMappings)),
-    JOB(CommonName.JOB_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(ADIndexManagement::getJobMappings)),
+    CONFIG(ADCommonName.CONFIG_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(IndexResourceLoader::getConfigMappings)),
+    JOB(CommonName.JOB_INDEX, false, ThrowingSupplierWrapper.throwingSupplierWrapper(IndexResourceLoader::getJobMappings)),
     CHECKPOINT(
         ADCommonName.CHECKPOINT_INDEX_NAME,
         false,
@@ -69,5 +70,10 @@ public enum ADIndex implements TimeSeriesIndex {
     @Override
     public boolean isConfigIndex() {
         return ADCommonName.CONFIG_INDEX.equals(getIndexName());
+    }
+
+    @Override
+    public boolean isResultIndex() {
+        return RESULT.getIndexName().equals(indexName) || CUSTOM_RESULT.getIndexName().equals(indexName);
     }
 }

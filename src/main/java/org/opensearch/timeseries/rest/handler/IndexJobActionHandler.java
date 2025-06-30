@@ -13,8 +13,6 @@ package org.opensearch.timeseries.rest.handler;
 
 import static org.opensearch.action.DocWriteResponse.Result.CREATED;
 import static org.opensearch.action.DocWriteResponse.Result.UPDATED;
-import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
-import static org.opensearch.timeseries.util.RestHandlerUtils.createXContentParserFromRegistry;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -31,31 +29,27 @@ import org.opensearch.ExceptionsHelper;
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.action.ActionType;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
-import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.jobscheduler.spi.schedule.IntervalSchedule;
 import org.opensearch.jobscheduler.spi.schedule.Schedule;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ExecuteResultResponseRecorder;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.ExecutorFunction;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.DateRange;
@@ -65,10 +59,10 @@ import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.JobResponse;
-import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.timeseries.transport.ResultRequest;
 import org.opensearch.timeseries.transport.ResultResponse;
 import org.opensearch.timeseries.transport.StopConfigRequest;
@@ -81,13 +75,26 @@ import org.opensearch.transport.client.Client;
 import com.google.common.base.Throwables;
 
 /**
- * job REST action handler to process POST/PUT request.
+ * Job REST action handler to process POST/PUT request.
+ *
+ * @param <IndexType> the time series index enum type
+ * @param <DataManagementType> the data management implementation type
+ * @param <TaskCacheManagerType> the task cache manager type
+ * @param <TaskTypeEnum> the task type enum
+ * @param <TaskClass> the time series task type
+ * @param <TaskManagerType> the task manager type
+ * @param <IndexableResultType> the indexable result type
+ * @param <ExecuteResultResponseRecorderType> the execute-result response recorder type
  */
-public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, IndexableResultType extends IndexableResult, ProfileActionType extends ActionType<ProfileResponse>, ExecuteResultResponseRecorderType extends ExecuteResultResponseRecorder<IndexType, IndexManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, IndexableResultType, ProfileActionType>> {
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: resultAction is local host call only (safe in multitenant); index/stopConfigAction are single-tenant only.")
+public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, IndexableResultType extends IndexableResult, ExecuteResultResponseRecorderType extends ExecuteResultResponseRecorder<IndexType, DataManagementType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, IndexableResultType>> {
+    private enum JobStartMode {
+        INDEX_BACKED,
+        CUSTOM_STARTER
+    }
 
-    private final IndexManagementType indexManagement;
+    private final DataManagementType indexManagement;
     private final Client client;
-    private final NamedXContentRegistry xContentRegistry;
     protected final TaskManagerType taskManager;
 
     private final Logger logger = LogManager.getLogger(IndexJobActionHandler.class);
@@ -97,14 +104,28 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
     private final AnalysisType analysisType;
     private final String stateIndex;
     private final ActionType<StopConfigResponse> stopConfigAction;
-    protected final NodeStateManager nodeStateManager;
+    protected final StateManager nodeStateManager;
+    private final RunContext runContext;
+    // Strategies to start/stop realtime job; default to indexing-based implementation
+    protected final JobStarter jobStarter;
+    protected final JobStopper jobStopper;
+    private final JobStartMode jobStartMode;
+
+    @FunctionalInterface
+    public interface JobStarter {
+        void start(Config config, TransportService transportService, Clock clock, ActionListener<JobResponse> listener);
+    }
+
+    @FunctionalInterface
+    public interface JobStopper {
+        void stop(String configId, String tenantId, TransportService transportService, ActionListener<JobResponse> listener);
+    }
 
     /**
      * Constructor function.
      *
      * @param client                  ES node client that executes actions on the local node
      * @param indexManagement         index manager
-     * @param xContentRegistry        Registry which is used for XContentParser
      * @param taskManager             task manager
      * @param recorder                Utility to record AnomalyResultAction execution result
      * @param resultAction            result action
@@ -112,26 +133,63 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
      * @param stateIndex              State index name
      * @param stopConfigAction        Stop config action
      * @param nodeStateManager        Node state manager
+     * @param runContext              Execution context
      * @param settings                Node settings
      * @param timeoutSetting          timeout setting
      */
     public IndexJobActionHandler(
         Client client,
-        IndexManagementType indexManagement,
-        NamedXContentRegistry xContentRegistry,
+        DataManagementType indexManagement,
         TaskManagerType taskManager,
         ExecuteResultResponseRecorderType recorder,
         ActionType<? extends ResultResponse<IndexableResultType>> resultAction,
         AnalysisType analysisType,
         String stateIndex,
         ActionType<StopConfigResponse> stopConfigAction,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
+        RunContext runContext,
         Settings settings,
         Setting<TimeValue> timeoutSetting
     ) {
+        this(
+            client,
+            indexManagement,
+            taskManager,
+            recorder,
+            resultAction,
+            analysisType,
+            stateIndex,
+            stopConfigAction,
+            nodeStateManager,
+            runContext,
+            settings,
+            timeoutSetting,
+            null,
+            null
+        );
+    }
+
+    /**
+     * Constructor overload allowing custom job start/stop strategies.
+     */
+    public IndexJobActionHandler(
+        Client client,
+        DataManagementType indexManagement,
+        TaskManagerType taskManager,
+        ExecuteResultResponseRecorderType recorder,
+        ActionType<? extends ResultResponse<IndexableResultType>> resultAction,
+        AnalysisType analysisType,
+        String stateIndex,
+        ActionType<StopConfigResponse> stopConfigAction,
+        StateManager nodeStateManager,
+        RunContext runContext,
+        Settings settings,
+        Setting<TimeValue> timeoutSetting,
+        JobStarter jobStarter,
+        JobStopper jobStopper
+    ) {
         this.client = client;
         this.indexManagement = indexManagement;
-        this.xContentRegistry = xContentRegistry;
         this.taskManager = taskManager;
         this.recorder = recorder;
         this.resultAction = resultAction;
@@ -139,22 +197,28 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
         this.stateIndex = stateIndex;
         this.stopConfigAction = stopConfigAction;
         this.nodeStateManager = nodeStateManager;
+        this.runContext = runContext;
         this.requestTimeout = timeoutSetting.get(settings);
+        this.jobStartMode = jobStarter == null ? JobStartMode.INDEX_BACKED : JobStartMode.CUSTOM_STARTER;
+        this.jobStarter = jobStarter != null ? jobStarter : this::defaultStartJob;
+        this.jobStopper = jobStopper != null ? wrapStopper(jobStopper) : this::defaultStopJob;
     }
 
     /**
-     * Start job.
-     * 1. If job doesn't exist, create new job.
-     * 2. If job exists: a). if job enabled, return error message; b). if job disabled, enable job.
-     * @param config config accessor
-     * @param transportService transport service
-     * @param clock clock to get current time
-     * @param listener Listener to send responses
+     * Start job via injected strategy. The listener is wrapped to record results for both default
+     * and alternative starters (e.g., EventBridge).
      */
     public void startJob(Config config, TransportService transportService, Clock clock, ActionListener<JobResponse> listener) {
-        // this start listener is created & injected throughout the job handler so that whenever the job response is received,
-        // there's the extra step of trying to index results and update detector state with a 60s delay.
-        ActionListener<JobResponse> startListener = ActionListener.wrap(r -> {
+        logger.info("startJob enter config={} tenant={} mode={}", config.getId(), config.getTenantId(), jobStartMode);
+        ActionListener<JobResponse> startListener = wrapStartListener(config, clock, listener);
+        jobStarter.start(config, transportService, clock, startListener);
+    }
+
+    /**
+     * Wrap the caller listener with logic that indexes the most recent execution window.
+     */
+    protected ActionListener<JobResponse> wrapStartListener(Config config, Clock clock, ActionListener<JobResponse> listener) {
+        return ActionListener.wrap(r -> {
             try {
                 Instant executionEndTime = Instant.now();
                 IntervalTimeConfiguration schedule = (IntervalTimeConfiguration) config.getInterval();
@@ -162,7 +226,8 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                 ResultRequest getRequest = createResultRequest(
                     config.getId(),
                     executionStartTime.toEpochMilli(),
-                    executionEndTime.toEpochMilli()
+                    executionEndTime.toEpochMilli(),
+                    config.getTenantId()
                 );
                 client.execute(resultAction, getRequest, ActionListener.wrap(response -> {
                     recorder.indexResult(executionStartTime, executionEndTime, response, config);
@@ -182,16 +247,27 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                 return;
             }
             listener.onResponse(r);
-
         }, listener::onFailure);
+    }
+
+    /**
+     * Default implementation backing the start strategy.
+     * 1. If job doesn't exist, create new job.
+     * 2. If job exists: a). if job enabled, return error message; b). if job disabled, enable job.
+     * @param config config accessor
+     * @param transportService transport service
+     * @param clock clock to get current time
+     * @param listener Listener to send responses (already wrapped by {@link #wrapStartListener})
+     */
+    protected void defaultStartJob(Config config, TransportService transportService, Clock clock, ActionListener<JobResponse> listener) {
         if (!indexManagement.doesJobIndexExist()) {
             indexManagement.initJobIndex(ActionListener.wrap(response -> {
                 if (response.isAcknowledged()) {
                     logger.info("Created {} with mappings.", CommonName.JOB_INDEX);
-                    createJob(config, transportService, startListener);
+                    createJob(config, transportService, listener);
                 } else {
                     logger.warn("Created {} with mappings call not acknowledged.", CommonName.JOB_INDEX);
-                    startListener
+                    listener
                         .onFailure(
                             new OpenSearchStatusException(
                                 "Created " + CommonName.JOB_INDEX + " with mappings call not acknowledged.",
@@ -199,9 +275,9 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                             )
                         );
                 }
-            }, exception -> startListener.onFailure(exception)));
+            }, listener::onFailure));
         } else {
-            createJob(config, transportService, startListener);
+            createJob(config, transportService, listener);
         }
     }
 
@@ -221,6 +297,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                 Instant.now(),
                 duration.getSeconds(),
                 config.getUser(),
+                config.getTenantId(),
                 config.getCustomResultIndexOrAlias(),
                 analysisType
             );
@@ -234,67 +311,51 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
     }
 
     private void getJobForWrite(Config config, Job job, TransportService transportService, ActionListener<JobResponse> listener) {
-        GetRequest getRequest = new GetRequest(CommonName.JOB_INDEX).id(config.getId());
-
-        client
-            .get(
-                getRequest,
-                ActionListener
-                    .wrap(
-                        response -> onGetJobForWrite(response, config, job, transportService, listener),
-                        exception -> listener.onFailure(exception)
-                    )
-            );
+        nodeStateManager.getJob(config.getId(), config.getTenantId(), false, ActionListener.wrap(jobOptional -> {
+            onGetJobForWrite(jobOptional, config, job, transportService, listener);
+        }, listener::onFailure));
     }
 
     private void onGetJobForWrite(
-        GetResponse response,
+        Optional<Job> currentJob,
         Config config,
         Job job,
         TransportService transportService,
         ActionListener<JobResponse> listener
-    ) throws IOException {
-        if (response.isExists()) {
-            try (XContentParser parser = createXContentParserFromRegistry(xContentRegistry, response.getSourceAsBytesRef())) {
-                ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                Job currentAdJob = Job.parse(parser);
-                if (currentAdJob.isEnabled()) {
-                    listener
-                        .onFailure(
-                            new OpenSearchStatusException("Anomaly detector job is already running: " + config.getId(), RestStatus.OK)
-                        );
-                    return;
-                } else {
-                    Job newJob = new Job(
-                        job.getName(),
-                        job.getSchedule(),
-                        job.getWindowDelay(),
-                        job.isEnabled(),
-                        Instant.now(),
-                        currentAdJob.getDisabledTime(),
-                        Instant.now(),
-                        job.getLockDurationSeconds(),
-                        job.getUser(),
-                        job.getCustomResultIndexOrAlias(),
-                        job.getAnalysisType()
-                    );
-                    // Get latest realtime task and check its state before index job. Will reset running realtime task
-                    // as STOPPED first if job disabled, then start new job and create new realtime task.
-                    startConfig(
-                        config,
-                        null,
-                        job.getUser(),
-                        transportService,
-                        ActionListener.wrap(r -> { indexJob(newJob, null, listener); }, e -> {
-                            // Have logged error message in ADTaskManager#startDetector
-                            listener.onFailure(e);
-                        })
-                    );
-                }
-            } catch (IOException e) {
-                String message = "Failed to parse job " + job.getName();
-                logger.error(message, e);
-                listener.onFailure(new OpenSearchStatusException(message, RestStatus.INTERNAL_SERVER_ERROR));
+    ) {
+        if (currentJob.isPresent()) {
+            Job currentAdJob = currentJob.get();
+            if (currentAdJob.isEnabled()) {
+                listener
+                    .onFailure(new OpenSearchStatusException("Anomaly detector job is already running: " + config.getId(), RestStatus.OK));
+                return;
+            } else {
+                Job newJob = new Job(
+                    job.getName(),
+                    job.getSchedule(),
+                    job.getWindowDelay(),
+                    job.isEnabled(),
+                    Instant.now(),
+                    currentAdJob.getDisabledTime(),
+                    Instant.now(),
+                    job.getLockDurationSeconds(),
+                    job.getUser(),
+                    job.getTenantId(),
+                    job.getCustomResultIndexOrAlias(),
+                    job.getAnalysisType()
+                );
+                // Get latest realtime task and check its state before index job. Will reset running realtime task
+                // as STOPPED first if job disabled, then start new job and create new realtime task.
+                startConfig(
+                    config,
+                    null,
+                    job.getUser(),
+                    transportService,
+                    ActionListener.wrap(r -> { indexJob(newJob, null, listener); }, e -> {
+                        // Have logged error message in ADTaskManager#startDetector
+                        listener.onFailure(e);
+                    })
+                );
             }
         } else {
             startConfig(
@@ -331,16 +392,35 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
         TransportService transportService,
         ActionListener<JobResponse> listener
     ) {
+        logger
+            .info(
+                "startConfig bootstrap enter config={} tenant={} dateRange={}",
+                config.getId(),
+                config.getTenantId(),
+                dateRange == null ? "null" : "present"
+            );
+
         try {
             if (indexManagement.doesStateIndexExist()) {
-                // If state index exist, check if latest AD task is running
-                taskManager.getAndExecuteOnLatestConfigLevelTask(config, dateRange, false, user, transportService, listener);
+                // If state index exist, check if latest task is running
+                logger.info("bootstrap latest realtime task config={} tenant={}", config.getId(), config.getTenantId());
+                taskManager
+                    .getAndExecuteOnLatestConfigLevelTask(config, config.getTenantId(), dateRange, false, user, transportService, listener);
             } else {
                 // If state index doesn't exist, create index and execute detector.
                 indexManagement.initStateIndex(ActionListener.wrap(r -> {
                     if (r.isAcknowledged()) {
                         logger.info("Created {} with mappings.", stateIndex);
-                        taskManager.updateLatestFlagOfOldTasksAndCreateNewTask(config, dateRange, false, user, TaskState.CREATED, listener);
+                        taskManager
+                            .updateLatestFlagOfOldTasksAndCreateNewTask(
+                                config,
+                                dateRange,
+                                false,
+                                user,
+                                config.getTenantId(),
+                                TaskState.CREATED,
+                                listener
+                            );
                     } else {
                         String error = String.format(Locale.ROOT, CommonMessages.CREATE_INDEX_NOT_ACKNOWLEDGED, stateIndex);
                         logger.warn(error);
@@ -348,7 +428,16 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                     }
                 }, e -> {
                     if (ExceptionsHelper.unwrapCause(e) instanceof ResourceAlreadyExistsException) {
-                        taskManager.updateLatestFlagOfOldTasksAndCreateNewTask(config, dateRange, false, user, TaskState.CREATED, listener);
+                        taskManager
+                            .updateLatestFlagOfOldTasksAndCreateNewTask(
+                                config,
+                                dateRange,
+                                false,
+                                user,
+                                config.getTenantId(),
+                                TaskState.CREATED,
+                                listener
+                            );
                     } else {
                         logger.error("Failed to init state index", e);
                         listener.onFailure(e);
@@ -400,52 +489,66 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
     }
 
     /**
-     * Stop config job.
+     * Stop job via injected strategy.
+     */
+    public void stopJob(String configId, String tenantId, TransportService transportService, ActionListener<JobResponse> listener) {
+        jobStopper.stop(configId, tenantId, transportService, listener);
+    }
+
+    private JobStopper wrapStopper(JobStopper delegate) {
+        return (configId, tenantId, transportService, listener) -> delegate
+            .stop(
+                configId,
+                tenantId,
+                transportService,
+                ActionListener.wrap(response -> postStopJob(configId, tenantId, transportService, listener), listener::onFailure)
+            );
+    }
+
+    private void postStopJob(String configId, String tenantId, TransportService transportService, ActionListener<JobResponse> listener) {
+        client
+            .execute(
+                stopConfigAction,
+                new StopConfigRequest(configId).tenantId(tenantId),
+                stopConfigListener(configId, tenantId, transportService, listener)
+            );
+    }
+
+    /**
+     * Default implementation backing the stop strategy.
      * 1.If job not exists, return error message
      * 2.If job exists: a).if job state is disabled, return error message; b).if job state is enabled, disable job.
      *
      * @param configId config identifier
      * @param listener Listener to send responses
      */
-    public void stopJob(String configId, TransportService transportService, ActionListener<JobResponse> listener) {
-        GetRequest getRequest = new GetRequest(CommonName.JOB_INDEX).id(configId);
-
-        client.get(getRequest, ActionListener.wrap(response -> {
-            if (response.isExists()) {
-                try (XContentParser parser = createXContentParserFromRegistry(xContentRegistry, response.getSourceAsBytesRef())) {
-                    ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                    Job job = Job.parse(parser);
-                    if (!job.isEnabled()) {
-                        taskManager.stopLatestRealtimeTask(configId, TaskState.STOPPED, null, transportService, listener);
-                    } else {
-                        Job newJob = new Job(
-                            job.getName(),
-                            job.getSchedule(),
-                            job.getWindowDelay(),
-                            false, // disable job
-                            job.getEnabledTime(),
-                            Instant.now(),
-                            Instant.now(),
-                            job.getLockDurationSeconds(),
-                            job.getUser(),
-                            job.getCustomResultIndexOrAlias(),
-                            job.getAnalysisType()
-                        );
-                        indexJob(
-                            newJob,
-                            () -> client
-                                .execute(
-                                    stopConfigAction,
-                                    new StopConfigRequest(configId),
-                                    stopConfigListener(configId, transportService, listener)
-                                ),
-                            listener
-                        );
-                    }
-                } catch (IOException e) {
-                    String message = "Failed to parse job " + configId;
-                    logger.error(message, e);
-                    listener.onFailure(new OpenSearchStatusException(message, RestStatus.INTERNAL_SERVER_ERROR));
+    protected void defaultStopJob(
+        String configId,
+        String tenantId,
+        TransportService transportService,
+        ActionListener<JobResponse> listener
+    ) {
+        nodeStateManager.getJob(configId, tenantId, false, ActionListener.wrap(jobOptional -> {
+            if (jobOptional.isPresent()) {
+                Job job = jobOptional.get();
+                if (!job.isEnabled()) {
+                    taskManager.stopLatestRealtimeTask(configId, tenantId, TaskState.STOPPED, null, transportService, listener);
+                } else {
+                    Job newJob = new Job(
+                        job.getName(),
+                        job.getSchedule(),
+                        job.getWindowDelay(),
+                        false, // disable job
+                        job.getEnabledTime(),
+                        Instant.now(),
+                        Instant.now(),
+                        job.getLockDurationSeconds(),
+                        job.getUser(),
+                        job.getTenantId(),
+                        job.getCustomResultIndexOrAlias(),
+                        job.getAnalysisType()
+                    );
+                    indexJob(newJob, () -> postStopJob(configId, job.getTenantId(), transportService, listener), listener);
                 }
             } else {
                 logger.info(new ParameterizedMessage("Job {} was not found", configId));
@@ -453,7 +556,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
             }
         }, exception -> {
             logger.error("JobRunner failed to get job " + configId, exception);
-            if (exception instanceof IndexNotFoundException) {
+            if (exception instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(exception)) {
                 listener.onResponse(new JobResponse(configId));
             } else {
                 listener.onFailure(exception);
@@ -461,8 +564,9 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
         }));
     }
 
-    public ActionListener<StopConfigResponse> stopConfigListener(
+    private ActionListener<StopConfigResponse> stopConfigListener(
         String configId,
+        String tenantId,
         TransportService transportService,
         ActionListener<JobResponse> listener
     ) {
@@ -473,13 +577,14 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                     logger.info("model deleted successfully for config {}", configId);
                     // e.g., StopDetectorTransportAction will send out DeleteModelAction which will clear all realtime cache.
                     // Pass null transport service to method "stopLatestRealtimeTask" to not re-clear coordinating node cache.
-                    taskManager.stopLatestRealtimeTask(configId, TaskState.STOPPED, null, null, listener);
+                    taskManager.stopLatestRealtimeTask(configId, tenantId, TaskState.STOPPED, null, null, listener);
                 } else {
                     logger.error("Failed to delete model for config {}", configId);
                     // If failed to clear all realtime cache, will try to re-clear coordinating node cache.
                     taskManager
                         .stopLatestRealtimeTask(
                             configId,
+                            tenantId,
                             TaskState.FAILED,
                             new OpenSearchStatusException("Failed to delete model", RestStatus.INTERNAL_SERVER_ERROR),
                             transportService,
@@ -495,6 +600,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                 taskManager
                     .stopLatestRealtimeTask(
                         configId,
+                        tenantId,
                         TaskState.FAILED,
                         new OpenSearchStatusException("Failed to execute stop config action", RestStatus.INTERNAL_SERVER_ERROR),
                         transportService,
@@ -509,6 +615,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
      * and start task for historical/run once.
      *
      * @param configId config id
+     * @param tenantId tenant id
      * @param dateRange historical analysis date range
      * @param user user
      * @param transportService transport service
@@ -518,17 +625,21 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
      */
     public void startConfig(
         String configId,
+        String tenantId,
         DateRange dateRange,
         User user,
         TransportService transportService,
-        ThreadContext.StoredContext context,
+        RunContext.RestorableContext context,
         Clock clock,
         ActionListener<JobResponse> listener
     ) {
-        // upgrade index mapping
-        indexManagement.update();
+        logger
+            .info("startConfig request enter config={} tenant={} dateRange={}", configId, tenantId, dateRange == null ? "null" : "present");
 
-        nodeStateManager.getConfig(configId, analysisType, (config) -> {
+        // upgrade index mapping
+        indexManagement.update(tenantId);
+
+        nodeStateManager.getConfig(configId, tenantId, analysisType, (config) -> {
             if (!config.isPresent()) {
                 listener.onFailure(new OpenSearchStatusException(CommonMessages.FAIL_TO_FIND_CONFIG_MSG + configId, RestStatus.NOT_FOUND));
                 return;
@@ -549,7 +660,8 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                 .initCustomResultIndexAndExecute(
                     resultIndex,
                     () -> startRealtimeOrHistoricalAnalysis(dateRange, user, transportService, listener, config, clock),
-                    listener
+                    listener,
+                    tenantId
                 );
 
         }, listener);
@@ -573,7 +685,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
         Optional<? extends Config> config,
         Clock clock
     ) {
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
+        runContext.runWithSystemAuth(() -> {
             if (dateRange == null) {
                 // start realtime job
                 startJob(config.get(), transportService, clock, listener);
@@ -581,18 +693,19 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                 // start historical analysis task
                 taskManager.startHistorical(config.get(), dateRange, user, transportService, listener);
             }
-        } catch (Exception e) {
-            logger.error("Failed to stash context", e);
-            listener.onFailure(e);
-        }
+        }, exception -> {
+            logger.error("Failed to run with system auth", exception);
+            listener.onFailure(exception);
+        });
     }
 
-    protected abstract ResultRequest createResultRequest(String configID, long start, long end);
+    protected abstract ResultRequest createResultRequest(String configID, long start, long end, String tenantId);
 
     protected abstract List<TaskTypeEnum> getBatchConfigTaskTypes();
 
     public abstract void stopConfig(
         String configId,
+        String tenantId,
         boolean historical,
         User user,
         TransportService transportService,

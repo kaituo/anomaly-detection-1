@@ -24,13 +24,15 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
 import org.opensearch.forecast.ratelimit.ForecastCheckpointMaintainWorker;
 import org.opensearch.forecast.ratelimit.ForecastCheckpointWriteWorker;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.MemoryTracker.Origin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.caching.PriorityCache;
 import org.opensearch.timeseries.caching.PriorityTracker;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -40,7 +42,7 @@ import org.opensearch.timeseries.model.Config;
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 
 public class ForecastPriorityCache extends
-    PriorityCache<RCFCaster, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastCheckpointMaintainWorker, ForecastCacheBuffer> {
+    PriorityCache<RCFCaster, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastCheckpointMaintainWorker, ForecastCacheBuffer> {
     private ForecastCheckpointWriteWorker checkpointWriteQueue;
     private ForecastCheckpointMaintainWorker checkpointMaintainQueue;
 
@@ -60,7 +62,8 @@ public class ForecastPriorityCache extends
         Settings settings,
         Setting<TimeValue> checkpointSavingFreq,
         ForecastCheckpointWriteWorker checkpointWriteQueue,
-        ForecastCheckpointMaintainWorker checkpointMaintainQueue
+        ForecastCheckpointMaintainWorker checkpointMaintainQueue,
+        StateManager nodeStateManager
     ) {
         super(
             checkpointDao,
@@ -79,7 +82,9 @@ public class ForecastPriorityCache extends
             checkpointSavingFreq,
             Origin.REAL_TIME_FORECASTER,
             FORECAST_DEDICATED_CACHE_SIZE,
-            FORECAST_MODEL_MAX_SIZE_PERCENTAGE
+            FORECAST_MODEL_MAX_SIZE_PERCENTAGE,
+            nodeStateManager,
+            AnalysisType.FORECAST
         );
 
         this.checkpointWriteQueue = checkpointWriteQueue;
@@ -98,16 +103,18 @@ public class ForecastPriorityCache extends
             checkpointWriteQueue,
             checkpointMaintainQueue,
             config.getId(),
-            tracker
+            tracker,
+            config.getTenantId()
         );
     }
 
     @Override
-    protected ModelState<RCFCaster> createEmptyModelState(String modelId, String forecasterId) {
+    protected ModelState<RCFCaster> createEmptyModelState(String modelId, String forecasterId, String tenantId) {
         return new ModelState<>(
             null,
             modelId,
             forecasterId,
+            tenantId,
             ModelManager.ModelType.RCFCASTER.getName(),
             clock,
             0,

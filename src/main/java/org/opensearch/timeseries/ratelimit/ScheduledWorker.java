@@ -25,7 +25,7 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 
 public abstract class ScheduledWorker<RequestType extends QueuedRequest, TransformedRequestType extends QueuedRequest> extends
@@ -57,7 +57,7 @@ public abstract class ScheduledWorker<RequestType extends QueuedRequest, Transfo
         int maintenanceFreqConstant,
         RateLimitedRequestWorker<TransformedRequestType> targetQueue,
         Duration stateTtl,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         AnalysisType context
     ) {
         super(

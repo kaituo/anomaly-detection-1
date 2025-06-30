@@ -28,19 +28,19 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.timeseries.ExpiringState;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.MemoryTracker.Origin;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ratelimit.CheckpointMaintainRequest;
 import org.opensearch.timeseries.ratelimit.CheckpointMaintainWorker;
 import org.opensearch.timeseries.ratelimit.CheckpointWriteWorker;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.util.DateUtils;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, CheckpointMaintainerType extends CheckpointMaintainWorker>
+public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType>, CheckpointMaintainerType extends CheckpointMaintainWorker>
     implements
         ExpiringState {
 
@@ -66,6 +66,7 @@ public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutFores
     protected final PriorityTracker priorityTracker;
     // key is model id
     protected final ConcurrentHashMap<String, ModelState<RCFModelType>> items;
+    private final String tenantId;
 
     public CacheBuffer(
         int minimumCapacity,
@@ -78,7 +79,8 @@ public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutFores
         CheckpointMaintainerType checkpointMaintainQueue,
         String configId,
         Origin origin,
-        PriorityTracker priorityTracker
+        PriorityTracker priorityTracker,
+        String tenantId
     ) {
         this.lastUsedTime = clock.instant();
         this.clock = clock;
@@ -94,6 +96,7 @@ public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutFores
         this.items = new ConcurrentHashMap<>();
         // called after minimumCapacity and memoryConsumptionPerModel are set
         setMinimumCapacity(minimumCapacity);
+        this.tenantId = tenantId;
     }
 
     public void setMinimumCapacity(int minimumCapacity) {
@@ -152,8 +155,8 @@ public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutFores
 
         if (obj instanceof CacheBuffer) {
             @SuppressWarnings("unchecked")
-            CacheBuffer<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType> other =
-                (CacheBuffer<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType>) obj;
+            CacheBuffer<RCFModelType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType> other =
+                (CacheBuffer<RCFModelType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType>) obj;
 
             EqualsBuilder equalsBuilder = new EqualsBuilder();
             equalsBuilder.append(configId, other.configId);
@@ -268,7 +271,8 @@ public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutFores
                                 System.currentTimeMillis() + modelTtl.toMillis(),
                                 configId,
                                 RequestPriority.LOW,
-                                entityModelId
+                                entityModelId,
+                                tenantId
                             )
                         );
                 }
@@ -308,7 +312,7 @@ public abstract class CacheBuffer<RCFModelType extends ThresholdedRandomCutFores
                 // null model has only samples. For null model we save a checkpoint
                 // regardless of last checkpoint time. whether If we don't save,
                 // we throw the new samples and might never be able to initialize the model
-                checkpointWriteQueue.write(valueRemoved, valueRemoved.getModel().isEmpty(), RequestPriority.MEDIUM);
+                checkpointWriteQueue.write(valueRemoved, tenantId, valueRemoved.getModel().isEmpty(), RequestPriority.MEDIUM);
             }
 
             valueRemoved.clear();

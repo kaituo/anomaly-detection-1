@@ -60,7 +60,8 @@ public class IndexAnomalyDetectorActionTests extends OpenSearchSingleNodeTestCas
             1000,
             10,
             5,
-            10
+            10,
+            null
         );
         request.writeTo(out);
         NamedWriteableAwareStreamInput input = new NamedWriteableAwareStreamInput(out.bytes().streamInput(), writableRegistry());

@@ -125,6 +125,10 @@ public class AnomalyDetectorSettingsTests extends OpenSearchTestCase {
         );
     }
 
+    public void testConfigDocumentStoreFactorySettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.CONFIG_DOCUMENT_STORE_FACTORY_CLASS));
+    }
+
     public void testAllLegacyOpenDistroSettingsFallback() {
         assertEquals(
             AnomalyDetectorSettings.AD_MAX_SINGLE_ENTITY_ANOMALY_DETECTORS.get(Settings.EMPTY),

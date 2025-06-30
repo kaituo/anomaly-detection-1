@@ -28,12 +28,13 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.Locale;
 
+import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.commons.authuser.User;
@@ -41,6 +42,8 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.transport.JobResponse;
@@ -50,7 +53,7 @@ import org.opensearch.transport.client.Client;
 import com.google.common.collect.ImmutableList;
 
 public class StartDetectorTests extends AbstractTimeSeriesTest {
-    private static ADIndexManagement anomalyDetectionIndices;
+    private static ADDelegatingDataManagement anomalyDetectionIndices;
     private static NamedXContentRegistry xContentRegistry;
 
     private DateRange detectionDateRange;
@@ -64,8 +67,14 @@ public class StartDetectorTests extends AbstractTimeSeriesTest {
 
     @BeforeClass
     public static void setOnce() throws IOException {
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
+        setUpThreadPool(StartDetectorTests.class.getSimpleName());
+        anomalyDetectionIndices = mock(ADDelegatingDataManagement.class);
         xContentRegistry = NamedXContentRegistry.EMPTY;
+    }
+
+    @AfterClass
+    public static void terminate() {
+        tearDownThreadPool();
     }
 
     @Override
@@ -77,10 +86,13 @@ public class StartDetectorTests extends AbstractTimeSeriesTest {
         detectionDateRange = new DateRange(startTime, endTime);
 
         client = mock(Client.class);
+        when(client.threadPool()).thenReturn(threadPool);
 
         adTaskManager = mock(ADTaskManager.class);
         recorder = mock(ExecuteADResultResponseRecorder.class);
         nodeStateManager = mock(NodeStateManager.class);
+        when(anomalyDetectionIndices.doesStateIndexExist()).thenReturn(true);
+        RunContext runContext = new ThreadRunContext(threadPool.getThreadContext());
 
         handler = new ADIndexJobActionHandler(
             client,
@@ -89,7 +101,8 @@ public class StartDetectorTests extends AbstractTimeSeriesTest {
             adTaskManager,
             recorder,
             nodeStateManager,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         listener = spy(new ActionListener<JobResponse>() {

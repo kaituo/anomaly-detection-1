@@ -21,8 +21,7 @@ import java.util.Random;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
@@ -30,6 +29,7 @@ import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
@@ -38,10 +38,10 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.CheckpointReadWorker;
+import org.opensearch.timeseries.util.IndexOperations;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
@@ -58,7 +58,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  *
  */
 public class ADCheckpointReadWorker extends
-    CheckpointReadWorker<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADColdStart, ADModelManager, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker, ADRealTimeInferencer> {
+    CheckpointReadWorker<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADCheckpointWriteWorker, ADColdStart, ADModelManager, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker, ADRealTimeInferencer> {
     public static final String WORKER_NAME = "ad-checkpoint-read";
 
     public ADCheckpointReadWorker(
@@ -77,13 +77,14 @@ public class ADCheckpointReadWorker extends
         int maintenanceFreqConstant,
         Duration executionTtl,
         ADModelManager modelManager,
-        ADCheckpointDao checkpointDao,
+        ADCheckpointStore checkpointDao,
         ADColdStartWorker entityColdStartQueue,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         Provider<ADPriorityCache> cacheProvider,
         Duration stateTtl,
         ADCheckpointWriteWorker checkpointWriteQueue,
-        ADRealTimeInferencer inferencer
+        ADRealTimeInferencer inferencer,
+        IndexOperations indexOperations
     ) {
         super(
             WORKER_NAME,
@@ -94,7 +95,7 @@ public class ADCheckpointReadWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,
@@ -113,7 +114,8 @@ public class ADCheckpointReadWorker extends
             AD_CHECKPOINT_READ_QUEUE_BATCH_SIZE,
             ADCommonName.CHECKPOINT_INDEX_NAME,
             AnalysisType.AD,
-            inferencer
+            inferencer,
+            indexOperations
         );
     }
 }

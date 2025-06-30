@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 
 import org.apache.logging.log4j.LogManager;
@@ -30,13 +31,12 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.Strings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.IntermediateResult;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -47,13 +47,14 @@ import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.util.ExceptionUtil;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>, CacheType extends TimeSeriesCache<RCFModelType>, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, ModelManagerType extends ModelManager<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>>
+public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, IndexableResultType>, CacheType extends TimeSeriesCache<RCFModelType>, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, ModelManagerType extends ModelManager<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, DataManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>>
     extends SingleRequestWorker<FeatureRequest> {
     private static final Logger LOG = LogManager.getLogger(ColdStartWorker.class);
 
@@ -84,7 +85,7 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
         Duration executionTtl,
         ColdStarterType coldStarter,
         Duration stateTtl,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         CacheType cacheProvider,
         AnalysisType context,
         ModelManagerType modelManager,
@@ -128,7 +129,7 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
 
         String modelId = coldStartRequest.getModelId();
         if (null == modelId) {
-            String error = String.format(Locale.ROOT, "Fail to get model id for request %s", coldStartRequest);
+            String error = String.format(Locale.ROOT, "Failed to get model id for request %s", coldStartRequest);
             LOG.warn(error);
             listener.onFailure(new RuntimeException(error));
             return;
@@ -136,14 +137,13 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
         ModelState<RCFModelType> modelState = createEmptyState(coldStartRequest, modelId, configId);
 
         ActionListener<List<IndexableResultType>> coldStartListener = ActionListener.wrap(r -> {
-            // task id equals to null means it is real time and we want to cache
-            nodeStateManager.getConfig(configId, context, coldStartRequest.getTaskId() == null, ActionListener.wrap(configOptional -> {
+            ActionListener<Optional<? extends Config>> onConfig = ActionListener.wrap(configOptional -> {
                 try {
                     if (!configOptional.isPresent()) {
                         LOG
                             .error(
                                 new ParameterizedMessage(
-                                    "fail to load trained model [{}] to cache due to the config not being found.",
+                                    "failed to load trained model [{}] to cache due to the config not being found.",
                                     modelState.getModelId()
                                 )
                             );
@@ -181,7 +181,7 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
                                 );
                             // wait until we have scored the current sample before writing to checkpoint
                             // this is to let long frequency model to have latest checkpoint when loaded later.
-                            checkpointWriteWorker.write(modelState, true, RequestPriority.MEDIUM);
+                            checkpointWriteWorker.write(modelState, coldStartRequest.getTenantId(), true, RequestPriority.MEDIUM);
                         }
                     } else {
                         String taskId = coldStartRequest.getTaskId();
@@ -191,19 +191,28 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
                             updatedFields.put(TimeSeriesTask.STATE_FIELD, TaskState.INACTIVE.name());
                             updatedFields.put(TimeSeriesTask.ERROR_FIELD, CommonMessages.NOT_ENOUGH_DATA);
 
-                            taskManager.updateTask(taskId, updatedFields, ActionListener.wrap(updateResponse -> {
-                                LOG.info("Updated task {} for config {}", taskId, configId);
-                            }, e -> { LOG.error("Failed to update task: {} for config: {}", taskId, configId, e); }));
+                            taskManager
+                                .updateTask(taskId, updatedFields, coldStartRequest.getTenantId(), ActionListener.wrap(updateResponse -> {
+                                    LOG.info("Updated task {} for config {}", taskId, configId);
+                                }, e -> { LOG.error("Failed to update task: {} for config: {}", taskId, configId, e); }));
                         } else if (modelState.getSamples().size() > 0) {
                             // real time scenario: not enough data to train model so model is still null
                             // write samples to checkpoint
-                            checkpointWriteWorker.write(modelState, true, RequestPriority.MEDIUM);
+                            checkpointWriteWorker.write(modelState, coldStartRequest.getTenantId(), true, RequestPriority.MEDIUM);
                         }
                     }
                 } finally {
                     listener.onResponse(null);
                 }
-            }, listener::onFailure));
+            }, listener::onFailure);
+
+            if (coldStartRequest.getConfig().isPresent()) {
+                onConfig.onResponse(coldStartRequest.getConfig());
+                return;
+            }
+
+            // task id equals to null means it is real time and we want to cache
+            nodeStateManager.getConfig(configId, coldStartRequest.getTenantId(), context, coldStartRequest.getTaskId() == null, onConfig);
 
         }, e -> {
             try {

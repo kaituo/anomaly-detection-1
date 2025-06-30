@@ -13,26 +13,28 @@ package org.opensearch.ad.caching;
 
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_DEDICATED_CACHE_SIZE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MODEL_MAX_SIZE_PERCENTAGE;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Optional;
 
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ratelimit.ADCheckpointMaintainWorker;
 import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.MemoryTracker.Origin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.caching.PriorityCache;
 import org.opensearch.timeseries.caching.PriorityTracker;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -42,12 +44,12 @@ import org.opensearch.timeseries.model.Config;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class ADPriorityCache extends
-    PriorityCache<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADCheckpointMaintainWorker, ADCacheBuffer> {
+    PriorityCache<ThresholdedRandomCutForest, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADCheckpointWriteWorker, ADCheckpointMaintainWorker, ADCacheBuffer> {
     private ADCheckpointWriteWorker checkpointWriteQueue;
     private ADCheckpointMaintainWorker checkpointMaintainQueue;
 
     public ADPriorityCache(
-        ADCheckpointDao checkpointDao,
+        ADCheckpointStore checkpointDao,
         int hcDedicatedCacheSize,
         Setting<TimeValue> checkpointTtl,
         int maxInactiveStates,
@@ -61,7 +63,8 @@ public class ADPriorityCache extends
         Settings settings,
         Setting<TimeValue> checkpointSavingFreq,
         ADCheckpointWriteWorker checkpointWriteQueue,
-        ADCheckpointMaintainWorker checkpointMaintainQueue
+        ADCheckpointMaintainWorker checkpointMaintainQueue,
+        StateManager nodeStateManager
     ) {
         super(
             checkpointDao,
@@ -74,13 +77,15 @@ public class ADPriorityCache extends
             clusterService,
             modelTtl,
             threadPool,
-            AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             maintenanceFreqConstant,
             settings,
             checkpointSavingFreq,
             Origin.REAL_TIME_DETECTOR,
             AD_DEDICATED_CACHE_SIZE,
-            AD_MODEL_MAX_SIZE_PERCENTAGE
+            AD_MODEL_MAX_SIZE_PERCENTAGE,
+            nodeStateManager,
+            AnalysisType.AD
         );
 
         this.checkpointWriteQueue = checkpointWriteQueue;
@@ -99,16 +104,18 @@ public class ADPriorityCache extends
             checkpointWriteQueue,
             checkpointMaintainQueue,
             detector.getId(),
-            tracker
+            tracker,
+            detector.getTenantId()
         );
     }
 
     @Override
-    protected ModelState<ThresholdedRandomCutForest> createEmptyModelState(String modelId, String detectorId) {
+    protected ModelState<ThresholdedRandomCutForest> createEmptyModelState(String modelId, String detectorId, String tenantId) {
         return new ModelState<>(
             null,
             modelId,
             detectorId,
+            tenantId,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,

@@ -13,6 +13,7 @@ package org.opensearch.timeseries.ratelimit;
 
 import java.util.Optional;
 
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 
 public class FeatureRequest extends QueuedRequest {
@@ -21,6 +22,7 @@ public class FeatureRequest extends QueuedRequest {
     protected final String modelId;
     private final Optional<Entity> entity;
     private final String taskId;
+    private final Optional<Config> config;
 
     // used in HC
     public FeatureRequest(
@@ -30,14 +32,16 @@ public class FeatureRequest extends QueuedRequest {
         double[] currentFeature,
         long dataStartTimeMs,
         Entity entity,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
-        super(expirationEpochMs, configId, priority);
+        super(expirationEpochMs, configId, priority, tenantId);
         this.currentFeature = currentFeature;
         this.dataStartTimeMillis = dataStartTimeMs;
-        this.modelId = entity.getModelId(configId).isEmpty() ? null : entity.getModelId(configId).get();
+        this.modelId = entity.getModelId(tenantId, configId).isEmpty() ? null : entity.getModelId(tenantId, configId).get();
         this.entity = Optional.ofNullable(entity);
         this.taskId = taskId;
+        this.config = Optional.empty();
     }
 
     // used in single-stream
@@ -48,14 +52,30 @@ public class FeatureRequest extends QueuedRequest {
         String modelId,
         double[] currentFeature,
         long dataStartTimeMs,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
-        super(expirationEpochMs, configId, priority);
+        this(expirationEpochMs, configId, priority, modelId, currentFeature, dataStartTimeMs, taskId, tenantId, null);
+    }
+
+    public FeatureRequest(
+        long expirationEpochMs,
+        String configId,
+        RequestPriority priority,
+        String modelId,
+        double[] currentFeature,
+        long dataStartTimeMs,
+        String taskId,
+        String tenantId,
+        Config config
+    ) {
+        super(expirationEpochMs, configId, priority, tenantId);
         this.currentFeature = currentFeature;
         this.dataStartTimeMillis = dataStartTimeMs;
         this.modelId = modelId;
         this.entity = Optional.empty();
         this.taskId = taskId;
+        this.config = Optional.ofNullable(config);
     }
 
     public double[] getCurrentFeature() {
@@ -76,6 +96,10 @@ public class FeatureRequest extends QueuedRequest {
 
     public String getTaskId() {
         return taskId;
+    }
+
+    public Optional<Config> getConfig() {
+        return config;
     }
 
     public boolean isRunOnce() {

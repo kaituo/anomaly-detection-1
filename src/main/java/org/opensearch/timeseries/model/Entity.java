@@ -23,13 +23,17 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+import org.apache.commons.lang3.tuple.Triple;
 import org.apache.lucene.search.join.ScoreMode;
 import org.apache.lucene.util.SetOnce;
 import org.opensearch.common.Numbers;
 import org.opensearch.common.hash.MurmurHash3;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
 import org.opensearch.common.xcontent.json.JsonXContent;
+import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.bytes.BytesReference;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
@@ -45,6 +49,7 @@ import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.timeseries.annotation.Generated;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.util.StringUtil;
 
 import com.google.common.base.Joiner;
 import com.google.common.base.Objects;
@@ -57,7 +62,8 @@ public class Entity implements ToXContentObject, Writeable {
 
     private static final long RANDOM_SEED = 42;
     private static final String MODEL_ID_INFIX = "_entity_";
-
+    private static final Pattern ENTITY_MODEL_ID_REGEX_WITH_TENANT = Pattern
+        .compile("(.+)" + Pattern.quote(CommonName.TENANT_ID_INFIX) + "(.+)" + Pattern.quote(MODEL_ID_INFIX) + "(.+)");
     public static final String ATTRIBUTE_NAME_FIELD = "name";
     public static final String ATTRIBUTE_VALUE_FIELD = "value";
 
@@ -234,6 +240,21 @@ public class Entity implements ToXContentObject, Writeable {
     }
 
     /**
+     * Extracts the sanitized tenant id, config id, and entity id from a model id that includes tenant information.
+     *
+     * @param modelId model id produced by {@link #getModelId(String, String, SortedMap)} when a tenant id is provided
+     * @return triplet containing the sanitized tenant id, config id, and entity id
+     * @throws IllegalArgumentException if the model id does not follow the expected format
+     */
+    public static Triple<String, String, String> extractTenantIdAndConfigId(String modelId) {
+        Matcher matcher = ENTITY_MODEL_ID_REGEX_WITH_TENANT.matcher(modelId);
+        if (matcher.matches()) {
+            return Triple.of(matcher.group(1), matcher.group(2), matcher.group(3));
+        }
+        throw new IllegalArgumentException("Invalid entity model id " + modelId);
+    }
+
+    /**
      * Create model Id out of config Id and the attribute name and value pairs
      *
      * HCAD v1 uses the categorical value as part of the model document Id,
@@ -274,11 +295,12 @@ public class Entity implements ToXContentObject, Writeable {
      * AnomalyDetector and when it is not. Thus, we prefer a hash-only solution
      * for ease of use and maintainability.
      *
+     * @param tenantId tenant Id
      * @param configId config Id
      * @param attributes Attributes of an entity
      * @return the model Id
      */
-    private static Optional<String> getModelId(String configId, SortedMap<String, String> attributes) {
+    private static Optional<String> getModelId(String tenantId, String configId, SortedMap<String, String> attributes) {
         if (attributes.isEmpty()) {
             return Optional.empty();
         } else {
@@ -296,20 +318,31 @@ public class Entity implements ToXContentObject, Writeable {
             System.arraycopy(Numbers.longToBytes(hashFunc.h1), 0, bytes, 0, 8);
             System.arraycopy(Numbers.longToBytes(hashFunc.h2), 0, bytes, 8, 8);
             // Some bytes like 10 in ascii is corrupted in some systems. Base64 ensures we use safe bytes: https://tinyurl.com/mxmrhmhf
-            return Optional.of(configId + MODEL_ID_INFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
+            if (Strings.isEmpty(tenantId)) {
+                return Optional.of(configId + MODEL_ID_INFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
+            } else {
+                return Optional
+                    .of(
+                        StringUtil.sanitizeId(tenantId) + CommonName.TENANT_ID_INFIX + configId + MODEL_ID_INFIX + Base64
+                            .getUrlEncoder()
+                            .withoutPadding()
+                            .encodeToString(bytes)
+                    );
+            }
         }
     }
 
     /**
      * Get the cached model Id if present. Or recompute one if missing.
      *
-     * @param configId Id. Used as part of model Id.
-     * @return Model Id.  Can be missing (e.g., the field value is too long for single-category detector)
+     * @param tenantId tenant Id
+     * @param configId config Id
+     * @return the model Id, if present
      */
-    public Optional<String> getModelId(String configId) {
+    public Optional<String> getModelId(String tenantId, String configId) {
         if (modelId.get() == null) {
             // computing model id is not cheap and the result is deterministic. We only do it once.
-            Optional<String> computedModelId = Entity.getModelId(configId, attributes);
+            Optional<String> computedModelId = Entity.getModelId(tenantId, configId, attributes);
             if (computedModelId.isPresent()) {
                 this.modelId.set(computedModelId.get());
             } else {

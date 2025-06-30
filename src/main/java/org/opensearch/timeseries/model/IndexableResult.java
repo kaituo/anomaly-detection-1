@@ -40,6 +40,7 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
     protected User user;
     protected final Integer schemaVersion;
     protected final String taskId;
+    protected final String tenantId;
 
     public IndexableResult(
         String configId,
@@ -52,7 +53,8 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
         Optional<Entity> entity,
         User user,
         Integer schemaVersion,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
         this.configId = configId;
         this.featureData = featureData;
@@ -65,6 +67,7 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
         this.user = user;
         this.schemaVersion = schemaVersion;
         this.taskId = taskId;
+        this.tenantId = tenantId;
     }
 
     public IndexableResult(StreamInput input) throws IOException {
@@ -91,6 +94,7 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
         }
         this.schemaVersion = input.readInt();
         this.taskId = input.readOptionalString();
+        this.tenantId = input.readOptionalString();
     }
 
     @Override
@@ -119,6 +123,7 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
         }
         out.writeInt(schemaVersion);
         out.writeOptionalString(taskId);
+        out.writeOptionalString(tenantId);
     }
 
     public String getConfigId() {
@@ -164,8 +169,12 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
      * @param configId config id
      * @return entity id
      */
-    public static String getEntityId(Optional<Entity> entity, String configId) {
-        return entity.flatMap(e -> e.getModelId(configId)).orElse(null);
+    public static String getEntityId(Optional<Entity> entity, String tenantId, String configId) {
+        return entity.flatMap(e -> e.getModelId(tenantId, configId)).orElse(null);
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 
     @Override
@@ -183,7 +192,8 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
             && Objects.equal(executionStartTime, that.executionStartTime)
             && Objects.equal(executionEndTime, that.executionEndTime)
             && Objects.equal(error, that.error)
-            && Objects.equal(optionalEntity, that.optionalEntity);
+            && Objects.equal(optionalEntity, that.optionalEntity)
+            && Objects.equal(tenantId, that.tenantId);
     }
 
     @Generated
@@ -199,7 +209,8 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
                 executionStartTime,
                 executionEndTime,
                 error,
-                optionalEntity
+                optionalEntity,
+                tenantId
             );
     }
 
@@ -215,6 +226,7 @@ public abstract class IndexableResult implements Writeable, ToXContentObject {
             .append("executionEndTime", executionEndTime)
             .append("error", error)
             .append("entity", optionalEntity)
+            .append("tenantId", tenantId)
             .toString();
     }
 

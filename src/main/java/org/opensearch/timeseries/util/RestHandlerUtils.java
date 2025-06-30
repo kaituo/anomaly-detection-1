@@ -92,6 +92,12 @@ public final class RestHandlerUtils {
     public static final String NODE_ID = "nodeId";
     public static final String STATS = "stats";
     public static final String STAT = "stat";
+    public static final String ENTITY_PROFILE = "_entity_profile";
+    public static final String ENTITY_RESULT = "_entity_result";
+    public static final String SINGLE_STREAM_RESULT = "_single_stream_result";
+    public static final String DELETE_MODEL = "_delete_model";
+    public static final String STATS_NODES = "_stats/nodes";
+    public static final String HC_IMPUTE = "_hc_impute";
 
     // AD constants
     public static final String DETECTOR_ID = "detectorID";

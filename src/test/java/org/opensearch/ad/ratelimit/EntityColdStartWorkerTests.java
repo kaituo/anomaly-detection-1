@@ -124,6 +124,7 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
             new double[] { 0 },
             0,
             entity,
+            null,
             null
         );
 
@@ -152,6 +153,7 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
             new double[] { 0 },
             0,
             entity,
+            null,
             null
         );
 
@@ -181,6 +183,7 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
             new double[] { 0 },
             0,
             entity,
+            null,
             null
         );
 

@@ -14,6 +14,7 @@ package org.opensearch.ad.task;
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.emptySet;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyFloat;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -57,8 +58,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingDeque;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.lucene.search.TotalHits;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
@@ -78,7 +81,6 @@ import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.ad.ADTaskProfileRunner;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.mock.model.MockSimpleLog;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskAction;
@@ -86,6 +88,7 @@ import org.opensearch.ad.model.ADTaskProfile;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.ADTaskProfileNodeResponse;
 import org.opensearch.ad.transport.ADTaskProfileResponse;
@@ -114,6 +117,7 @@ import org.opensearch.index.engine.VersionConflictEngineException;
 import org.opensearch.index.get.GetResult;
 import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.index.reindex.DeleteByQueryAction;
+import org.opensearch.search.DocValueFormat;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
 import org.opensearch.search.aggregations.InternalAggregations;
@@ -123,9 +127,16 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.DuplicateTaskException;
+import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
+import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.model.Config;
@@ -133,6 +144,7 @@ import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.model.TaskState;
+import org.opensearch.timeseries.model.TimeSeriesTask;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.stats.InternalStatNames;
 import org.opensearch.timeseries.task.RealtimeTaskCache;
@@ -142,6 +154,8 @@ import org.opensearch.timeseries.transport.StatsNodesResponse;
 import org.opensearch.timeseries.transport.StopConfigResponse;
 import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportResponseHandler;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
@@ -157,8 +171,8 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
     private Client client;
     private ClusterService clusterService;
     private ClusterSettings clusterSettings;
-    private DiscoveryNodeFilterer nodeFilter;
-    private ADIndexManagement detectionIndices;
+    private DiscoveryNodeSelector nodeFilter;
+    private ADDelegatingDataManagement detectionIndices;
     private ADTaskCacheManager adTaskCacheManager;
     private HashRing hashRing;
     private ThreadContext threadContext;
@@ -166,6 +180,8 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
     private ADTaskManager adTaskManager;
     private ThreadPool threadPool;
     private ADIndexJobActionHandler indexAnomalyDetectorJobActionHandler;
+    private DataAccess taskSearcher;
+    private ADDelegatingDataManagement stateIndexStore;
 
     private DateRange detectionDateRange;
     private ActionListener<JobResponse> listener;
@@ -248,7 +264,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
 
         client = mock(Client.class);
         nodeFilter = mock(DiscoveryNodeFilterer.class);
-        detectionIndices = mock(ADIndexManagement.class);
+        detectionIndices = mock(ADDelegatingDataManagement.class);
         adTaskCacheManager = mock(ADTaskCacheManager.class);
         hashRing = mock(HashRing.class);
         transportService = mock(TransportService.class);
@@ -258,21 +274,31 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         when(client.threadPool()).thenReturn(threadPool);
         nodeStateManager = mock(NodeStateManager.class);
         taskProfileRunner = new ADTaskProfileRunner(hashRing, client);
+        taskSearcher = new DefaultDataAccess(
+            client,
+            clusterService,
+            mock(SecurityClientUtil.class),
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
+        stateIndexStore = mock(ADDelegatingDataManagement.class);
+        when(stateIndexStore.doesStateIndexExist()).thenReturn(true);
         adTaskManager = spy(
             new ADTaskManager(
                 settings,
                 clusterService,
                 client,
                 TestHelpers.xContentRegistry(),
-                detectionIndices,
                 nodeFilter,
                 hashRing,
                 adTaskCacheManager,
                 threadPool,
                 nodeStateManager,
+                taskSearcher,
+                stateIndexStore,
                 taskProfileRunner
             )
         );
+        RunContext runContext = new ThreadRunContext(threadContext);
         indexAnomalyDetectorJobActionHandler = new ADIndexJobActionHandler(
             client,
             detectionIndices,
@@ -280,7 +306,8 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             adTaskManager,
             mock(ExecuteADResultResponseRecorder.class),
             nodeStateManager,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         listener = spy(new ActionListener<JobResponse>() {
@@ -322,6 +349,19 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             function.accept(new DiscoveryNode[] { node1, node2 });
             return null;
         }).when(hashRing).getNodesWithSameLocalVersion(any(), any());
+    }
+
+    private ADIndexJobActionHandler createIndexJobActionHandler(StateManager stateManager) {
+        return new ADIndexJobActionHandler(
+            client,
+            detectionIndices,
+            mock(NamedXContentRegistry.class),
+            adTaskManager,
+            mock(ExecuteADResultResponseRecorder.class),
+            stateManager,
+            Settings.EMPTY,
+            new ThreadRunContext(threadContext)
+        );
     }
 
     private void setupTaskSlots(int node1UsedTaskSlots, int node1AssignedTaskSLots, int node2UsedTaskSlots, int node2AssignedTaskSLots) {
@@ -539,7 +579,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).get(any(), any());
 
-        adTaskManager.getTask(taskId, actionListener);
+        adTaskManager.getTask(taskId, null, actionListener);
         verify(actionListener, times(1)).onResponse(eq(Optional.empty()));
     }
 
@@ -566,7 +606,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).get(any(), any());
 
-        adTaskManager.getTask(taskId, actionListener);
+        adTaskManager.getTask(taskId, null, actionListener);
         verify(actionListener, times(1)).onResponse(eq(Optional.empty()));
     }
 
@@ -580,7 +620,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).get(any(), any());
 
-        adTaskManager.getTask(taskId, actionListener);
+        adTaskManager.getTask(taskId, null, actionListener);
         verify(actionListener, times(1)).onResponse(eq(Optional.empty()));
     }
 
@@ -594,7 +634,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).get(any(), any());
 
-        adTaskManager.getTask(taskId, actionListener);
+        adTaskManager.getTask(taskId, null, actionListener);
         verify(actionListener, times(1)).onFailure(any());
     }
 
@@ -622,7 +662,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).get(any(), any());
 
-        adTaskManager.getTask(taskId, actionListener);
+        adTaskManager.getTask(taskId, null, actionListener);
         verify(actionListener, times(1)).onResponse(any());
     }
 
@@ -638,21 +678,22 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         // Mock nodeStateManager to return an enabled job (default behavior)
         Job enabledJob = TestHelpers.randomJob(true);
         doAnswer(invocation -> {
-            ActionListener<Optional<Job>> listener = invocation.getArgument(1);
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
             listener.onResponse(Optional.of(enabledJob));
             return null;
-        }).when(nodeStateManager).getJob(eq(detectorId), any(ActionListener.class));
+        }).when(nodeStateManager).getJob(eq(detectorId), eq(null), anyBoolean(), any(ActionListener.class));
 
         doReturn(node1).when(clusterService).localNode();
         when(adTaskCacheManager.isRealtimeTaskChangeNeeded(anyString(), anyString(), anyFloat(), anyString())).thenReturn(true);
         doAnswer(invocation -> {
-            ActionListener<UpdateResponse> listener = invocation.getArgument(3);
+            ActionListener<UpdateResponse> listener = invocation.getArgument(4);
             listener.onResponse(new UpdateResponse(ShardId.fromString("[test][1]"), "1", 0L, 1L, 1L, DocWriteResponse.Result.UPDATED));
             return null;
-        }).when(adTaskManager).updateLatestTask(anyString(), any(), anyMap(), any());
+        }).when(adTaskManager).updateLatestTask(anyString(), any(), any(), anyMap(), any());
         adTaskManager
             .updateLatestRealtimeTaskOnCoordinatingNode(
                 detectorId,
+                null,
                 state,
                 rcfTotalUpdates,
                 detectorIntervalInMinutes,
@@ -660,6 +701,38 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                 true,
                 actionListener
             );
+        verify(actionListener, times(1)).onResponse(any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testUpdateLatestRealtimeTaskWithRecentResultPersistsInitProgress() {
+        String detectorId = randomAlphaOfLength(5);
+        ActionListener<UpdateResponse> actionListener = mock(ActionListener.class);
+
+        Job enabledJob = TestHelpers.randomJob(true);
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onResponse(Optional.of(enabledJob));
+            return null;
+        }).when(nodeStateManager).getJob(eq(detectorId), eq(null), anyBoolean(), any(ActionListener.class));
+
+        doReturn(node1).when(clusterService).localNode();
+        when(adTaskCacheManager.isRealtimeTaskChangeNeeded(anyString(), anyString(), anyFloat(), anyString())).thenReturn(true);
+
+        ArgumentCaptor<Map<String, Object>> updatedFieldsCaptor = ArgumentCaptor.forClass(Map.class);
+        doAnswer(invocation -> {
+            ActionListener<UpdateResponse> listener = invocation.getArgument(4);
+            listener.onResponse(new UpdateResponse(ShardId.fromString("[test][1]"), "1", 0L, 1L, 1L, DocWriteResponse.Result.UPDATED));
+            return null;
+        }).when(adTaskManager).updateLatestTask(eq(detectorId), eq(null), any(), updatedFieldsCaptor.capture(), any());
+
+        adTaskManager.updateLatestRealtimeTaskOnCoordinatingNode(detectorId, null, null, 0L, 1L, "", true, actionListener);
+
+        Map<String, Object> updatedFields = updatedFieldsCaptor.getValue();
+        assertEquals(TaskState.RUNNING.name(), updatedFields.get(TimeSeriesTask.STATE_FIELD));
+        assertEquals(1.0f, updatedFields.get(TimeSeriesTask.INIT_PROGRESS_FIELD));
+        assertEquals(0, updatedFields.get(TimeSeriesTask.ESTIMATED_MINUTES_LEFT_FIELD));
+        assertEquals(node1.getId(), updatedFields.get(TimeSeriesTask.COORDINATING_NODE_FIELD));
         verify(actionListener, times(1)).onResponse(any());
     }
 
@@ -675,22 +748,23 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         // Mock nodeStateManager to return a disabled job
         Job disabledJob = TestHelpers.randomJob(false);
         doAnswer(invocation -> {
-            ActionListener<Optional<Job>> listener = invocation.getArgument(1);
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
             listener.onResponse(Optional.of(disabledJob));
             return null;
-        }).when(nodeStateManager).getJob(eq(detectorId), any(ActionListener.class));
+        }).when(nodeStateManager).getJob(eq(detectorId), eq(null), anyBoolean(), any(ActionListener.class));
 
         doReturn(node1).when(clusterService).localNode();
         when(adTaskCacheManager.isRealtimeTaskChangeNeeded(anyString(), anyString(), anyFloat(), anyString())).thenReturn(true);
         doAnswer(invocation -> {
-            ActionListener<UpdateResponse> listener = invocation.getArgument(3);
+            ActionListener<UpdateResponse> listener = invocation.getArgument(4);
             listener.onResponse(new UpdateResponse(ShardId.fromString("[test][1]"), "1", 0L, 1L, 1L, DocWriteResponse.Result.UPDATED));
             return null;
-        }).when(adTaskManager).updateLatestTask(anyString(), any(), anyMap(), any());
+        }).when(adTaskManager).updateLatestTask(anyString(), any(), any(), anyMap(), any());
 
         adTaskManager
             .updateLatestRealtimeTaskOnCoordinatingNode(
                 detectorId,
+                null,
                 state,
                 rcfTotalUpdates,
                 detectorIntervalInMinutes,
@@ -704,11 +778,114 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             .updateLatestTask(
                 eq(detectorId),
                 any(),
+                any(),
                 argThat(updatedFields -> TaskState.STOPPED.name().equals(updatedFields.get("state"))),
                 any(ActionListener.class)
             );
 
         verify(actionListener, times(1)).onResponse(any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testUpdateLatestRealtimeTaskRetriesWhenLatestTaskTemporarilyMissing() {
+        String detectorId = randomAlphaOfLength(5);
+        String state = TaskState.RUNNING.name();
+        Long rcfTotalUpdates = randomLongBetween(200, 1000);
+        Long detectorIntervalInMinutes = 1L;
+        String error = randomAlphaOfLength(5);
+        ActionListener<UpdateResponse> actionListener = mock(ActionListener.class);
+
+        Job enabledJob = TestHelpers.randomJob(true);
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onResponse(Optional.of(enabledJob));
+            return null;
+        }).when(nodeStateManager).getJob(eq(detectorId), eq(null), anyBoolean(), any(ActionListener.class));
+
+        doAnswer(invocation -> {
+            Runnable runnable = invocation.getArgument(0);
+            runnable.run();
+            return null;
+        }).when(threadPool).schedule(any(Runnable.class), any(TimeValue.class), anyString());
+
+        doReturn(node1).when(clusterService).localNode();
+        when(adTaskCacheManager.isRealtimeTaskChangeNeeded(anyString(), anyString(), anyFloat(), anyString())).thenReturn(true);
+
+        AtomicInteger updateAttempts = new AtomicInteger(0);
+        doAnswer(invocation -> {
+            ActionListener<UpdateResponse> listener = invocation.getArgument(4);
+            if (updateAttempts.getAndIncrement() == 0) {
+                listener.onFailure(new ResourceNotFoundException(CommonMessages.CAN_NOT_FIND_LATEST_TASK));
+            } else {
+                listener.onResponse(new UpdateResponse(ShardId.fromString("[test][1]"), "1", 0L, 1L, 1L, DocWriteResponse.Result.UPDATED));
+            }
+            return null;
+        }).when(adTaskManager).updateLatestTask(anyString(), any(), any(), anyMap(), any());
+
+        adTaskManager
+            .updateLatestRealtimeTaskOnCoordinatingNode(
+                detectorId,
+                null,
+                state,
+                rcfTotalUpdates,
+                detectorIntervalInMinutes,
+                error,
+                true,
+                actionListener
+            );
+
+        verify(adTaskManager, times(2)).updateLatestTask(anyString(), any(), any(), anyMap(), any());
+        verify(actionListener, times(1)).onResponse(any());
+        verify(actionListener, never()).onFailure(any());
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testUpdateLatestRealtimeTaskFailsAfterRetryLimit() {
+        String detectorId = randomAlphaOfLength(5);
+        String state = TaskState.RUNNING.name();
+        Long rcfTotalUpdates = randomLongBetween(200, 1000);
+        Long detectorIntervalInMinutes = 1L;
+        String error = randomAlphaOfLength(5);
+        ActionListener<UpdateResponse> actionListener = mock(ActionListener.class);
+
+        Job enabledJob = TestHelpers.randomJob(true);
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onResponse(Optional.of(enabledJob));
+            return null;
+        }).when(nodeStateManager).getJob(eq(detectorId), eq(null), anyBoolean(), any(ActionListener.class));
+
+        doAnswer(invocation -> {
+            Runnable runnable = invocation.getArgument(0);
+            runnable.run();
+            return null;
+        }).when(threadPool).schedule(any(Runnable.class), any(TimeValue.class), anyString());
+
+        doReturn(node1).when(clusterService).localNode();
+        when(adTaskCacheManager.isRealtimeTaskChangeNeeded(anyString(), anyString(), anyFloat(), anyString())).thenReturn(true);
+
+        doAnswer(invocation -> {
+            ActionListener<UpdateResponse> listener = invocation.getArgument(4);
+            listener.onFailure(new ResourceNotFoundException(CommonMessages.CAN_NOT_FIND_LATEST_TASK));
+            return null;
+        }).when(adTaskManager).updateLatestTask(anyString(), any(), any(), anyMap(), any());
+
+        adTaskManager
+            .updateLatestRealtimeTaskOnCoordinatingNode(
+                detectorId,
+                null,
+                state,
+                rcfTotalUpdates,
+                detectorIntervalInMinutes,
+                error,
+                true,
+                actionListener
+            );
+
+        // Initial attempt + 10 retries.
+        verify(adTaskManager, times(11)).updateLatestTask(anyString(), any(), any(), anyMap(), any());
+        verify(actionListener, times(1)).onFailure(any(ResourceNotFoundException.class));
+        verify(actionListener, never()).onResponse(any());
     }
 
     public void testTriageStateWithNullRcfTotalUpdates() {
@@ -780,7 +957,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
 
     public void testResetLatestFlagAsFalse() throws IOException {
         List<ADTask> adTasks = new ArrayList<>();
-        adTaskManager.resetLatestFlagAsFalse(adTasks);
+        adTaskManager.resetLatestFlagAsFalse(adTasks, null);
         verify(client, never()).execute(any(), any(), any());
 
         ADTask adTask = randomAdTask();
@@ -797,7 +974,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             listener.onResponse(new BulkResponse(responses, 1));
             return null;
         }).when(client).execute(any(), any(), any());
-        adTaskManager.resetLatestFlagAsFalse(adTasks);
+        adTaskManager.resetLatestFlagAsFalse(adTasks, null);
         verify(client, times(1)).execute(any(), any(), any());
     }
 
@@ -809,7 +986,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
 
     public void testCleanADResultOfDeletedDetectorWithException() {
         String detectorId = randomAlphaOfLength(5);
-        when(adTaskCacheManager.pollDeletedConfig()).thenReturn(detectorId);
+        when(adTaskCacheManager.pollDeletedConfig()).thenReturn(Pair.of(detectorId, null));
 
         doAnswer(invocation -> {
             ActionListener<BulkByScrollResponse> listener = invocation.getArgument(2);
@@ -848,22 +1025,23 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                 clusterService,
                 client,
                 TestHelpers.xContentRegistry(),
-                detectionIndices,
                 nodeFilter,
                 hashRing,
                 adTaskCacheManager,
                 threadPool,
                 nodeStateManager,
+                taskSearcher,
+                stateIndexStore,
                 taskProfileRunner
             )
         );
         adTaskManager.cleanResultOfDeletedConfig();
         verify(client, times(1)).execute(eq(DeleteByQueryAction.INSTANCE), any(), any());
-        verify(adTaskCacheManager, times(1)).addDeletedConfig(eq(detectorId));
+        verify(adTaskCacheManager, times(1)).addDeletedConfig(eq(detectorId), eq((String) null));
 
         adTaskManager.cleanResultOfDeletedConfig();
         verify(client, times(2)).execute(eq(DeleteByQueryAction.INSTANCE), any(), any());
-        verify(adTaskCacheManager, times(1)).addDeletedConfig(eq(detectorId));
+        verify(adTaskCacheManager, times(1)).addDeletedConfig(eq(detectorId), eq((String) null));
     }
 
     public void testMaintainRunningHistoricalTasksWithOwningNodeIsNotLocalNode() {
@@ -949,6 +1127,72 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         }).when(client).search(any(), any());
         adTaskManager.maintainRunningHistoricalTasks(transportService, 10);
         verify(client, times(1)).search(any(), any());
+    }
+
+    public void testMaintainRunningHistoricalTasksWithPagination() {
+        when(hashRing.getOwningNodeWithHighestVersion(anyString())).thenReturn(Optional.of(node1));
+        doReturn(node1).when(clusterService).localNode();
+
+        List<Object[]> searchAfterValues = new ArrayList<>();
+
+        doAnswer(invocation -> {
+            SearchRequest request = invocation.getArgument(0);
+            searchAfterValues.add(request.source().searchAfter());
+
+            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            SearchHit task1 = SearchHit.fromXContent(TestHelpers.parser(runningHistoricalHCTaskContent));
+            task1.sortValues(new Object[] { 3L, historicalTaskId }, new DocValueFormat[] { DocValueFormat.RAW, DocValueFormat.RAW });
+            SearchHit task2 = SearchHit
+                .fromXContent(TestHelpers.parser(runningHistoricalHCTaskContent.replace(historicalTaskId, historicalTaskId + "_2")));
+            task2.sortValues(
+                new Object[] { 2L, historicalTaskId + "_2" },
+                new DocValueFormat[] { DocValueFormat.RAW, DocValueFormat.RAW }
+            );
+            SearchHit task3 = SearchHit
+                .fromXContent(TestHelpers.parser(runningHistoricalHCTaskContent.replace(historicalTaskId, historicalTaskId + "_3")));
+            task3.sortValues(
+                new Object[] { 1L, historicalTaskId + "_3" },
+                new DocValueFormat[] { DocValueFormat.RAW, DocValueFormat.RAW }
+            );
+
+            SearchHit[] hits;
+            if (searchAfterValues.size() == 1) {
+                hits = new SearchHit[] { task1, task2 };
+            } else if (searchAfterValues.size() == 2) {
+                hits = new SearchHit[] { task3 };
+            } else {
+                hits = new SearchHit[0];
+            }
+
+            SearchHits searchHits = new SearchHits(hits, new TotalHits(3, TotalHits.Relation.EQUAL_TO), Float.NaN);
+            InternalSearchResponse response = new InternalSearchResponse(
+                searchHits,
+                InternalAggregations.EMPTY,
+                null,
+                null,
+                false,
+                null,
+                1
+            );
+            SearchResponse searchResponse = new SearchResponse(
+                response,
+                null,
+                1,
+                1,
+                0,
+                100,
+                ShardSearchFailure.EMPTY_ARRAY,
+                SearchResponse.Clusters.EMPTY
+            );
+
+            listener.onResponse(searchResponse);
+            return null;
+        }).when(client).search(any(), any());
+
+        adTaskManager.maintainRunningHistoricalTasks(transportService, 2);
+        verify(client, times(2)).search(any(), any());
+        assertNull(searchAfterValues.get(0));
+        assertArrayEquals(new Object[] { 2L, historicalTaskId + "_2" }, searchAfterValues.get(1));
     }
 
     public void testMaintainRunningRealtimeTasksWithNoRealtimeTask() {
@@ -1051,6 +1295,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                 detectorId,
                 null,
                 null,
+                null,
                 ADTaskType.ALL_DETECTOR_TASK_TYPES,
                 function,
                 transportService,
@@ -1058,7 +1303,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                 10,
                 listener
             );
-        verify(client, times(2)).update(any(), any());
+        verify(client, times(1)).update(any(), any());
     }
 
     @SuppressWarnings("unchecked")
@@ -1116,6 +1361,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                 detectorId,
                 null,
                 null,
+                null,
                 ADTaskType.ALL_DETECTOR_TASK_TYPES,
                 function,
                 transportService,
@@ -1123,7 +1369,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                 10,
                 listener
             );
-        verify(client, times(2)).update(any(), any());
+        verify(client, never()).update(any(), any());
     }
 
     @SuppressWarnings("unchecked")
@@ -1227,6 +1473,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                                 60L,
                                 TestHelpers.randomUser(),
                                 null,
+                                null,
                                 AnalysisType.AD
                             ).toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS)
                         ),
@@ -1285,7 +1532,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
 
     public void testCleanChildTasksAndADResultsOfDeletedTaskWithFailToDeleteADResult() {
         when(adTaskCacheManager.hasDeletedTask()).thenReturn(true);
-        when(adTaskCacheManager.pollDeletedTask()).thenReturn(randomAlphaOfLength(5));
+        when(adTaskCacheManager.pollDeletedTask()).thenReturn(Pair.of(randomAlphaOfLength(5), null));
         doAnswer(invocation -> {
             ActionListener<BulkByScrollResponse> actionListener = invocation.getArgument(2);
             actionListener.onFailure(new RuntimeException("test"));
@@ -1304,7 +1551,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
 
     public void testCleanChildTasksAndADResultsOfDeletedTask() {
         when(adTaskCacheManager.hasDeletedTask()).thenReturn(true);
-        when(adTaskCacheManager.pollDeletedTask()).thenReturn(randomAlphaOfLength(5)).thenReturn(null);
+        when(adTaskCacheManager.pollDeletedTask()).thenReturn(Pair.of(randomAlphaOfLength(5), null)).thenReturn(null);
         doAnswer(invocation -> {
             ActionListener<BulkByScrollResponse> actionListener = invocation.getArgument(2);
             BulkByScrollResponse response = mock(BulkByScrollResponse.class);
@@ -1335,7 +1582,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         String detectorId = randomAlphaOfLength(5);
         ExecutorFunction function = mock(ExecutorFunction.class);
         ActionListener<DeleteResponse> listener = mock(ActionListener.class);
-        adTaskManager.deleteTasks(detectorId, function, listener);
+        adTaskManager.deleteTasks(detectorId, function, null, listener);
         verify(function, times(1)).execute();
     }
 
@@ -1360,7 +1607,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         String detectorId = randomAlphaOfLength(5);
         ExecutorFunction function = mock(ExecutorFunction.class);
         ActionListener<DeleteResponse> listener = mock(ActionListener.class);
-        adTaskManager.deleteTasks(detectorId, function, listener);
+        adTaskManager.deleteTasks(detectorId, function, null, listener);
         verify(listener, times(1)).onFailure(any());
     }
 
@@ -1380,11 +1627,11 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         ExecutorFunction function = mock(ExecutorFunction.class);
         ActionListener<DeleteResponse> listener = mock(ActionListener.class);
 
-        adTaskManager.deleteTasks(detectorId, function, listener);
+        adTaskManager.deleteTasks(detectorId, function, null, listener);
         verify(function, times(1)).execute();
         verify(listener, never()).onFailure(any());
 
-        adTaskManager.deleteTasks(detectorId, function, listener);
+        adTaskManager.deleteTasks(detectorId, function, null, listener);
         verify(function, times(1)).execute();
         verify(listener, times(1)).onFailure(any());
     }
@@ -1449,12 +1696,14 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         String detectorId = randomAlphaOfLength(5);
         boolean historical = true;
         ActionListener<JobResponse> listener = mock(ActionListener.class);
+        StateManager stateManager = mock(StateManager.class);
+        ADIndexJobActionHandler indexJobActionHandler = createIndexJobActionHandler(stateManager);
         doAnswer(invocation -> {
-            Consumer<Optional<AnomalyDetector>> function = invocation.getArgument(2);
+            Consumer<Optional<?>> function = invocation.getArgument(3);
             function.accept(Optional.empty());
             return null;
-        }).when(nodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(Consumer.class), any());
-        indexAnomalyDetectorJobActionHandler.stopConfig(detectorId, historical, null, transportService, listener);
+        }).when(stateManager).getConfig(eq(detectorId), eq((String) null), eq(AnalysisType.AD), any(Consumer.class), eq(listener));
+        indexJobActionHandler.stopConfig(detectorId, null, historical, null, transportService, listener);
         verify(listener, times(1)).onFailure(any());
     }
 
@@ -1463,12 +1712,14 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         String detectorId = randomAlphaOfLength(5);
         boolean historical = true;
         ActionListener<JobResponse> listener = mock(ActionListener.class);
+        StateManager stateManager = mock(StateManager.class);
+        ADIndexJobActionHandler indexJobActionHandler = createIndexJobActionHandler(stateManager);
         doAnswer(invocation -> {
-            Consumer<Optional<AnomalyDetector>> function = invocation.getArgument(2);
+            Consumer<Optional<?>> function = invocation.getArgument(3);
             AnomalyDetector detector = randomAnomalyDetector(ImmutableList.of(randomFeature(true)));
             function.accept(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(Consumer.class), any());
+        }).when(stateManager).getConfig(eq(detectorId), eq((String) null), eq(AnalysisType.AD), any(Consumer.class), eq(listener));
 
         doAnswer(invocation -> {
             ActionListener<SearchResponse> actionListener = invocation.getArgument(1);
@@ -1476,7 +1727,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).search(any(), any());
 
-        indexAnomalyDetectorJobActionHandler.stopConfig(detectorId, historical, null, transportService, listener);
+        indexJobActionHandler.stopConfig(detectorId, null, historical, null, transportService, listener);
         verify(listener, times(1)).onFailure(any());
     }
 
@@ -1485,12 +1736,14 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         String detectorId = randomAlphaOfLength(5);
         boolean historical = true;
         ActionListener<JobResponse> listener = mock(ActionListener.class);
+        StateManager stateManager = mock(StateManager.class);
+        ADIndexJobActionHandler indexJobActionHandler = createIndexJobActionHandler(stateManager);
         doAnswer(invocation -> {
-            Consumer<Optional<AnomalyDetector>> function = invocation.getArgument(2);
+            Consumer<Optional<?>> function = invocation.getArgument(3);
             AnomalyDetector detector = randomAnomalyDetector(ImmutableList.of(randomFeature(true)));
             function.accept(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(Consumer.class), any());
+        }).when(stateManager).getConfig(eq(detectorId), eq((String) null), eq(AnalysisType.AD), any(Consumer.class), eq(listener));
 
         doAnswer(invocation -> {
             ActionListener<SearchResponse> actionListener = invocation.getArgument(1);
@@ -1519,7 +1772,7 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).search(any(), any());
 
-        indexAnomalyDetectorJobActionHandler.stopConfig(detectorId, historical, null, transportService, listener);
+        indexJobActionHandler.stopConfig(detectorId, null, historical, null, transportService, listener);
         verify(listener, times(1)).onFailure(any());
     }
 
@@ -1559,18 +1812,30 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             clusterService,
             TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            TimeSeriesSettings.BACKOFF_MINUTES
+            TimeSeriesSettings.BACKOFF_MINUTES,
+            mock(org.opensearch.timeseries.rest.handler.EventBridgeHandler.class)
         );
-        nodeStateManager.getConfig(detectorId, AnalysisType.AD, function, listener);
+        nodeStateManager.getConfig(detectorId, null, AnalysisType.AD, function, listener);
         verify(listener, times(1)).onFailure(any());
     }
 
     @SuppressWarnings("unchecked")
     public void testDeleteTaskDocs() {
+        int[] searchInvocationCount = new int[] { 0 };
         doAnswer(invocation -> {
             ActionListener<SearchResponse> actionListener = invocation.getArgument(1);
-            SearchHit task = SearchHit.fromXContent(TestHelpers.parser(taskContent));
-            SearchHits searchHits = new SearchHits(new SearchHit[] { task }, new TotalHits(1, TotalHits.Relation.EQUAL_TO), Float.NaN);
+            SearchHit[] hits;
+            TotalHits totalHits;
+            if (searchInvocationCount[0] == 0) {
+                SearchHit task = SearchHit.fromXContent(TestHelpers.parser(taskContent));
+                hits = new SearchHit[] { task };
+                totalHits = new TotalHits(1, TotalHits.Relation.EQUAL_TO);
+            } else {
+                hits = new SearchHit[0];
+                totalHits = new TotalHits(0, TotalHits.Relation.EQUAL_TO);
+            }
+            searchInvocationCount[0]++;
+            SearchHits searchHits = new SearchHits(hits, totalHits, Float.NaN);
             InternalSearchResponse response = new InternalSearchResponse(
                 searchHits,
                 InternalAggregations.EMPTY,
@@ -1611,12 +1876,12 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         SearchRequest searchRequest = mock(SearchRequest.class);
         ExecutorFunction function = mock(ExecutorFunction.class);
         ActionListener<SearchResponse> listener = mock(ActionListener.class);
-        adTaskManager.deleteTaskDocs(detectorId, searchRequest, function, listener);
-        verify(adTaskCacheManager, times(1)).addDeletedTask(anyString());
+        adTaskManager.deleteTaskDocs(detectorId, searchRequest, function, null, listener);
+        verify(adTaskCacheManager, times(1)).addDeletedTask(anyString(), any());
         verify(function, times(1)).execute();
     }
 
-    public void testStopConfigListener_onResponse_failure() {
+    public void testStopConfigListener_onResponse_failure() throws Exception {
         // Arrange
         String configId = randomAlphaOfLength(5);
         TransportService transportService = mock(TransportService.class);
@@ -1624,8 +1889,12 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         ActionListener<JobResponse> listener = mock(ActionListener.class);
 
         // Act
-        ActionListener<StopConfigResponse> stopConfigListener = indexAnomalyDetectorJobActionHandler
-            .stopConfigListener(configId, transportService, listener);
+        java.lang.reflect.Method method = org.opensearch.timeseries.rest.handler.IndexJobActionHandler.class
+            .getDeclaredMethod("stopConfigListener", String.class, String.class, TransportService.class, ActionListener.class);
+        method.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        ActionListener<StopConfigResponse> stopConfigListener = (ActionListener<StopConfigResponse>) method
+            .invoke(indexAnomalyDetectorJobActionHandler, configId, null, transportService, listener);
         StopConfigResponse stopConfigResponse = mock(StopConfigResponse.class);
         when(stopConfigResponse.success()).thenReturn(false);
 
@@ -1635,7 +1904,14 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
         ArgumentCaptor<OpenSearchStatusException> exceptionCaptor = ArgumentCaptor.forClass(OpenSearchStatusException.class);
 
         verify(adTaskManager, times(1))
-            .stopLatestRealtimeTask(eq(configId), eq(TaskState.FAILED), exceptionCaptor.capture(), eq(transportService), eq(listener));
+            .stopLatestRealtimeTask(
+                eq(configId),
+                eq((String) null),
+                eq(TaskState.FAILED),
+                exceptionCaptor.capture(),
+                eq(transportService),
+                eq(listener)
+            );
 
         OpenSearchStatusException capturedException = exceptionCaptor.getValue();
         assertEquals("Failed to delete model", capturedException.getMessage());

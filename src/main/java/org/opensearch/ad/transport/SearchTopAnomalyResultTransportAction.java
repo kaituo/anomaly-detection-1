@@ -11,7 +11,6 @@
 
 package org.opensearch.ad.transport;
 
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.TOP_ANOMALY_RESULT_TIMEOUT_IN_MILLIS;
 
 import java.time.Clock;
@@ -61,6 +60,7 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.FieldSortBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonName;
@@ -173,6 +173,7 @@ import org.opensearch.transport.client.Client;
 // }
 // }
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Local host call only. Safe in multitenant.")
 public class SearchTopAnomalyResultTransportAction extends
     HandledTransportAction<SearchTopAnomalyResultRequest, SearchTopAnomalyResultResponse> {
     private ADSearchHandler searchHandler;
@@ -181,7 +182,7 @@ public class SearchTopAnomalyResultTransportAction extends
     private static final OrderType DEFAULT_ORDER_TYPE = OrderType.SEVERITY;
     private static final int DEFAULT_SIZE = 10;
     private static final int MAX_SIZE = 1000;
-    private static final String defaultIndex = ALL_AD_RESULTS_INDEX_PATTERN;
+    private static final String defaultIndex = ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN;
     private static final String COUNT_FIELD = "_count";
     private static final String BUCKET_SORT_FIELD = "bucket_sort";
     public static final String MULTI_BUCKETS_FIELD = "multi_buckets";
@@ -230,7 +231,8 @@ public class SearchTopAnomalyResultTransportAction extends
             "",
             "",
             false,
-            null
+            null,
+            request.getTenantId()
         );
         client.execute(GetAnomalyDetectorAction.INSTANCE, getAdRequest, ActionListener.wrap(getAdResponse -> {
             // Make sure detector exists

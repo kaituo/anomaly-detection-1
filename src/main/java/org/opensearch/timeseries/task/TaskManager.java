@@ -32,11 +32,11 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.search.join.ScoreMode;
 import org.opensearch.OpenSearchStatusException;
-import org.opensearch.action.bulk.BulkAction;
 import org.opensearch.action.bulk.BulkItemResponse;
 import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.delete.DeleteRequest;
@@ -71,9 +71,7 @@ import org.opensearch.index.query.NestedQueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.index.query.TermsQueryBuilder;
-import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.DeleteByQueryRequest;
-import org.opensearch.index.reindex.UpdateByQueryAction;
 import org.opensearch.index.reindex.UpdateByQueryRequest;
 import org.opensearch.script.Script;
 import org.opensearch.search.SearchHit;
@@ -81,7 +79,9 @@ import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.search.sort.SortOrder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.DuplicateTaskException;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TaskCancelledException;
@@ -90,7 +90,6 @@ import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.BiCheckedFunction;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.function.ResponseTransformer;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.DateRange;
@@ -99,33 +98,35 @@ import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import com.google.common.collect.ImmutableMap;
 
-public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>> {
+public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, DataStoreType extends DelegatingDataManagement<? extends Enum<? extends TimeSeriesIndex>>> {
     protected static int DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS = 5;
+    private static final int MAX_UPDATE_LATEST_REALTIME_TASK_RETRIES = 10;
+    private static final TimeValue UPDATE_LATEST_REALTIME_TASK_RETRY_INTERVAL = TimeValue.timeValueMillis(2000);
 
     private final Logger logger = LogManager.getLogger(TaskManager.class);
 
     protected final TaskCacheManagerType taskCacheManager;
     protected final ClusterService clusterService;
-    protected final Client client;
+
     protected final String stateIndex;
     protected final List<TaskTypeEnum> realTimeTaskTypes;
     private final List<TaskTypeEnum> historicalTaskTypes;
     private final List<TaskTypeEnum> runOnceTaskTypes;
-    protected final IndexManagementType indexManagement;
-    protected final NodeStateManager nodeStateManager;
+    protected final StateManager nodeStateManager;
     protected final AnalysisType analysisType;
     protected final NamedXContentRegistry xContentRegistry;
     protected final String configIdFieldName;
+    protected final DataAccess dataAccess;
 
     protected volatile Integer maxOldTaskDocsPerConfig;
 
@@ -138,19 +139,18 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
     public TaskManager(
         TaskCacheManagerType taskCacheManager,
         ClusterService clusterService,
-        Client client,
         String stateIndex,
         List<TaskTypeEnum> realTimeTaskTypes,
         List<TaskTypeEnum> historicalTaskTypes,
         List<TaskTypeEnum> runOnceTaskTypes,
-        IndexManagementType indexManagement,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         AnalysisType analysisType,
         NamedXContentRegistry xContentRegistry,
         String configIdFieldName,
         Setting<Integer> maxOldADTaskDocsPerConfigSetting,
         Settings settings,
         ThreadPool threadPool,
+        DataAccess taskSearcher,
         String allResultIndexPattern,
         String batchTaskThreadPoolName,
         Setting<Boolean> deleteResultWhenDeleteConfigSetting,
@@ -158,16 +158,15 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
     ) {
         this.taskCacheManager = taskCacheManager;
         this.clusterService = clusterService;
-        this.client = client;
         this.stateIndex = stateIndex;
         this.realTimeTaskTypes = realTimeTaskTypes;
         this.historicalTaskTypes = historicalTaskTypes;
         this.runOnceTaskTypes = runOnceTaskTypes;
-        this.indexManagement = indexManagement;
         this.nodeStateManager = nodeStateManager;
         this.analysisType = analysisType;
         this.xContentRegistry = xContentRegistry;
         this.configIdFieldName = configIdFieldName;
+        this.dataAccess = Objects.requireNonNull(taskSearcher, "taskSearcher must not be null");
 
         this.maxOldTaskDocsPerConfig = maxOldADTaskDocsPerConfigSetting.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(maxOldADTaskDocsPerConfigSetting, it -> maxOldTaskDocsPerConfig = it);
@@ -182,6 +181,14 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
             .addSettingsUpdateConsumer(deleteResultWhenDeleteConfigSetting, it -> deleteResultWhenDeleteConfig = it);
 
         this.stopped = stopped;
+    }
+
+    public DataAccess getDataAccess() {
+        return dataAccess;
+    }
+
+    public StateManager getStateManager() {
+        return nodeStateManager;
     }
 
     public boolean skipUpdateRealtimeTask(String configId, String error) {
@@ -238,6 +245,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
      */
     public void updateLatestRealtimeTask(
         String configId,
+        String tenantId,
         String state,
         Long rcfTotalUpdates,
         Long intervalInMinutes,
@@ -248,7 +256,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
     ) {
 
         // Check if job is enabled before proceeding
-        nodeStateManager.getJob(configId, ActionListener.wrap(jobOptional -> {
+        nodeStateManager.getJob(configId, tenantId, false, ActionListener.wrap(jobOptional -> {
             boolean jobEnabled = jobOptional.isPresent() && jobOptional.get().isEnabled();
 
             String newState = null;
@@ -296,12 +304,17 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
 
             // no need to update init progress if state is STOPPED
             if (initProgress != null && newState != TaskState.STOPPED.name()) {
-                updatedFields.put(TimeSeriesTask.INIT_PROGRESS_FIELD, initProgress);
-                updatedFields
-                    .put(
-                        TimeSeriesTask.ESTIMATED_MINUTES_LEFT_FIELD,
-                        Math.max(0, TimeSeriesSettings.NUM_MIN_SAMPLES - rcfTotalUpdates) * intervalInMinutes
-                    );
+                if (Boolean.TRUE.equals(hasResult)) {
+                    updatedFields.put(TimeSeriesTask.INIT_PROGRESS_FIELD, initProgress);
+                    updatedFields.put(TimeSeriesTask.ESTIMATED_MINUTES_LEFT_FIELD, 0);
+                } else if (rcfTotalUpdates != null && rcfTotalUpdates > 0) {
+                    updatedFields.put(TimeSeriesTask.INIT_PROGRESS_FIELD, initProgress);
+                    updatedFields
+                        .put(
+                            TimeSeriesTask.ESTIMATED_MINUTES_LEFT_FIELD,
+                            Math.max(0, TimeSeriesSettings.NUM_MIN_SAMPLES - rcfTotalUpdates) * intervalInMinutes
+                        );
+                }
             }
             if (newState != null) {
                 updatedFields.put(TimeSeriesTask.STATE_FIELD, newState);
@@ -311,22 +324,72 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
             }
             Float finalInitProgress = initProgress;
             String finalNewState = newState;
-            updateLatestTask(configId, realTimeTaskTypes, updatedFields, ActionListener.wrap(r -> {
-                logger.debug("Updated latest realtime AD task successfully for config {}", configId);
-                taskCacheManager.updateRealtimeTaskCache(configId, finalNewState, finalInitProgress, finalError);
-                listener.onResponse(r);
-            }, e -> {
-                logger.error("Failed to update realtime task for config " + configId, e);
-                listener.onFailure(e);
-            }));
+            updateLatestRealtimeTaskWithRetry(
+                configId,
+                tenantId,
+                updatedFields,
+                MAX_UPDATE_LATEST_REALTIME_TASK_RETRIES,
+                ActionListener.wrap(r -> {
+                    logger.debug("Updated latest realtime AD task successfully for config {}", configId);
+                    taskCacheManager.updateRealtimeTaskCache(configId, finalNewState, finalInitProgress, finalError);
+                    listener.onResponse(r);
+                }, e -> {
+                    logger.error("Failed to update realtime task for config " + configId, e);
+                    listener.onFailure(e);
+                })
+            );
         }, e -> {
             logger.error("Failed to get job for config " + configId, e);
             listener.onFailure(e);
         }));
     }
 
+    /**
+     * Retry updating latest realtime task to handle a short visibility gap in coordinator mode.
+     *
+     * In multi-tenant coordinator mode, some start paths such as EventBridge-backed start do not
+     * create a realtime task document immediately.
+     * On first execution, the analysis-type-specific task manager may recreate the missing realtime task.
+     * Immediately after recreation, backend visibility can lag, so searching the latest task in
+     * {@link #updateLatestTask(String, String, List, Map, ActionListener)} can briefly return empty and
+     * raise {@code can't find latest task}. We retry that specific transient case.
+     *
+     * @param configId config id
+     * @param tenantId tenant id
+     * @param updatedFields updated fields
+     * @param remainingRetries remaining retries
+     * @param listener action listener
+     */
+    private void updateLatestRealtimeTaskWithRetry(
+        String configId,
+        String tenantId,
+        Map<String, Object> updatedFields,
+        int remainingRetries,
+        ActionListener<UpdateResponse> listener
+    ) {
+        updateLatestTask(configId, tenantId, realTimeTaskTypes, updatedFields, ActionListener.wrap(listener::onResponse, e -> {
+            boolean missingLatestTask = (e instanceof ResourceNotFoundException)
+                && e.getMessage() != null
+                && e.getMessage().contains(CommonMessages.CAN_NOT_FIND_LATEST_TASK);
+
+            if (!missingLatestTask || remainingRetries <= 0) {
+                listener.onFailure(e);
+                return;
+            }
+
+            logger.debug("Latest realtime task is not visible yet for config {}, retries left: {}", configId, remainingRetries);
+            threadPool
+                .schedule(
+                    () -> updateLatestRealtimeTaskWithRetry(configId, tenantId, updatedFields, remainingRetries - 1, listener),
+                    UPDATE_LATEST_REALTIME_TASK_RETRY_INTERVAL,
+                    ThreadPool.Names.GENERIC
+                );
+        }));
+    }
+
     public void updateLatestRealtimeTaskOnCoordinatingNode(
         String configId,
+        String tenantId,
         String state,
         Long rcfTotalUpdates,
         Long intervalInMinutes,
@@ -334,27 +397,31 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         Boolean hasResult,
         ActionListener<UpdateResponse> listener
     ) {
-        updateLatestRealtimeTask(configId, state, rcfTotalUpdates, intervalInMinutes, error, true, hasResult, listener);
+        updateLatestRealtimeTask(configId, tenantId, state, rcfTotalUpdates, intervalInMinutes, error, true, hasResult, listener);
     }
 
-    /**
-     * Update latest task of a config.
-     *
-     * @param configId config id
-     * @param taskTypes task types
-     * @param updatedFields updated fields, key: filed name, value: new value
-     * @param listener action listener
-     */
     public void updateLatestTask(
         String configId,
+        String tenantId,
         List<TaskTypeEnum> taskTypes,
         Map<String, Object> updatedFields,
         ActionListener<UpdateResponse> listener
     ) {
-        getAndExecuteOnLatestConfigLevelTask(configId, taskTypes, (task) -> {
+        logger
+            .info(
+                "updateLatestTask enter config={} tenant={} taskTypes={} updatedFieldKeys={}",
+                configId,
+                tenantId,
+                taskTypes == null ? List.of() : taskTypeToString(taskTypes),
+                updatedFields.keySet()
+            );
+
+        getAndExecuteOnLatestConfigLevelTask(configId, tenantId, taskTypes, (task) -> {
             if (task.isPresent()) {
-                updateTask(task.get().getTaskId(), updatedFields, listener);
+                logger.info("found latest realtime task for update config={} taskId={}", configId, task.get().getTaskId());
+                updateTask(task.get().getTaskId(), updatedFields, tenantId, listener);
             } else {
+                logger.info("latest realtime task missing during update config={} tenant={}", configId, tenantId);
                 listener.onFailure(new ResourceNotFoundException(configId, CommonMessages.CAN_NOT_FIND_LATEST_TASK));
             }
         }, null, false, listener);
@@ -362,15 +429,16 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
 
     public void getAndExecuteOnLatestConfigLevelTask(
         Config config,
+        String tenantId,
         DateRange dateRange,
         boolean runOnce,
         User user,
         TransportService transportService,
         ActionListener<JobResponse> listener
     ) {
-        getAndExecuteOnLatestConfigLevelTask(config.getId(), getTaskTypes(dateRange), (task) -> {
+        getAndExecuteOnLatestConfigLevelTask(config.getId(), tenantId, getTaskTypes(dateRange), (task) -> {
             if (!task.isPresent() || task.get().isDone()) {
-                updateLatestFlagOfOldTasksAndCreateNewTask(config, dateRange, runOnce, user, TaskState.CREATED, listener);
+                updateLatestFlagOfOldTasksAndCreateNewTask(config, dateRange, runOnce, user, tenantId, TaskState.CREATED, listener);
             } else {
                 listener.onFailure(new OpenSearchStatusException(CONFIG_IS_RUNNING, RestStatus.BAD_REQUEST));
             }
@@ -382,6 +450,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         DateRange dateRange,
         boolean runOnce,
         User user,
+        String tenantId,
         TaskState initialState,
         ActionListener<T> listener
     ) {
@@ -400,7 +469,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         String script = String.format(Locale.ROOT, "ctx._source.%s=%s;", TimeSeriesTask.IS_LATEST_FIELD, false);
         updateByQueryRequest.setScript(new Script(script));
 
-        client.execute(UpdateByQueryAction.INSTANCE, updateByQueryRequest, ActionListener.wrap(r -> {
+        dataAccess.updateByQuery(updateByQueryRequest, TenantContext.user(tenantId), ActionListener.wrap(r -> {
             List<BulkItemResponse.Failure> bulkFailures = r.getBulkFailures();
             if (bulkFailures.isEmpty()) {
                 // Realtime AD coordinating node is chosen by job scheduler, we won't know it until realtime AD job
@@ -420,58 +489,63 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         }));
     }
 
-    /**
-     * Get latest task and execute consumer function.
-     * [Important!] Make sure listener returns in function
-     *
-     * @param configId config id
-     * @param taskTypes task types
-     * @param function consumer function
-     * @param transportService transport service
-     * @param resetTaskState reset task state or not
-     * @param listener action listener
-     * @param <T> action listener response type
-     */
     public <T> void getAndExecuteOnLatestConfigLevelTask(
         String configId,
+        String tenantId,
         List<TaskTypeEnum> taskTypes,
         Consumer<Optional<TaskClass>> function,
         TransportService transportService,
         boolean resetTaskState,
         ActionListener<T> listener
     ) {
-        getAndExecuteOnLatestConfigTask(configId, null, null, taskTypes, function, transportService, resetTaskState, listener);
+        getAndExecuteOnLatestConfigTask(configId, null, null, tenantId, taskTypes, function, transportService, resetTaskState, listener);
     }
 
-    /**
-     * Get one latest task and execute consumer function.
-     * [Important!] Make sure listener returns in function
-     *
-     * @param configId config id
-     * @param parentTaskId parent task id
-     * @param entity entity value
-     * @param taskTypes task types
-     * @param function consumer function
-     * @param transportService transport service
-     * @param resetTaskState reset task state or not
-     * @param listener action listener
-     * @param <T> action listener response type
-     */
     public <T> void getAndExecuteOnLatestConfigTask(
         String configId,
         String parentTaskId,
         Entity entity,
+        String tenantId,
         List<TaskTypeEnum> taskTypes,
         Consumer<Optional<TaskClass>> function,
         TransportService transportService,
         boolean resetTaskState,
         ActionListener<T> listener
     ) {
-        getAndExecuteOnLatestTasks(configId, parentTaskId, entity, taskTypes, (taskList) -> {
-            if (taskList != null && taskList.size() > 0) {
-                function.accept(Optional.ofNullable(taskList.get(0)));
-            } else {
-                function.accept(Optional.empty());
+        getAndExecuteOnLatestTasks(configId, parentTaskId, entity, tenantId, taskTypes, (taskList) -> {
+            Optional<TaskClass> latestTask = taskList != null && taskList.size() > 0
+                ? Optional.ofNullable(taskList.get(0))
+                : Optional.empty();
+            logger
+                .info(
+                    "Latest config task callback enter config={} tenant={} resetTaskState={} taskPresent={} firstTaskId={}",
+                    configId,
+                    tenantId,
+                    resetTaskState,
+                    latestTask.isPresent(),
+                    latestTask.map(TimeSeriesTask::getTaskId).orElse("none")
+                );
+            try {
+                function.accept(latestTask);
+                logger
+                    .info(
+                        "Latest config task callback exit config={} tenant={} resetTaskState={} taskPresent={}",
+                        configId,
+                        tenantId,
+                        resetTaskState,
+                        latestTask.isPresent()
+                    );
+            } catch (RuntimeException e) {
+                logger
+                    .error(
+                        "Latest config task callback failed config={} tenant={} resetTaskState={} taskPresent={}",
+                        configId,
+                        tenantId,
+                        resetTaskState,
+                        latestTask.isPresent(),
+                        e
+                    );
+                throw e;
             }
         }, transportService, resetTaskState, 1, listener);
     }
@@ -491,19 +565,20 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
      */
     public void stopLatestRealtimeTask(
         String configId,
+        String tenantId,
         TaskState state,
         Exception error,
         TransportService transportService,
         ActionListener<JobResponse> listener
     ) {
-        getAndExecuteOnLatestConfigLevelTask(configId, realTimeTaskTypes, (adTask) -> {
+        getAndExecuteOnLatestConfigLevelTask(configId, tenantId, realTimeTaskTypes, (adTask) -> {
             if (adTask.isPresent() && !adTask.get().isDone()) {
                 Map<String, Object> updatedFields = new HashMap<>();
                 updatedFields.put(TimeSeriesTask.STATE_FIELD, state.name());
                 if (error != null) {
                     updatedFields.put(TimeSeriesTask.ERROR_FIELD, ExceptionUtil.getErrorMessage(error));
                 }
-                ExecutorFunction function = () -> updateTask(adTask.get().getTaskId(), updatedFields, ActionListener.wrap(r -> {
+                ExecutorFunction function = () -> updateTask(adTask.get().getTaskId(), updatedFields, tenantId, ActionListener.wrap(r -> {
                     if (error == null) {
                         listener.onResponse(new JobResponse(configId));
                     } else {
@@ -532,7 +607,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         cleanConfigCache(task, transportService, () -> {
             String taskId = task.getTaskId();
             Map<String, Object> updatedFields = ImmutableMap.of(TimeSeriesTask.STATE_FIELD, stopped.name());
-            updateTask(taskId, updatedFields, ActionListener.wrap(r -> {
+            updateTask(taskId, updatedFields, task.getTenantId(), ActionListener.wrap(r -> {
                 task.setState(stopped.name());
                 if (function != null) {
                     function.execute();
@@ -540,7 +615,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                 // For realtime anomaly detection, we only create config level task, no entity level realtime task.
                 if (isHistoricalHCTask(task)) {
                     // Reset running entity tasks as STOPPED
-                    resetEntityTasksAsStopped(taskId);
+                    resetEntityTasksAsStopped(taskId, task.getTenantId());
                 }
             }, e -> {
                 logger.error("Failed to update task state as stopped for task " + taskId, e);
@@ -549,25 +624,11 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         }, listener);
     }
 
-    /**
-     * Get latest config tasks and execute consumer function.
-     * [Important!] Make sure listener returns in function
-     *
-     * @param configId config id
-     * @param parentTaskId parent task id
-     * @param entity entity value
-     * @param taskTypes task types
-     * @param function consumer function
-     * @param transportService transport service
-     * @param resetTaskState reset task state or not
-     * @param size return how many tasks
-     * @param listener action listener
-     * @param <T> response type of action listener
-     */
     public <T> void getAndExecuteOnLatestTasks(
         String configId,
         String parentTaskId,
         Entity entity,
+        String tenantId,
         List<TaskTypeEnum> taskTypes,
         Consumer<List<TaskClass>> function,
         TransportService transportService,
@@ -604,15 +665,33 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         SearchRequest searchRequest = new SearchRequest();
         searchRequest.source(sourceBuilder);
         searchRequest.indices(stateIndex);
-
-        client.search(searchRequest, ActionListener.wrap(r -> {
+        dataAccess.search(searchRequest, TenantContext.user(tenantId), ActionListener.wrap(r -> {
             // https://github.com/opendistro-for-elasticsearch/anomaly-detection/pull/359#discussion_r558653132
             // getTotalHits will be null when we track_total_hits is false in the query request.
             // Add more checking here to cover some unknown cases.
             List<TaskClass> tsTasks = new ArrayList<>();
+            long totalHits = (r == null || r.getHits().getTotalHits() == null) ? -1 : r.getHits().getTotalHits().value();
+            logger
+                .info(
+                    "Latest task search completed config={} tenant={} resetTaskState={} requestedSize={} taskTypes={} totalHits={}",
+                    configId,
+                    tenantId,
+                    resetTaskState,
+                    size,
+                    taskTypes == null ? "[]" : TaskType.taskTypeToString(taskTypes),
+                    totalHits
+                );
             if (r == null || r.getHits().getTotalHits() == null || r.getHits().getTotalHits().value() == 0) {
                 // don't throw exception here as consumer functions need to handle missing task
                 // in different way.
+                logger
+                    .info(
+                        "Latest task search returned no tasks config={} tenant={} resetTaskState={} taskTypes={}",
+                        configId,
+                        tenantId,
+                        resetTaskState,
+                        taskTypes == null ? "[]" : TaskType.taskTypeToString(taskTypes)
+                    );
                 function.accept(tsTasks);
                 return;
             }
@@ -630,17 +709,29 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                     listener.onFailure(new OpenSearchStatusException(message, RestStatus.INTERNAL_SERVER_ERROR));
                 }
             }
+            logger
+                .info(
+                    "Latest task search parsed tasks config={} tenant={} resetTaskState={} parsedCount={}",
+                    configId,
+                    tenantId,
+                    resetTaskState,
+                    tsTasks.size()
+                );
             if (resetTaskState) {
+                logger.info("Latest task search delegating to resetLatestConfigTaskState config={} tenant={}", configId, tenantId);
                 resetLatestConfigTaskState(tsTasks, function, transportService, listener);
             } else {
+                logger.info("Latest task search invoking callback directly config={} tenant={}", configId, tenantId);
                 function.accept(tsTasks);
             }
         }, e -> {
-            if (e instanceof IndexNotFoundException) {
+            if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
+                logger.info("Latest task search treated missing state index as empty result config={} tenant={}", configId, tenantId);
                 function.accept(new ArrayList<>());
             } else if (e instanceof SearchPhaseExecutionException) {
                 logger.info("Failed to search task for config " + configId, e);
                 // e.getMessage(): "No mapping found for" or "all shards failed" likely due to state index hasn't finished initialization
+                logger.info("Latest task search treated search phase failure as empty result config={} tenant={}", configId, tenantId);
                 function.accept(new ArrayList<>());
             } else {
                 // unknown exceptions
@@ -662,28 +753,22 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         }
         TimeSeriesTask tsTask = runningRealtimeTasks.get(0);
         String configId = tsTask.getConfigId();
-        GetRequest getJobRequest = new GetRequest(CommonName.JOB_INDEX).id(configId);
-        client.get(getJobRequest, ActionListener.wrap(r -> {
-            if (r.isExists()) {
-                try (XContentParser parser = createXContentParserFromRegistry(xContentRegistry, r.getSourceAsBytesRef())) {
-                    ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                    Job job = Job.parse(parser);
-                    if (!job.isEnabled()) {
-                        logger.debug("job is disabled, reset realtime task as stopped for config {}", configId);
-                        resetTaskStateAsStopped(tsTask, function, transportService, listener);
-                    } else {
-                        function.execute();
-                    }
-                } catch (IOException e) {
-                    logger.error(" Failed to parse job " + configId, e);
-                    listener.onFailure(e);
+        String tenantId = tsTask.getTenantId();
+        nodeStateManager.getJob(configId, tenantId, false, ActionListener.wrap(jobOptional -> {
+            if (jobOptional.isPresent()) {
+                Job job = jobOptional.get();
+                if (!job.isEnabled()) {
+                    logger.debug("job is disabled, reset realtime task as stopped for config {}", configId);
+                    resetTaskStateAsStopped(tsTask, function, transportService, listener);
+                } else {
+                    function.execute();
                 }
             } else {
                 logger.debug("job is not found, reset realtime task as stopped for config {}", configId);
                 resetTaskStateAsStopped(tsTask, function, transportService, listener);
             }
         }, e -> {
-            if (e instanceof IndexNotFoundException) {
+            if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
                 logger.debug("job is not found, reset realtime task as stopped for config {}", configId);
                 resetTaskStateAsStopped(tsTask, function, transportService, listener);
             } else {
@@ -714,7 +799,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                         + ". Will delete task "
                         + task.getTaskId()
                 );
-            deleteTask(task.getTaskId());
+            deleteTask(task.getTaskId(), task.getTenantId());
             return;
         }
         if (e instanceof TaskCancelledException) {
@@ -730,7 +815,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         updatedFields.put(TimeSeriesTask.ERROR_FIELD, ExceptionUtil.getErrorMessage(e));
         updatedFields.put(TimeSeriesTask.STATE_FIELD, state);
         updatedFields.put(TimeSeriesTask.EXECUTION_END_TIME_FIELD, Instant.now().toEpochMilli());
-        updateTask(task.getTaskId(), updatedFields);
+        updateTask(task.getTaskId(), updatedFields, task.getTenantId());
     }
 
     /**
@@ -738,9 +823,10 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
      *
      * @param taskId task id
      * @param updatedFields updated fields, key: filed name, value: new value
+     * @param tenantId tenant id
      */
-    public void updateTask(String taskId, Map<String, Object> updatedFields) {
-        updateTask(taskId, updatedFields, ActionListener.wrap(response -> {
+    public void updateTask(String taskId, Map<String, Object> updatedFields, String tenantId) {
+        updateTask(taskId, updatedFields, tenantId, ActionListener.wrap(response -> {
             if (response.status() == RestStatus.OK) {
                 logger.debug("Updated task successfully: {}, task id: {}", response.status(), taskId);
             } else {
@@ -754,9 +840,10 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
      *
      * @param taskId task id
      * @param updatedFields updated fields, key: filed name, value: new value
+     * @param tenantId tenant id
      * @param listener action listener
      */
-    public void updateTask(String taskId, Map<String, Object> updatedFields, ActionListener<UpdateResponse> listener) {
+    public void updateTask(String taskId, Map<String, Object> updatedFields, String tenantId, ActionListener<UpdateResponse> listener) {
         UpdateRequest updateRequest = new UpdateRequest(stateIndex, taskId);
         Map<String, Object> updatedContent = new HashMap<>();
         updatedContent.putAll(updatedFields);
@@ -765,29 +852,35 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         updateRequest.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
         // OpenSearch will transparently re‑read the doc and retry up to 2 times.
         updateRequest.retryOnConflict(2);
-        client.update(updateRequest, listener);
+        dataAccess.update(updateRequest, TenantContext.user(tenantId), listener);
     }
 
     /**
-     * Delete task with task id.
+     * Delete task with task id and tenant.
      *
      * @param taskId task id
+     * @param tenantId tenant id
      */
-    public void deleteTask(String taskId) {
-        deleteTask(taskId, ActionListener.wrap(r -> { logger.info("Deleted task {} with status: {}", taskId, r.status()); }, e -> {
-            logger.error("Failed to delete task " + taskId, e);
-        }));
+    public void deleteTask(String taskId, String tenantId) {
+        deleteTask(
+            taskId,
+            tenantId,
+            ActionListener.wrap(r -> { logger.info("Deleted task {} with status: {}", taskId, r.status()); }, e -> {
+                logger.error("Failed to delete task " + taskId, e);
+            })
+        );
     }
 
     /**
      * Delete task with task id.
      *
      * @param taskId task id
+     * @param tenantId tenant id
      * @param listener action listener
      */
-    public void deleteTask(String taskId, ActionListener<DeleteResponse> listener) {
+    public void deleteTask(String taskId, String tenantId, ActionListener<DeleteResponse> listener) {
         DeleteRequest deleteRequest = new DeleteRequest(stateIndex, taskId);
-        client.delete(deleteRequest, listener);
+        dataAccess.delete(deleteRequest, TenantContext.user(tenantId), listener);
     }
 
     /**
@@ -805,7 +898,8 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
             request
                 .source(tsTask.toXContent(builder, RestHandlerUtils.XCONTENT_WITH_TYPE))
                 .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
-            client.index(request, ActionListener.wrap(r -> function.accept(r), e -> {
+            String tenantId = tsTask.getTenantId();
+            dataAccess.index(request, TenantContext.user(tenantId), ActionListener.wrap(r -> function.accept(r), e -> {
                 logger.error("Failed to create task for config " + tsTask.getConfigId(), e);
                 listener.onFailure(e);
             }));
@@ -856,10 +950,26 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                 T transformedResponse = responseTransformer.transform(response);
                 delegatedListener.onResponse(transformedResponse);
             }
-        }, delegatedListener);
+        }, tsTask.getTenantId(), delegatedListener);
     }
 
-    public <T> void deleteTaskDocs(String configId, SearchRequest searchRequest, ExecutorFunction function, ActionListener<T> listener) {
+    public <T> void deleteTaskDocs(
+        String configId,
+        SearchRequest searchRequest,
+        ExecutorFunction function,
+        String tenantId,
+        ActionListener<T> listener
+    ) {
+        deleteTaskDocs(configId, searchRequest, tenantId, function, listener);
+    }
+
+    public <T> void deleteTaskDocs(
+        String configId,
+        SearchRequest searchRequest,
+        String tenantId,
+        ExecutorFunction function,
+        ActionListener<T> listener
+    ) {
         ActionListener<SearchResponse> searchListener = ActionListener.wrap(r -> {
             Iterator<SearchHit> iterator = r.getHits().iterator();
             if (iterator.hasNext()) {
@@ -881,7 +991,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                         listener.onFailure(e);
                     }
                 }
-                client.execute(BulkAction.INSTANCE, bulkRequest, ActionListener.wrap(res -> {
+                dataAccess.bulk(bulkRequest, TenantContext.user(tenantId), ActionListener.wrap(res -> {
                     logger.info("Old tasks deleted for config {}", configId);
                     BulkItemResponse[] bulkItemResponses = res.getItems();
                     if (bulkItemResponses != null && bulkItemResponses.length > 0) {
@@ -889,7 +999,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                             if (!bulkItemResponse.isFailed()) {
                                 logger.debug("Add config task into cache. Task id: {}", bulkItemResponse.getId());
                                 // add deleted task in cache and delete its child tasks and results
-                                taskCacheManager.addDeletedTask(bulkItemResponse.getId());
+                                taskCacheManager.addDeletedTask(bulkItemResponse.getId(), tenantId);
                             }
                         }
                     }
@@ -904,14 +1014,14 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                 function.execute();
             }
         }, e -> {
-            if (e instanceof IndexNotFoundException) {
+            if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
                 function.execute();
             } else {
                 listener.onFailure(e);
             }
         });
 
-        client.search(searchRequest, searchListener);
+        dataAccess.search(searchRequest, TenantContext.user(tenantId), searchListener);
     }
 
     /**
@@ -922,26 +1032,31 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
             return;
         }
         threadPool.schedule(() -> {
-            String taskId = taskCacheManager.pollDeletedTask();
+            Pair<String, String> deletedTask = taskCacheManager.pollDeletedTask();
+            if (deletedTask == null) {
+                return;
+            }
+            String taskId = deletedTask.getLeft();
+            String tenantId = deletedTask.getRight();
             if (taskId == null) {
                 return;
             }
             DeleteByQueryRequest deleteResultsRequest = new DeleteByQueryRequest(allResultIndexPattern);
             deleteResultsRequest.setQuery(new TermsQueryBuilder(CommonName.TASK_ID_FIELD, taskId));
-            client.execute(DeleteByQueryAction.INSTANCE, deleteResultsRequest, ActionListener.wrap(res -> {
-                logger.debug("Successfully deleted results of task " + taskId);
+            dataAccess.deleteByQuery(deleteResultsRequest, TenantContext.user(tenantId), ActionListener.wrap(res -> {
+                logger.debug("Successfully deleted {} results of task {}", res.getDeleted(), taskId);
                 DeleteByQueryRequest deleteChildTasksRequest = new DeleteByQueryRequest(stateIndex);
                 deleteChildTasksRequest.setQuery(new TermsQueryBuilder(TimeSeriesTask.PARENT_TASK_ID_FIELD, taskId));
 
-                client.execute(DeleteByQueryAction.INSTANCE, deleteChildTasksRequest, ActionListener.wrap(r -> {
-                    logger.debug("Successfully deleted child tasks of task " + taskId);
+                dataAccess.deleteByQuery(deleteChildTasksRequest, TenantContext.user(tenantId), ActionListener.wrap(r -> {
+                    logger.debug("Successfully deleted {} child tasks of task {}", r.getDeleted(), taskId);
                     cleanChildTasksAndResultsOfDeletedTask();
                 }, e -> { logger.error("Failed to delete child tasks of task " + taskId, e); }));
             }, ex -> { logger.error("Failed to delete results for task " + taskId, ex); }));
         }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), batchTaskThreadPoolName);
     }
 
-    protected void resetEntityTasksAsStopped(String configTaskId) {
+    protected void resetEntityTasksAsStopped(String configTaskId, String tenantId) {
         UpdateByQueryRequest updateByQueryRequest = new UpdateByQueryRequest();
         updateByQueryRequest.indices(stateIndex);
         BoolQueryBuilder query = new BoolQueryBuilder();
@@ -953,7 +1068,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         String script = String.format(Locale.ROOT, "ctx._source.%s='%s';", TimeSeriesTask.STATE_FIELD, TaskState.INACTIVE.name());
         updateByQueryRequest.setScript(new Script(script));
 
-        client.execute(UpdateByQueryAction.INSTANCE, updateByQueryRequest, ActionListener.wrap(r -> {
+        dataAccess.updateByQuery(updateByQueryRequest, TenantContext.user(tenantId), ActionListener.wrap(r -> {
             List<BulkItemResponse.Failure> bulkFailures = r.getBulkFailures();
             if (ParseUtils.isNullOrEmpty(bulkFailures)) {
                 logger.debug("Updated {} child entity tasks state for config task {}", r.getUpdated(), configTaskId);
@@ -967,7 +1082,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
      * Set old task's latest flag as false.
      * @param tasks list of tasks
      */
-    public void resetLatestFlagAsFalse(List<TaskClass> tasks) {
+    public void resetLatestFlagAsFalse(List<TaskClass> tasks, String tenantId) {
         if (tasks == null || tasks.size() == 0) {
             return;
         }
@@ -986,7 +1101,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         });
 
         bulkRequest.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
-        client.execute(BulkAction.INSTANCE, bulkRequest, ActionListener.wrap(res -> {
+        dataAccess.bulk(bulkRequest, TenantContext.user(tenantId), ActionListener.wrap(res -> {
             BulkItemResponse[] bulkItemResponses = res.getItems();
             if (bulkItemResponses != null && bulkItemResponses.length > 0) {
                 for (BulkItemResponse bulkItemResponse : bulkItemResponses) {
@@ -1008,33 +1123,34 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
      * @param function time series function
      * @param listener action listener
      */
-    public void deleteTasks(String configId, ExecutorFunction function, ActionListener<DeleteResponse> listener) {
+    public void deleteTasks(String configId, ExecutorFunction function, String tenantId, ActionListener<DeleteResponse> listener) {
         DeleteByQueryRequest request = new DeleteByQueryRequest(stateIndex);
 
         BoolQueryBuilder query = new BoolQueryBuilder();
         query.filter(new TermQueryBuilder(configIdFieldName, configId));
 
         request.setQuery(query);
-        client.execute(DeleteByQueryAction.INSTANCE, request, ActionListener.wrap(r -> {
+        dataAccess.deleteByQuery(request, TenantContext.user(tenantId), ActionListener.wrap(r -> {
             if (r.getBulkFailures() == null || r.getBulkFailures().size() == 0) {
-                logger.info("tasks deleted for config {}", configId);
-                deleteResultOfConfig(configId);
+                logger.info("{} tasks deleted for config {}", r.getDeleted(), configId);
+                deleteResultOfConfig(configId, tenantId);
                 function.execute();
             } else {
                 listener.onFailure(new OpenSearchStatusException("Failed to delete all tasks", RestStatus.INTERNAL_SERVER_ERROR));
             }
         }, e -> {
             logger.info("Failed to delete tasks for " + configId, e);
-            if (e instanceof IndexNotFoundException) {
-                deleteResultOfConfig(configId);
+            if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
+                deleteResultOfConfig(configId, tenantId);
                 function.execute();
             } else {
+                logger.error("Failed to delete tasks for " + configId, e);
                 listener.onFailure(e);
             }
         }));
     }
 
-    public void deleteResultOfConfig(String configId) {
+    public void deleteResultOfConfig(String configId, String tenantId) {
         if (!deleteResultWhenDeleteConfig) {
             logger.info("Won't delete result for {} as delete result setting is disabled", configId);
             return;
@@ -1042,22 +1158,23 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
         logger.info("Start to delete results of config {}", configId);
         DeleteByQueryRequest deleteADResultsRequest = new DeleteByQueryRequest(allResultIndexPattern);
         deleteADResultsRequest.setQuery(new TermQueryBuilder(configIdFieldName, configId));
-        client.execute(DeleteByQueryAction.INSTANCE, deleteADResultsRequest, ActionListener.wrap(response -> {
-            logger.debug("Successfully deleted results of config " + configId);
+        dataAccess.deleteByQuery(deleteADResultsRequest, TenantContext.user(tenantId), ActionListener.wrap(response -> {
+            logger.debug("Successfully deleted {} results of config {}", response.getDeleted(), configId);
         }, exception -> {
             logger.error("Failed to delete results of config " + configId, exception);
-            taskCacheManager.addDeletedConfig(configId);
+            taskCacheManager.addDeletedConfig(configId, tenantId);
         }));
     }
 
     /**
      * Get task with task id and execute listener.
      * @param taskId task id
+     * @param tenantId tenant id
      * @param listener action listener
      */
-    public void getTask(String taskId, ActionListener<Optional<TaskClass>> listener) {
+    public void getTask(String taskId, String tenantId, ActionListener<Optional<TaskClass>> listener) {
         GetRequest request = new GetRequest(stateIndex, taskId);
-        client.get(request, ActionListener.wrap(r -> {
+        dataAccess.get(request, TenantContext.user(tenantId), ActionListener.wrap(r -> {
             if (r != null && r.isExists()) {
                 try (XContentParser parser = createXContentParserFromRegistry(xContentRegistry, r.getSourceAsBytesRef())) {
                     ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
@@ -1072,7 +1189,7 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                 listener.onResponse(Optional.empty());
             }
         }, e -> {
-            if (e instanceof IndexNotFoundException) {
+            if (e instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(e)) {
                 listener.onResponse(Optional.empty());
             } else {
                 logger.error("Failed to get task " + taskId, e);
@@ -1085,9 +1202,11 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
      * Clean results of deleted config.
      */
     public void cleanResultOfDeletedConfig() {
-        String detectorId = taskCacheManager.pollDeletedConfig();
-        if (detectorId != null) {
-            deleteResultOfConfig(detectorId);
+        Pair<String, String> deletedConfig = taskCacheManager.pollDeletedConfig();
+        if (deletedConfig != null) {
+            String configId = deletedConfig.getLeft();
+            String tenantId = deletedConfig.getRight();
+            deleteResultOfConfig(configId, tenantId);
         }
     }
 

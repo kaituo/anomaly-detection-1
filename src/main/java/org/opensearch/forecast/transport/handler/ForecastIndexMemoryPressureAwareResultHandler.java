@@ -13,32 +13,34 @@ package org.opensearch.forecast.transport.handler;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.ratelimit.ForecastResultWriteRequest;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.transport.ForecastResultBulkAction;
 import org.opensearch.forecast.transport.ForecastResultBulkRequest;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.transport.ResultBulkResponse;
 import org.opensearch.timeseries.transport.handler.IndexMemoryPressureAwareResultHandler;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Local host call only. Safe in multitenant.")
 public class ForecastIndexMemoryPressureAwareResultHandler extends
-    IndexMemoryPressureAwareResultHandler<ForecastResult, ForecastResultWriteRequest, ForecastResultBulkRequest, ResultBulkResponse, ForecastIndex, ForecastIndexManagement> {
+    IndexMemoryPressureAwareResultHandler<ForecastResult, ForecastResultWriteRequest, ForecastResultBulkRequest, ResultBulkResponse, ForecastIndex, ForecastDelegatingDataManagement> {
     private static final Logger LOG = LogManager.getLogger(ForecastIndexMemoryPressureAwareResultHandler.class);
 
     @Inject
     public ForecastIndexMemoryPressureAwareResultHandler(
         Client client,
-        ForecastIndexManagement anomalyDetectionIndices,
-        ClusterService clusterService
+        ForecastDelegatingDataManagement forecastIndices,
+        DiscoveryNodeSelector discoveryNodeSelector
     ) {
-        super(client, anomalyDetectionIndices, clusterService);
+        super(client, forecastIndices, discoveryNodeSelector);
     }
 
     @Override

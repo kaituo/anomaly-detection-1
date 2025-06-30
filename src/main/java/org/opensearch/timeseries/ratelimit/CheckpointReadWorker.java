@@ -36,14 +36,13 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.IntermediateResult;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -54,14 +53,16 @@ import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.util.ActionListenerExecutor;
 import org.opensearch.timeseries.util.ExceptionUtil;
+import org.opensearch.timeseries.util.IndexOperations;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointType, ColdStarterType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, IndexManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>>
+public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointType, ColdStarterType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, DataManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>>
     extends BatchWorker<FeatureRequest, MultiGetRequest, MultiGetResponse> {
 
     private static final Logger LOG = LogManager.getLogger(CheckpointReadWorker.class);
@@ -73,6 +74,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
     protected final Provider<? extends TimeSeriesCache<RCFModelType>> cacheProvider;
     protected final String checkpointIndexName;
     protected final InferencerType inferencer;
+    protected final IndexOperations indexOperations;
 
     public CheckpointReadWorker(
         String workerName,
@@ -94,7 +96,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
         ModelManagerType modelManager,
         CheckpointType checkpointDao,
         ColdStartWorkerType entityColdStartWorker,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         Provider<? extends TimeSeriesCache<RCFModelType>> cacheProvider,
         Duration stateTtl,
         CheckpointWriteWorkerType checkpointWriteWorker,
@@ -102,7 +104,8 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
         Setting<Integer> batchSizeSetting,
         String checkpointIndexName,
         AnalysisType context,
-        InferencerType inferencer
+        InferencerType inferencer,
+        IndexOperations indexOperations
     ) {
         super(
             workerName,
@@ -135,6 +138,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
         this.checkpointWriteWorker = checkpointWriteWorker;
         this.checkpointIndexName = checkpointIndexName;
         this.inferencer = inferencer;
+        this.indexOperations = indexOperations;
     }
 
     @Override
@@ -150,14 +154,15 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
      * @return The converted multi-get request
      */
     @Override
-    protected MultiGetRequest toBatchRequest(List<FeatureRequest> toProcess) {
+    protected MultiGetRequest toBatchRequest(List<FeatureRequest> toProcess, String tenantId) {
         MultiGetRequest multiGetRequest = new MultiGetRequest();
         for (FeatureRequest request : toProcess) {
             String modelId = request.getModelId();
             if (null == modelId) {
                 continue;
             }
-            multiGetRequest.add(new MultiGetRequest.Item(checkpointIndexName, modelId));
+            String indexName = indexOperations.resolveIndexName(request.getTenantId(), request.getConfigId(), modelId, checkpointIndexName);
+            multiGetRequest.add(new MultiGetRequest.Item(indexName, modelId));
         }
         return multiGetRequest;
     }
@@ -181,7 +186,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                 if (itemResponse.isFailed()) {
 
                     final Exception failure = itemResponse.getFailure().getFailure();
-                    if (failure instanceof IndexNotFoundException) {
+                    if (failure instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(failure)) {
                         for (FeatureRequest origRequest : toProcess) {
                             // If it is checkpoint index not found exception, I don't
                             // need to retry as checkpoint read is bound to fail. Just
@@ -266,7 +271,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                 // retry all of them
                 putAll(toProcess);
             } else {
-                LOG.error("Fail to restore models", exception);
+                LOG.error("Failed to restore models", exception);
             }
         });
     }
@@ -299,7 +304,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
             if (checkpointResponse != null) {
                 // successful requests
                 ModelState<RCFModelType> modelState = checkpointDao
-                    .processHCGetResponse(checkpointResponse.getResponse(), modelId, configId);
+                    .processHCGetResponse(checkpointResponse.getResponse(), modelId, configId, origRequest.getTenantId());
 
                 if (null == modelState) {
                     // checkpoint is not available (e.g., too big or corrupted); cold start again
@@ -311,6 +316,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                 nodeStateManager
                     .getConfig(
                         configId,
+                        origRequest.getTenantId(),
                         context,
                         true,
                         processIterationUsingConfig(
@@ -377,6 +383,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                                 checkpointWriteWorker
                                     .write(
                                         restoredModelState,
+                                        config.getTenantId(),
                                         true,
                                         config.isLongFrequency() ? RequestPriority.MEDIUM : RequestPriority.LOW
                                     );

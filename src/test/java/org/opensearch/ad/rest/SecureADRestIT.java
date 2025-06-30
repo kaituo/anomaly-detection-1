@@ -612,6 +612,7 @@ public class SecureADRestIT extends AnomalyDetectorRestTestCase {
             null,
             Instant.now(),
             aliceDetector.getFrequency(),
+            null,
             null
         );
 

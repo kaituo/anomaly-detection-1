@@ -47,6 +47,7 @@ import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorActionHandler;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -63,6 +64,10 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
@@ -80,6 +85,7 @@ import org.opensearch.transport.client.node.NodeClient;
  */
 public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTest {
     static ThreadPool threadPool;
+
     private String TEXT_FIELD_TYPE = "text";
     private IndexAnomalyDetectorActionHandler handler;
     private ClusterService clusterService;
@@ -87,7 +93,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
     private SecurityClientUtil clientUtil;
     private TransportService transportService;
     // private ActionListener<IndexAnomalyDetectorResponse> channel;
-    private ADIndexManagement anomalyDetectionIndices;
+    private ADDelegatingDataManagement anomalyDetectionIndices;
+    private ADIndexManagement adIndexManagement;
     private String detectorId;
     private Long seqNo;
     private Long primaryTerm;
@@ -102,7 +109,9 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
     private RestRequest.Method method;
     private ADTaskManager adTaskManager;
     private SearchFeatureDao searchFeatureDao;
+    private DataAccess dataAccess;
     private ClusterName clusterName;
+    private RunContext runContext;
 
     @BeforeClass
     public static void beforeClass() {
@@ -123,6 +132,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         settings = Settings.EMPTY;
 
         clusterService = mock(ClusterService.class);
+        when(clusterService.getSettings()).thenReturn(settings);
         ClusterName clusterName = new ClusterName("test");
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().build()).build();
         when(clusterService.state()).thenReturn(clusterState);
@@ -130,10 +140,13 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         clientMock = spy(new NodeClient(settings, threadPool));
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        useDataAccess(clientMock);
         transportService = mock(TransportService.class);
+        runContext = new SdkRunContext();
 
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
-        when(anomalyDetectionIndices.doesConfigIndexExist()).thenReturn(true);
+        adIndexManagement = mock(ADIndexManagement.class);
+        when(adIndexManagement.doesConfigIndexExist()).thenReturn(true);
+        anomalyDetectionIndices = new ADDelegatingDataManagement(adIndexManagement, null, clusterService);
 
         detectorId = "123";
         seqNo = 0L;
@@ -166,8 +179,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -185,7 +197,17 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
+        );
+    }
+
+    private void useDataAccess(NodeClient client) {
+        dataAccess = new DefaultDataAccess(
+            client,
+            clusterService,
+            clientUtil,
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
         );
     }
 
@@ -213,11 +235,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        useDataAccess(clientSpy);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -236,7 +258,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -295,11 +318,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         };
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        useDataAccess(client);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -317,7 +340,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -384,11 +408,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        useDataAccess(clientSpy);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -406,7 +430,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -484,14 +509,14 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        useDataAccess(clientSpy);
         ClusterName clusterName = new ClusterName("test");
         ClusterState clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -509,7 +534,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -611,11 +637,11 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        useDataAccess(clientSpy);
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -633,7 +659,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -706,8 +733,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -725,7 +751,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -793,8 +820,7 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -812,7 +838,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
@@ -879,7 +906,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
                         false,
                         Instant.now(),
                         detector.getFrequency(),
-                        null
+                        null,
+                        detector.getTenantId()
                     );
                     try {
                         listener.onResponse((Response) TestHelpers.createGetResponse(clone, clone.getId(), ADCommonName.CONFIG_INDEX));
@@ -892,13 +920,13 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.PUT;
 
         handler = new IndexAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -916,7 +944,8 @@ public class IndexAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTe
             null,
             adTaskManager,
             searchFeatureDao,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {

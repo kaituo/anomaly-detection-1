@@ -30,7 +30,7 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.tasks.Task;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.model.TaskState;
@@ -53,7 +53,7 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
     // action for realtime task.
     // =========================================================
     // NodeStateManager caches anomaly detector's backpressure counter for realtime detection.
-    private final NodeStateManager stateManager;
+    private final StateManager stateManager;
     // FeatureManager caches anomaly detector's feature data points for shingling of realtime detection.
     private final FeatureManager featureManager;
 
@@ -64,7 +64,7 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
         ADTaskManager adTaskManager,
         ADTaskCacheManager adTaskCacheManager,
         FeatureManager featureManager,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         ADIndexJobActionHandler indexJobHander
     ) {
         super(ForwardADTaskAction.NAME, transportService, actionFilters, ForwardADTaskRequest::new);
@@ -142,7 +142,8 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
                                         adTaskManager.hcDetectorProgress(detectorId),
                                         TimeSeriesTask.ERROR_FIELD,
                                         adTask.getError() != null ? adTask.getError() : ""
-                                    )
+                                    ),
+                                adTask.getTenantId()
                             );
                     }
                 } else {
@@ -250,7 +251,7 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
                     adTaskCacheManager.removeRealtimeTaskCache(detectorId);
                     // If hash ring changed like new node added when scale out, the realtime job coordinating node may
                     // change, then we should clean up cache on old coordinating node.
-                    stateManager.clear(detectorId);
+                    stateManager.clear(detector.getTenantId(), detectorId);
                 }
                 listener.onResponse(new JobResponse(detector.getId()));
                 break;

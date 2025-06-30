@@ -68,6 +68,7 @@ import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.action.support.clustermanager.AcknowledgedResponse;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.client.ADNodeCommunicator;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
@@ -111,6 +112,10 @@ import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.InternalFailure;
@@ -126,8 +131,10 @@ import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
+import org.opensearch.timeseries.transport.EntityResultRequest;
 import org.opensearch.timeseries.transport.ResultProcessor;
 import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportException;
@@ -154,6 +161,9 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
     private TransportService transportService;
     private Client client;
     private SecurityClientUtil clientUtil;
+    private DataAccess dataAccess;
+    private RunContext runContext;
+    private DiscoveryNodeSelector discoveryNodeSelector;
     private FeatureManager featureQuery;
     private ADModelManager normalModelManager;
     private HashRing hashRing;
@@ -182,6 +192,7 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
     private ADSaveResultStrategy resultSaver;
     private ADRealTimeInferencer inferencer;
     private Entity entity1, entity2, entity3;
+    private ADNodeCommunicator adNodeCommunicator;
 
     @BeforeClass
     public static void setUpBeforeClass() {
@@ -207,12 +218,13 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
         detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(detectorId, Collections.singletonList(categoryField));
 
         stateManager = mock(NodeStateManager.class);
+        when(stateManager.fetchExceptionAndClear(anyString())).thenReturn(Optional.empty());
         // make sure parameters are not null, otherwise this mock won't get invoked
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(stateManager).getConfig(anyString(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        }).when(stateManager).getConfig(anyString(), any(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         settings = Settings
             .builder()
@@ -223,7 +235,7 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
         // make sure end time is larger enough than Clock.systemUTC().millis() to get PageIterator.hasNext() to pass
         long endTime = Clock.systemUTC().millis() + 100_000;
         Instant historyEnd = Instant.ofEpochMilli(endTime);
-        request = new AnomalyResultRequest(detectorId, 100, endTime);
+        request = new AnomalyResultRequest(detectorId, 100, endTime, null);
 
         transportService = mock(TransportService.class);
 
@@ -234,6 +246,18 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
         when(client.threadPool()).thenReturn(mockThreadPool);
         when(mockThreadPool.getThreadContext()).thenReturn(threadContext);
         clientUtil = new SecurityClientUtil(stateManager, settings);
+        runContext = new ThreadRunContext(threadContext);
+        discoveryNodeSelector = mock(DiscoveryNodeSelector.class);
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(0);
+            listener.onResponse(false);
+            return null;
+        }).when(discoveryNodeSelector).hasGlobalBlock(any());
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(2);
+            listener.onResponse(false);
+            return null;
+        }).when(discoveryNodeSelector).hasIndicesBlock(any(), any(String[].class), any());
 
         featureQuery = mock(FeatureManager.class);
 
@@ -252,7 +276,8 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             mock(FeatureManager.class),
             mock(MemoryTracker.class),
             settings,
-            clusterService
+            clusterService,
+            stateManager
         );
 
         hashRing = mock(HashRing.class);
@@ -275,6 +300,8 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
         clusterService = ClusterServiceUtils.createClusterService(threadPool, discoveryNode, clusterSettings);
 
         indexNameResolver = new IndexNameExpressionResolver(new ThreadContext(Settings.EMPTY));
+        dataAccess = new DefaultDataAccess(client, clusterService, clientUtil, indexNameResolver);
+        adNodeCommunicator = mock(ADNodeCommunicator.class);
 
         adCircuitBreakerService = mock(CircuitBreakerService.class);
         when(adCircuitBreakerService.isOpen()).thenReturn(false);
@@ -308,18 +335,19 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             new ActionFilters(Collections.emptySet()),
             transportService,
             settings,
-            client,
-            clientUtil,
+            dataAccess,
             stateManager,
             featureQuery,
             hashRing,
             clusterService,
-            indexNameResolver,
             adCircuitBreakerService,
             adStats,
             mockThreadPool,
             xContentRegistry(),
-            adTaskManager
+            adTaskManager,
+            discoveryNodeSelector,
+            runContext,
+            adNodeCommunicator
         );
 
         provider = mock(ADCacheProvider.class);
@@ -461,7 +489,6 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             adCircuitBreakerService,
             provider,
             nodeStateManager,
-            indexUtil,
             checkpointReadQueue,
             coldEntityQueue,
             threadPool,
@@ -497,7 +524,8 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             clusterService,
             TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            TimeSeriesSettings.BACKOFF_MINUTES
+            TimeSeriesSettings.BACKOFF_MINUTES,
+            mock(org.opensearch.timeseries.rest.handler.EventBridgeHandler.class)
         );
 
         clientUtil = new SecurityClientUtil(stateManager, settings);
@@ -506,18 +534,19 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             new ActionFilters(Collections.emptySet()),
             transportService,
             settings,
-            client,
-            clientUtil,
+            dataAccess,
             stateManager,
             featureQuery,
             hashRing,
             clusterService,
-            indexNameResolver,
             adCircuitBreakerService,
             adStats,
             mockThreadPool,
             xContentRegistry(),
-            adTaskManager
+            adTaskManager,
+            discoveryNodeSelector,
+            runContext,
+            adNodeCommunicator
         );
     }
 
@@ -729,6 +758,16 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
         // we start support multi-category fields since 1.1
         // Set version to 1.1 will force the outbound/inbound message to use 1.1 version
         setupTestNodes(entityResultInterceptor, 5, settings, Version.V_2_0_0, AD_MAX_ENTITIES_PER_QUERY, AD_PAGE_SIZE);
+        doAnswer(invocation -> {
+            DiscoveryNode node = invocation.getArgument(0);
+            EntityResultRequest entityResultRequest = invocation.getArgument(1);
+            TransportRequestOptions options = invocation.getArgument(2);
+            @SuppressWarnings("unchecked")
+            TransportResponseHandler<AcknowledgedResponse> responseHandler = invocation.getArgument(3);
+            TransportService transportService = invocation.getArgument(4);
+            transportService.sendRequest(node, EntityADResultAction.NAME, entityResultRequest, options, responseHandler);
+            return null;
+        }).when(adNodeCommunicator).entityResult(any(), any(), any(), any(), any());
 
         TransportService realTransportService = testNodes[0].transportService;
         ClusterService realClusterService = testNodes[0].clusterService;
@@ -737,18 +776,19 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             new ActionFilters(Collections.emptySet()),
             realTransportService,
             settings,
-            client,
-            clientUtil,
+            dataAccess,
             nodeStateManager,
             featureQuery,
             hashRing,
             realClusterService,
-            indexNameResolver,
             adCircuitBreakerService,
             adStats,
             threadPool,
             xContentRegistry(),
-            adTaskManager
+            adTaskManager,
+            discoveryNodeSelector,
+            runContext,
+            adNodeCommunicator
         );
     }
 
@@ -805,7 +845,8 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             clusterService,
             TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            TimeSeriesSettings.BACKOFF_MINUTES
+            TimeSeriesSettings.BACKOFF_MINUTES,
+            mock(org.opensearch.timeseries.rest.handler.EventBridgeHandler.class)
         );
 
         NodeStateManager spyStateManager = spy(stateManager);
@@ -827,7 +868,6 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             openBreaker,
             provider,
             spyStateManager,
-            indexUtil,
             checkpointReadQueue,
             coldEntityQueue,
             threadPool,
@@ -1004,7 +1044,6 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             adCircuitBreakerService,
             provider,
             stateManager,
-            indexUtil,
             checkpointReadQueue,
             coldEntityQueue,
             threadPool,
@@ -1195,15 +1234,12 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             10,
             detector,
             xContentRegistry(),
-            client,
-            clientUtil,
+            dataAccess,
             100,
             clock,
             settings,
             10000,
             1000,
-            indexNameResolver,
-            clusterService,
             AnalysisType.AD
         );
         Map<Entity, double[]> results = new HashMap<>();
@@ -1223,15 +1259,12 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
             10,
             detector,
             xContentRegistry(),
-            client,
-            clientUtil,
+            dataAccess,
             100,
             clock,
             settings,
             10000,
             1000,
-            indexNameResolver,
-            clusterService,
             AnalysisType.AD
         );
 
@@ -1253,11 +1286,11 @@ public class MultiEntityResultTests extends AbstractTimeSeriesTest {
         CountDownLatch modelNodeInProgress = new CountDownLatch(1);
         // make sure parameters are not null, otherwise this mock won't get invoked
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(detector));
             modelNodeInProgress.countDown();
             return null;
-        }).when(modelNodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        }).when(modelNodeStateManager).getConfig(anyString(), any(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
         return modelNodeStateManager;
     }
 

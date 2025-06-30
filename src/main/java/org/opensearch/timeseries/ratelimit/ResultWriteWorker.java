@@ -30,18 +30,18 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.transport.ResultBulkRequest;
 import org.opensearch.timeseries.transport.ResultBulkResponse;
 import org.opensearch.timeseries.transport.handler.IndexMemoryPressureAwareResultHandler;
 import org.opensearch.timeseries.util.ExceptionUtil;
 
-public abstract class ResultWriteWorker<ResultType extends IndexableResult, ResultWriteRequestType extends ResultWriteRequest<ResultType>, BatchRequestType extends ResultBulkRequest<ResultType, ResultWriteRequestType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, ResultHandlerType extends IndexMemoryPressureAwareResultHandler<ResultType, ResultWriteRequestType, BatchRequestType, ResultBulkResponse, IndexType, IndexManagementType>>
+public abstract class ResultWriteWorker<ResultType extends IndexableResult, ResultWriteRequestType extends ResultWriteRequest<ResultType>, BatchRequestType extends ResultBulkRequest<ResultType, ResultWriteRequestType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, ResultHandlerType extends IndexMemoryPressureAwareResultHandler<ResultType, ResultWriteRequestType, BatchRequestType, ResultBulkResponse, IndexType, DataManagementType>>
     extends BatchWorker<ResultWriteRequestType, BatchRequestType, ResultBulkResponse> {
     private static final Logger LOG = LogManager.getLogger(ResultWriteWorker.class);
     protected final ResultHandlerType resultHandler;
@@ -68,7 +68,7 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
         Duration executionTtl,
         Setting<Integer> batchSizeSetting,
         Duration stateTtl,
-        NodeStateManager timeSeriesNodeStateManager,
+        StateManager timeSeriesNodeStateManager,
         ResultHandlerType resultHandler,
         NamedXContentRegistry xContentRegistry,
         CheckedFunction<XContentParser, ? extends ResultType, IOException> resultParser,
@@ -108,7 +108,7 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
             listener.onResponse(null);
             return;
         }
-        resultHandler.flush(request, listener);
+        resultHandler.flush(request, request.getTenantId(), listener);
     }
 
     @Override
@@ -150,7 +150,7 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
         ResultType result = resultToRetry.get();
         String id = result.getConfigId();
         // not sure if we should cache or not. Don't cache to be safe.
-        nodeStateManager.getConfig(id, context, false, onGetConfig(requestToRetry, index, id, result));
+        nodeStateManager.getConfig(id, result.getTenantId(), context, false, onGetConfig(requestToRetry, index, id, result));
     }
 
     protected Optional<ResultType> getResult(DocWriteRequest<?> request) {

@@ -46,6 +46,7 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
     private String order;
     private Instant startTime;
     private Instant endTime;
+    private String tenantId;
 
     public SearchTopAnomalyResultRequest(StreamInput in) throws IOException {
         super(in);
@@ -57,6 +58,7 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
         order = in.readOptionalString();
         startTime = in.readInstant();
         endTime = in.readInstant();
+        tenantId = in.readOptionalString();
     }
 
     public SearchTopAnomalyResultRequest(
@@ -67,7 +69,8 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
         List<String> categoryFields,
         String order,
         Instant startTime,
-        Instant endTime
+        Instant endTime,
+        String tenantId
     ) {
         super();
         this.detectorId = detectorId;
@@ -78,6 +81,7 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
         this.order = order;
         this.startTime = startTime;
         this.endTime = endTime;
+        this.tenantId = tenantId;
     }
 
     public String getId() {
@@ -112,6 +116,10 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
         return endTime;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     public void setTaskId(String taskId) {
         this.taskId = taskId;
     }
@@ -129,7 +137,8 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
     }
 
     @SuppressWarnings("unchecked")
-    public static SearchTopAnomalyResultRequest parse(XContentParser parser, String detectorId, boolean historical) throws IOException {
+    public static SearchTopAnomalyResultRequest parse(XContentParser parser, String detectorId, boolean historical, String tenantId)
+        throws IOException {
         String taskId = null;
         Integer size = null;
         List<Object> categoryFields = null;
@@ -170,7 +179,17 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
 
         // Cast category field Object list to String list
         List<String> convertedCategoryFields = (List<String>) (List<?>) (categoryFields);
-        return new SearchTopAnomalyResultRequest(detectorId, taskId, historical, size, convertedCategoryFields, order, startTime, endTime);
+        return new SearchTopAnomalyResultRequest(
+            detectorId,
+            taskId,
+            historical,
+            size,
+            convertedCategoryFields,
+            order,
+            startTime,
+            endTime,
+            tenantId
+        );
     }
 
     @Override
@@ -184,6 +203,7 @@ public class SearchTopAnomalyResultRequest extends ActionRequest {
         out.writeOptionalString(order);
         out.writeInstant(startTime);
         out.writeInstant(endTime);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

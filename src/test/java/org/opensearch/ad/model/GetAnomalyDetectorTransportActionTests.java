@@ -10,6 +10,8 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -27,6 +29,7 @@ import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.opensearch.action.support.ActionFilters;
+import org.opensearch.ad.client.ADNodeCommunicator;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
@@ -37,6 +40,9 @@ import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.transport.GetConfigRequest;
 import org.opensearch.transport.TransportService;
 
@@ -55,9 +61,22 @@ public class GetAnomalyDetectorTransportActionTests extends AbstractTimeSeriesTe
         ADTaskManager taskManager = mock(ADTaskManager.class);
         doAnswer(invocation -> {
             List<ADTask> taskList = new ArrayList<>(tasks.values());
-            ((Consumer<List<ADTask>>) invocation.getArguments()[4]).accept(taskList);
+            ((Consumer<List<ADTask>>) invocation.getArguments()[5]).accept(taskList);
             return null;
-        }).when(taskManager).getAndExecuteOnLatestTasks(anyString(), any(), any(), any(), any(), any(), anyBoolean(), anyInt(), any());
+        })
+            .when(taskManager)
+            .getAndExecuteOnLatestTasks(
+                anyString(),
+                any(),
+                any(),
+                nullable(String.class),
+                any(),
+                any(),
+                any(),
+                anyBoolean(),
+                anyInt(),
+                any()
+            );
 
         // Mock listener
         ActionListener<GetAnomalyDetectorResponse> listener = mock(ActionListener.class);
@@ -68,30 +87,35 @@ public class GetAnomalyDetectorTransportActionTests extends AbstractTimeSeriesTe
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(settings);
+        RunContext runContext = new SdkRunContext();
         GetAnomalyDetectorTransportAction getForecaster = spy(
             new GetAnomalyDetectorTransportAction(
                 mock(TransportService.class),
                 null,
                 mock(ActionFilters.class),
                 clusterService,
+                mock(DataAccess.class),
                 null,
-                null,
+                mock(ADNodeCommunicator.class),
                 Settings.EMPTY,
                 null,
                 taskManager,
-                null
+                null,
+                null,
+                runContext
             )
         );
 
         // Act
-        GetConfigRequest request = new GetConfigRequest(configID, ADIndex.CONFIG.getIndexName(), 0L, true, true, "", "", true, null);
+        GetConfigRequest request = new GetConfigRequest(configID, ADIndex.CONFIG.getIndexName(), 0L, true, true, "", "", true, null, null);
         getForecaster.getExecute(request, listener);
 
         // Assert
         // Verify that realtimeTask is assigned using singleStreamRealTimeTaskName
         // This can be checked by verifying interactions or internal state
         // For this example, we'll verify that the correct task is passed to getConfigAndJob
-        verify(getForecaster).getConfigAndJob(eq(configID), anyBoolean(), anyBoolean(), any(), eq(Optional.of(adTask)), eq(listener));
+        verify(getForecaster)
+            .getConfigAndJob(eq(configID), anyBoolean(), anyBoolean(), any(), eq(Optional.of(adTask)), isNull(), eq(listener));
     }
 
     @SuppressWarnings("unchecked")
@@ -109,9 +133,22 @@ public class GetAnomalyDetectorTransportActionTests extends AbstractTimeSeriesTe
         ADTaskManager taskManager = mock(ADTaskManager.class);
         doAnswer(invocation -> {
             List<ADTask> taskList = new ArrayList<>(tasks.values());
-            ((Consumer<List<ADTask>>) invocation.getArguments()[4]).accept(taskList);
+            ((Consumer<List<ADTask>>) invocation.getArguments()[5]).accept(taskList);
             return null;
-        }).when(taskManager).getAndExecuteOnLatestTasks(anyString(), any(), any(), any(), any(), any(), anyBoolean(), anyInt(), any());
+        })
+            .when(taskManager)
+            .getAndExecuteOnLatestTasks(
+                anyString(),
+                any(),
+                any(),
+                nullable(String.class),
+                any(),
+                any(),
+                any(),
+                anyBoolean(),
+                anyInt(),
+                any()
+            );
 
         // Mock listener
         ActionListener<GetAnomalyDetectorResponse> listener = mock(ActionListener.class);
@@ -122,29 +159,34 @@ public class GetAnomalyDetectorTransportActionTests extends AbstractTimeSeriesTe
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(settings);
+        RunContext runContext = new SdkRunContext();
         GetAnomalyDetectorTransportAction getForecaster = spy(
             new GetAnomalyDetectorTransportAction(
                 mock(TransportService.class),
                 null,
                 mock(ActionFilters.class),
                 clusterService,
+                mock(DataAccess.class),
                 null,
-                null,
+                mock(ADNodeCommunicator.class),
                 Settings.EMPTY,
                 null,
                 taskManager,
-                null
+                null,
+                null,
+                runContext
             )
         );
 
         // Act
-        GetConfigRequest request = new GetConfigRequest(configID, ADIndex.CONFIG.getIndexName(), 0L, true, true, "", "", true, null);
+        GetConfigRequest request = new GetConfigRequest(configID, ADIndex.CONFIG.getIndexName(), 0L, true, true, "", "", true, null, null);
         getForecaster.getExecute(request, listener);
 
         // Assert
         // Verify that realtimeTask is assigned using singleStreamRealTimeTaskName
         // This can be checked by verifying interactions or internal state
         // For this example, we'll verify that the correct task is passed to getConfigAndJob
-        verify(getForecaster).getConfigAndJob(eq(configID), anyBoolean(), anyBoolean(), any(), eq(Optional.empty()), eq(listener));
+        verify(getForecaster)
+            .getConfigAndJob(eq(configID), anyBoolean(), anyBoolean(), any(), eq(Optional.empty()), isNull(), eq(listener));
     }
 }

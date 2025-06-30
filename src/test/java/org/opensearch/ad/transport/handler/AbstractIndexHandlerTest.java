@@ -27,7 +27,7 @@ import org.mockito.MockitoAnnotations;
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.transport.AnomalyResultTests;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -42,7 +42,9 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.timeseries.util.IndexUtils;
 import org.opensearch.transport.client.Client;
 
@@ -64,13 +66,19 @@ public abstract class AbstractIndexHandlerTest extends AbstractTimeSeriesTest {
     protected Client client;
 
     @Mock
-    protected ADIndexManagement anomalyDetectionIndices;
+    protected ADDelegatingDataManagement anomalyDetectionIndices;
 
     @Mock
     protected ClusterService clusterService;
 
     @Mock
     protected IndexNameExpressionResolver indexNameResolver;
+
+    @Mock
+    protected DiscoveryNodeSelector discoveryNodeSelector;
+
+    @Mock
+    protected DataAccess dataAccess;
 
     @BeforeClass
     public static void setUpBeforeClass() {
@@ -95,7 +103,17 @@ public abstract class AbstractIndexHandlerTest extends AbstractTimeSeriesTest {
         setWriteBlockAdResultIndex(false);
         context = TestHelpers.createThreadPool();
         clientUtil = new ClientUtil(client);
-        indexUtil = new IndexUtils(clusterService, indexNameResolver);
+        indexUtil = new IndexUtils(clusterService);
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(2);
+            listener.onResponse(false);
+            return null;
+        }).when(discoveryNodeSelector).hasIndicesBlock(any(), any(), any());
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(0);
+            listener.onResponse(false);
+            return null;
+        }).when(discoveryNodeSelector).hasGlobalBlock(any());
     }
 
     protected void setWriteBlockAdResultIndex(boolean blocked) {
@@ -106,12 +124,22 @@ public abstract class AbstractIndexHandlerTest extends AbstractTimeSeriesTest {
         ClusterState blockedClusterState = createIndexBlockedState(indexName, settings, ADCommonName.ANOMALY_RESULT_INDEX_ALIAS);
         when(clusterService.state()).thenReturn(blockedClusterState);
         when(indexNameResolver.concreteIndexNames(any(), any(), any(String.class))).thenReturn(new String[] { indexName });
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(2);
+            listener.onResponse(blocked);
+            return null;
+        }).when(discoveryNodeSelector).hasIndicesBlock(any(), any(), any());
     }
 
     protected void setGlobalWriteBlocked() {
         ClusterBlocks.Builder builder = ClusterBlocks.builder().addGlobalBlock(NoClusterManagerBlockService.NO_CLUSTER_MANAGER_BLOCK_ALL);
         ClusterState blockedClusterState = ClusterState.builder(new ClusterName("test cluster")).blocks(builder).build();
         when(clusterService.state()).thenReturn(blockedClusterState);
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(0);
+            listener.onResponse(true);
+            return null;
+        }).when(discoveryNodeSelector).hasGlobalBlock(any());
     }
 
     protected void setUpSavingAnomalyResultIndex(boolean anomalyResultIndexExists, IndexCreation creationResult) throws IOException {

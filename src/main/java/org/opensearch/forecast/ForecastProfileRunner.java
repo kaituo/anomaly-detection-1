@@ -6,42 +6,40 @@
 package org.opensearch.forecast;
 
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskProfile;
 import org.opensearch.forecast.model.ForecastTaskType;
-import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.model.ForecasterProfile;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.settings.ForecastNumericSetting;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.forecast.transport.ForecastProfileAction;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ProfileRunner;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.task.TaskCacheManager;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ForecastProfileRunner extends
-    ProfileRunner<TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastIndexManagement, ForecastTaskProfile, ForecastTaskManager, ForecasterProfile, ForecastProfileAction, ForecastTaskProfileRunner> {
+    ProfileRunner<TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastDelegatingDataManagement, ForecastTaskProfile, ForecastTaskManager, ForecasterProfile, ForecastProfileAction, ForecastTaskProfileRunner> {
 
     public ForecastProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
+        NodeCommunicator nodeCommunicator,
         NamedXContentRegistry xContentRegistry,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         long requiredSamples,
         TransportService transportService,
         ForecastTaskManager forecastTaskManager,
-        ForecastTaskProfileRunner taskProfileRunner
+        ForecastTaskProfileRunner taskProfileRunner,
+        DataAccess dataAccess
     ) {
         super(
-            client,
-            clientUtil,
+            nodeCommunicator,
+            dataAccess,
             xContentRegistry,
             nodeFilter,
             requiredSamples,
@@ -53,9 +51,7 @@ public class ForecastProfileRunner extends
             ForecastNumericSetting.maxCategoricalFields(),
             ProfileName.FORECAST_TASK,
             ForecastProfileAction.INSTANCE,
-            Forecaster::parse,
-            taskProfileRunner,
-            ForecastCommonName.CONFIG_INDEX
+            taskProfileRunner
         );
     }
 

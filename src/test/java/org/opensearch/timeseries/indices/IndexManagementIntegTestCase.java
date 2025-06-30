@@ -58,7 +58,7 @@ public abstract class IndexManagementIntegTestCase<IndexType extends Enum<IndexT
             return null;
         }).when(function).execute();
         latch.await(20, TimeUnit.SECONDS);
-        indices.validateCustomIndexForBackendJob(resultIndex, securityLogId, user, roles, function, listener);
+        indices.validateCustomIndexForBackendJob(resultIndex, securityLogId, user, roles, function, listener, null);
         verify(listener, never()).onFailure(any(Exception.class));
     }
 
@@ -80,7 +80,7 @@ public abstract class IndexManagementIntegTestCase<IndexType extends Enum<IndexT
         ExecutorFunction function = mock(ExecutorFunction.class);
         ActionListener<Void> listener = mock(ActionListener.class);
 
-        indices.validateCustomIndexForBackendJob(resultIndex, securityLogId, user, roles, function, listener);
+        indices.validateCustomIndexForBackendJob(resultIndex, securityLogId, user, roles, function, listener, null);
 
         ArgumentCaptor<EndRunException> exceptionCaptor = ArgumentCaptor.forClass(EndRunException.class);
         verify(listener).onFailure(exceptionCaptor.capture());
@@ -96,7 +96,7 @@ public abstract class IndexManagementIntegTestCase<IndexType extends Enum<IndexT
         ExecutorFunction function = mock(ExecutorFunction.class);
         ActionListener<Void> listener = mock(ActionListener.class);
 
-        indices.validateCustomIndexForBackendJob(resultIndex, securityLogId, user, roles, function, listener);
+        indices.validateCustomIndexForBackendJob(resultIndex, securityLogId, user, roles, function, listener, null);
         // function.execute should be executed after indices are created
         doAnswer(invocation -> {
             countDown.countDown();

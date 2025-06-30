@@ -38,6 +38,7 @@ public class EntityResultRequest extends ActionRequest implements ToXContentObje
     protected long end;
     protected AnalysisType analysisType;
     protected String taskId;
+    protected String tenantId;
 
     public EntityResultRequest(StreamInput in) throws IOException {
         super(in);
@@ -50,10 +51,14 @@ public class EntityResultRequest extends ActionRequest implements ToXContentObje
         this.start = in.readLong();
         this.end = in.readLong();
 
-        // newly added
         if (in.available() > 0) {
             analysisType = in.readEnum(AnalysisType.class);
+        }
+        if (in.available() > 0) {
             taskId = in.readOptionalString();
+        }
+        if (in.available() > 0) {
+            tenantId = in.readOptionalString();
         }
     }
 
@@ -63,7 +68,8 @@ public class EntityResultRequest extends ActionRequest implements ToXContentObje
         long start,
         long end,
         AnalysisType analysisType,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
         super();
         this.configId = configId;
@@ -72,6 +78,7 @@ public class EntityResultRequest extends ActionRequest implements ToXContentObje
         this.end = end;
         this.analysisType = analysisType;
         this.taskId = taskId;
+        this.tenantId = tenantId;
     }
 
     public String getConfigId() {
@@ -98,6 +105,10 @@ public class EntityResultRequest extends ActionRequest implements ToXContentObje
         return taskId;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
@@ -110,6 +121,7 @@ public class EntityResultRequest extends ActionRequest implements ToXContentObje
         out.writeLong(this.end);
         out.writeEnum(analysisType);
         out.writeOptionalString(taskId);
+        out.writeOptionalString(tenantId);
     }
 
     @Override
@@ -145,6 +157,9 @@ public class EntityResultRequest extends ActionRequest implements ToXContentObje
         builder.endArray();
         builder.field(CommonName.ANALYSIS_TYPE_FIELD, analysisType);
         builder.field(CommonName.TASK_ID_FIELD, taskId);
+        if (tenantId != null) {
+            builder.field(CommonName.TENANT_ID_FIELD, tenantId);
+        }
         builder.endObject();
         return builder;
     }

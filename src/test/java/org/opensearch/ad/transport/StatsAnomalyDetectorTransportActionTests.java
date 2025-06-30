@@ -49,7 +49,7 @@ public class StatsAnomalyDetectorTransportActionTests extends ADIntegTestCase {
     }
 
     public void testStatsAnomalyDetectorWithNodeLevelStats() {
-        StatsRequest adStatsRequest = new StatsRequest(clusterService().localNode());
+        StatsRequest adStatsRequest = new StatsRequest(null, clusterService().localNode());
         adStatsRequest.addStat(InternalStatNames.JVM_HEAP_USAGE.getName());
         StatsTimeSeriesResponse response = client().execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest).actionGet(5_000);
         assertEquals(1, response.getAdStatsResponse().getStatsNodesResponse().getNodes().size());
@@ -65,7 +65,7 @@ public class StatsAnomalyDetectorTransportActionTests extends ADIntegTestCase {
     }
 
     public void testStatsAnomalyDetectorWithClusterLevelStats() {
-        StatsRequest adStatsRequest = new StatsRequest(clusterService().localNode());
+        StatsRequest adStatsRequest = new StatsRequest(null, clusterService().localNode());
         adStatsRequest.addStat(StatNames.DETECTOR_COUNT.getName());
         adStatsRequest.addStat(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName());
         StatsTimeSeriesResponse response = client().execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest).actionGet(5_000);
@@ -78,7 +78,7 @@ public class StatsAnomalyDetectorTransportActionTests extends ADIntegTestCase {
     }
 
     public void testStatsAnomalyDetectorWithDetectorCount() {
-        StatsRequest adStatsRequest = new StatsRequest(clusterService().localNode());
+        StatsRequest adStatsRequest = new StatsRequest(null, clusterService().localNode());
         adStatsRequest.addStat(StatNames.DETECTOR_COUNT.getName());
         StatsTimeSeriesResponse response = client().execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest).actionGet(5_000);
         assertEquals(1, response.getAdStatsResponse().getStatsNodesResponse().getNodes().size());
@@ -90,7 +90,7 @@ public class StatsAnomalyDetectorTransportActionTests extends ADIntegTestCase {
     }
 
     public void testStatsAnomalyDetectorWithSingleEntityDetectorCount() {
-        StatsRequest adStatsRequest = new StatsRequest(clusterService().localNode());
+        StatsRequest adStatsRequest = new StatsRequest(null, clusterService().localNode());
         adStatsRequest.addStat(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName());
         StatsTimeSeriesResponse response = client().execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest).actionGet(5_000);
         assertEquals(1, response.getAdStatsResponse().getStatsNodesResponse().getNodes().size());

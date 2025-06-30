@@ -40,6 +40,7 @@ public class IndexAnomalyDetectorRequest extends ActionRequest implements DocReq
     // added during refactoring for forecasting. It is fine we add a new field
     // since the request is handled by the same node.
     private Integer maxCategoricalFields;
+    private String tenantId;
 
     public IndexAnomalyDetectorRequest(StreamInput in) throws IOException {
         super(in);
@@ -54,6 +55,8 @@ public class IndexAnomalyDetectorRequest extends ActionRequest implements DocReq
         maxMultiEntityAnomalyDetectors = in.readInt();
         maxAnomalyFeatures = in.readInt();
         maxCategoricalFields = in.readInt();
+        // best practice to add new fields at the end of the constructor for backward compatibility
+        tenantId = in.readOptionalString();
     }
 
     public IndexAnomalyDetectorRequest(
@@ -67,7 +70,8 @@ public class IndexAnomalyDetectorRequest extends ActionRequest implements DocReq
         Integer maxSingleEntityAnomalyDetectors,
         Integer maxMultiEntityAnomalyDetectors,
         Integer maxAnomalyFeatures,
-        Integer maxCategoricalFields
+        Integer maxCategoricalFields,
+        String tenantId
     ) {
         super();
         this.detectorID = detectorID;
@@ -81,6 +85,7 @@ public class IndexAnomalyDetectorRequest extends ActionRequest implements DocReq
         this.maxMultiEntityAnomalyDetectors = maxMultiEntityAnomalyDetectors;
         this.maxAnomalyFeatures = maxAnomalyFeatures;
         this.maxCategoricalFields = maxCategoricalFields;
+        this.tenantId = tenantId;
     }
 
     public String getDetectorID() {
@@ -127,6 +132,10 @@ public class IndexAnomalyDetectorRequest extends ActionRequest implements DocReq
         return maxCategoricalFields;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
@@ -141,6 +150,7 @@ public class IndexAnomalyDetectorRequest extends ActionRequest implements DocReq
         out.writeInt(maxMultiEntityAnomalyDetectors);
         out.writeInt(maxAnomalyFeatures);
         out.writeInt(maxCategoricalFields);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

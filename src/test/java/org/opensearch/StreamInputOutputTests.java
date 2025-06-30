@@ -99,7 +99,7 @@ public class StreamInputOutputTests extends AbstractTimeSeriesTest {
         entities.put(entity, feature);
         start = 10L;
         end = 20L;
-        entityResultRequest = new EntityResultRequest(detectorId, entities, start, end, AnalysisType.AD, null);
+        entityResultRequest = new EntityResultRequest(detectorId, entities, start, end, AnalysisType.AD, null, null);
     }
 
     /**
@@ -121,7 +121,7 @@ public class StreamInputOutputTests extends AbstractTimeSeriesTest {
     private void setUpEntityProfileRequest() {
         profilesToCollect = new HashSet<EntityProfileName>();
         profilesToCollect.add(EntityProfileName.STATE);
-        entityProfileRequest = new EntityProfileRequest(detectorId, entity, profilesToCollect);
+        entityProfileRequest = new EntityProfileRequest(detectorId, entity, profilesToCollect, null);
     }
 
     /**

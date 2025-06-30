@@ -22,12 +22,11 @@ import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.action.get.GetRequest;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskProfile;
 import org.opensearch.ad.model.ADTaskType;
-import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.DetectorProfile;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.ADNumericSetting;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
@@ -42,6 +41,8 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ProfileRunner;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.common.exception.NotSerializedExceptionName;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.constant.CommonMessages;
@@ -53,7 +54,6 @@ import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
@@ -64,23 +64,25 @@ import org.opensearch.transport.client.Client;
  *
  */
 public class OldAnomalyDetectorProfileRunner extends
-    ProfileRunner<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement, ADTaskProfile, ADTaskManager, DetectorProfile, ADProfileAction, ADTaskProfileRunner> {
+    ProfileRunner<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADDelegatingDataManagement, ADTaskProfile, ADTaskManager, DetectorProfile, ADProfileAction, ADTaskProfileRunner> {
 
     private final Logger logger = LogManager.getLogger(AnomalyDetectorProfileRunner.class);
+    private final Client client;
 
     public OldAnomalyDetectorProfileRunner(
         Client client,
-        SecurityClientUtil clientUtil,
+        NodeCommunicator nodeCommunicator,
         NamedXContentRegistry xContentRegistry,
         DiscoveryNodeFilterer nodeFilter,
         long requiredSamples,
         TransportService transportService,
         ADTaskManager adTaskManager,
-        ADTaskProfileRunner taskProfileRunner
+        ADTaskProfileRunner taskProfileRunner,
+        DataAccess dataAccess
     ) {
         super(
-            client,
-            clientUtil,
+            nodeCommunicator,
+            dataAccess,
             xContentRegistry,
             nodeFilter,
             requiredSamples,
@@ -92,10 +94,9 @@ public class OldAnomalyDetectorProfileRunner extends
             ADNumericSetting.maxCategoricalFields(),
             ProfileName.AD_TASK,
             ADProfileAction.INSTANCE,
-            AnomalyDetector::parse,
-            taskProfileRunner,
-            ADCommonName.CONFIG_INDEX
+            taskProfileRunner
         );
+        this.client = client;
     }
 
     @Override
@@ -150,7 +151,7 @@ public class OldAnomalyDetectorProfileRunner extends
                                 false
                             );
                         if (profilesToCollect.contains(ProfileName.ERROR)) {
-                            taskManager.getAndExecuteOnLatestConfigLevelTask(configId, realTimeTaskTypes, task -> {
+                            taskManager.getAndExecuteOnLatestConfigLevelTask(configId, config.getTenantId(), realTimeTaskTypes, task -> {
                                 DetectorProfile.Builder profileBuilder = createProfileBuilder();
                                 if (task.isPresent()) {
                                     long lastUpdateTimeMs = task.get().getLastUpdateTime().toEpochMilli();
@@ -182,7 +183,7 @@ public class OldAnomalyDetectorProfileRunner extends
                             profileModels(config, profilesToCollect, job, delegateListener);
                         }
                         if (profilesToCollect.contains(ProfileName.AD_TASK)) {
-                            getLatestHistoricalTaskProfile(configId, transportService, null, delegateListener);
+                            getLatestHistoricalTaskProfile(configId, config.getTenantId(), transportService, null, delegateListener);
                         }
 
                     } catch (Exception e) {
@@ -190,12 +191,12 @@ public class OldAnomalyDetectorProfileRunner extends
                         listener.onFailure(e);
                     }
                 } else {
-                    onGetDetectorForPrepare(configId, listener, profilesToCollect);
+                    onGetDetectorForPrepare(configId, config.getTenantId(), listener, profilesToCollect);
                 }
             }, exception -> {
                 if (ExceptionUtil.isIndexNotAvailable(exception)) {
                     logger.info(exception.getMessage());
-                    onGetDetectorForPrepare(configId, listener, profilesToCollect);
+                    onGetDetectorForPrepare(configId, config.getTenantId(), listener, profilesToCollect);
                 } else {
                     logger.error(CommonMessages.FAIL_TO_GET_PROFILE_MSG + configId);
                     listener.onFailure(exception);

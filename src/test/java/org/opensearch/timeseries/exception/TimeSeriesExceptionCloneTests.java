@@ -5,6 +5,7 @@
 package org.opensearch.timeseries.exception;
 
 import org.opensearch.test.OpenSearchTestCase;
+import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 
 /** Exercises every reflection branch in TimeSeriesException#cloneWithMsgPrefix. */
@@ -88,5 +89,16 @@ public class TimeSeriesExceptionCloneTests extends OpenSearchTestCase {
 
         assertEquals("Suppressed count mismatch", 1, clone.getSuppressed().length);
         assertSame("Suppressed throwable not copied", suppressed, clone.getSuppressed()[0]);
+    }
+
+    public void testEndRunExceptionClonePreservesEndNow() {
+        EndRunException src = new EndRunException("cfg-1", "orig", new IllegalArgumentException("boom"), true);
+
+        TimeSeriesException clone = src.cloneWithMsgPrefix("P:");
+
+        assertTrue(clone instanceof EndRunException);
+        assertTrue(((EndRunException) clone).isEndNow());
+        assertEquals("P:orig", clone.getMessage());
+        assertEquals("cfg-1", clone.getConfigId());
     }
 }
