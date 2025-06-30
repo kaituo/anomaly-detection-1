@@ -28,6 +28,8 @@ import org.opensearch.rest.BaseRestHandler;
  * This class consists of the base class for validating and indexing forecast REST handlers.
  */
 public abstract class AbstractForecasterAction extends BaseRestHandler {
+    protected final Settings settings;
+    protected final ClusterService clusterService;
     /**
      * Timeout duration for the forecast request.
      */
@@ -70,6 +72,8 @@ public abstract class AbstractForecasterAction extends BaseRestHandler {
      * @param clusterService Cluster service.
      */
     public AbstractForecasterAction(Settings settings, ClusterService clusterService) {
+        this.settings = settings;
+        this.clusterService = clusterService;
         this.requestTimeout = FORECAST_REQUEST_TIMEOUT.get(settings);
         this.forecastInterval = FORECAST_INTERVAL.get(settings);
         this.forecastWindowDelay = FORECAST_WINDOW_DELAY.get(settings);

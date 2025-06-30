@@ -17,7 +17,7 @@ import org.opensearch.action.ActionType;
 import org.opensearch.ad.constant.ADCommonValue;
 
 public class ADCancelTaskAction extends ActionType<ADCancelTaskResponse> {
-
+    // only used in historical analysis
     public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "detectors/" + CANCEL_TASK;
     public static final ADCancelTaskAction INSTANCE = new ADCancelTaskAction();
 

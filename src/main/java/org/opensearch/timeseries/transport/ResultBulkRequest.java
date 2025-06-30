@@ -30,13 +30,23 @@ public class ResultBulkRequest<ResultType extends IndexableResult, ResultWriteRe
     implements
         Writeable {
     private final List<ResultWriteRequestType> results;
+    private String tenantId;
+    private String dataSourceId;
 
-    public ResultBulkRequest() {
+    public ResultBulkRequest(String tenantId) {
+        this(tenantId, null);
+    }
+
+    public ResultBulkRequest(String tenantId, String dataSourceId) {
         results = new ArrayList<>();
+        this.tenantId = tenantId;
+        this.dataSourceId = dataSourceId;
     }
 
     public ResultBulkRequest(StreamInput in, Writeable.Reader<ResultWriteRequestType> reader) throws IOException {
         super(in);
+        tenantId = in.readOptionalString();
+        dataSourceId = in.readOptionalString();
         int size = in.readVInt();
         results = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
@@ -56,6 +66,8 @@ public class ResultBulkRequest<ResultType extends IndexableResult, ResultWriteRe
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
+        out.writeOptionalString(tenantId);
+        out.writeOptionalString(dataSourceId);
         out.writeVInt(results.size());
         for (ResultWriteRequestType result : results) {
             result.writeTo(out);
@@ -69,6 +81,14 @@ public class ResultBulkRequest<ResultType extends IndexableResult, ResultWriteRe
      */
     public List<ResultWriteRequestType> getResults() {
         return results;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public String getDataSourceId() {
+        return dataSourceId;
     }
 
     /**

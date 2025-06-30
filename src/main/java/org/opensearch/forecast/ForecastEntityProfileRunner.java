@@ -5,37 +5,32 @@
 
 package org.opensearch.forecast;
 
-import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.settings.ForecastNumericSetting;
-import org.opensearch.forecast.transport.ForecastEntityProfileAction;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.EntityProfileRunner;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 
-public class ForecastEntityProfileRunner extends EntityProfileRunner<ForecastEntityProfileAction> {
+public class ForecastEntityProfileRunner extends EntityProfileRunner {
 
     public ForecastEntityProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
-        NamedXContentRegistry xContentRegistry,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager stateManager,
         long requiredSamples
     ) {
         super(
-            client,
-            clientUtil,
-            xContentRegistry,
+            nodeCommunicator,
+            dataAccess,
+            stateManager,
             requiredSamples,
-            Forecaster::parse,
             ForecastNumericSetting.maxCategoricalFields(),
             AnalysisType.FORECAST,
-            ForecastEntityProfileAction.INSTANCE,
             ForecastIndex.RESULT.getIndexName(),
-            ForecastCommonName.FORECASTER_ID_KEY,
-            ForecastCommonName.CONFIG_INDEX
+            ForecastCommonName.FORECASTER_ID_KEY
         );
     }
 }

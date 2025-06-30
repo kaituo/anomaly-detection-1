@@ -15,6 +15,7 @@ import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.transport.SearchTopForecastResultRequest;
 import org.opensearch.timeseries.Name;
+import org.opensearch.timeseries.constant.CommonName;
 
 public enum ValidationIssueType implements Name {
     NAME(Config.NAME_FIELD),
@@ -40,7 +41,8 @@ public enum ValidationIssueType implements Name {
     DESCRIPTION(Config.DESCRIPTION_FIELD),
     HISTORY(Config.HISTORY_INTERVAL_FIELD),
     RULE(AnomalyDetector.RULES_FIELD),
-    FREQUENCY(Config.FREQUENCY_FIELD);
+    FREQUENCY(Config.FREQUENCY_FIELD),
+    TENANT_ID(CommonName.TENANT_ID_FIELD);
 
     private String name;
 

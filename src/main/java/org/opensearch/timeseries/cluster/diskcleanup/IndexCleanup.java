@@ -22,29 +22,33 @@ import org.opensearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.opensearch.action.admin.indices.stats.ShardStats;
 import org.opensearch.action.support.IndicesOptions;
 import org.opensearch.cluster.service.ClusterService;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.query.QueryBuilder;
-import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.DeleteByQueryRequest;
 import org.opensearch.index.store.StoreStats;
-import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.transport.client.Client;
 
 /**
  * Clean up the old docs for indices.
  */
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant; org.opensearch.cluster.service.ClusterService#state usage: Only meant to be used in single-tenant.")
 public class IndexCleanup {
     private static final Logger LOG = LogManager.getLogger(IndexCleanup.class);
 
     private final Client client;
-    private final ClientUtil clientUtil;
+    private final DataAccess dataAccess;
     private final ClusterService clusterService;
+    private final RunContext runContext;
 
-    public IndexCleanup(Client client, ClientUtil clientUtil, ClusterService clusterService) {
+    public IndexCleanup(Client client, DataAccess dataAccess, ClusterService clusterService, RunContext runContext) {
         this.client = client;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
         this.clusterService = clusterService;
+        this.runContext = runContext;
     }
 
     /**
@@ -110,17 +114,18 @@ public class IndexCleanup {
             .setIndicesOptions(IndicesOptions.LENIENT_EXPAND_OPEN)
             .setRefresh(true);
 
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
-            clientUtil.execute(DeleteByQueryAction.INSTANCE, deleteRequest, ActionListener.wrap(response -> {
+        runContext.runWithSystemAuth(() -> {
+            // System-wide context triggers pagination in SdkDataAccess.deleteByQuery
+            dataAccess.deleteByQuery(deleteRequest, TenantContext.systemWide(), ActionListener.wrap(response -> {
                 long deleted = response.getDeleted();
                 if (deleted > 0) {
                     // if 0 docs get deleted, it means our query cannot find any matching doc
                     // or the index does not exist at all
                     LOG.info("{} docs are deleted for index:{}", deleted, indexName);
                 }
-                listener.onResponse(response.getDeleted());
+                listener.onResponse(deleted);
             }, listener::onFailure));
-        }
+        }, listener::onFailure);
 
     }
 }

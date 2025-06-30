@@ -16,12 +16,14 @@ import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.identity.Subject;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.transport.client.Client;
 import org.opensearch.transport.client.FilterClient;
 
 /**
  * A special client for executing transport actions as this plugin's system subject.
  */
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant; resource sharing is not available in multi-tenant.")
 public class PluginClient extends FilterClient {
 
     private static final Logger logger = LogManager.getLogger(PluginClient.class);

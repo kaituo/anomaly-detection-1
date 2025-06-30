@@ -17,6 +17,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import java.lang.reflect.Field;
+import java.net.NoRouteToHostException;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -24,9 +25,14 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
+import org.apache.hc.client5.http.ConnectTimeoutException;
+import org.apache.hc.client5.http.HttpHostConnectException;
+import org.apache.hc.core5.http.ConnectionRequestTimeoutException;
+import org.apache.hc.core5.util.Deadline;
+import org.apache.hc.core5.util.DeadlineTimeoutException;
 import org.mockito.ArgumentCaptor;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -34,6 +40,7 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.forecast.client.ForecastNodeCommunicator;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.settings.ForecastSettings;
@@ -47,8 +54,11 @@ import org.opensearch.threadpool.Scheduler.ScheduledCancellable;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.cluster.HashRing;
+import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.InternalFailure;
+import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.dataprocessor.ImputationMethod;
 import org.opensearch.timeseries.dataprocessor.ImputationOption;
 import org.opensearch.timeseries.feature.CompositeRetriever;
@@ -58,9 +68,9 @@ import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.timeseries.task.TaskCacheManager;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.transport.TransportException;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ResultProcessorTests extends OpenSearchTestCase {
 
@@ -69,6 +79,7 @@ public class ResultProcessorTests extends OpenSearchTestCase {
     private HashRing hashRing;
     private NodeStateManager nodeStateManager;
     private TransportService transportService;
+    private DiscoveryNodeSelector discoveryNodeSelector;
     private final String entityResultAction = "cluster:admin/opensearch/forecast/result";
     private Runnable scheduledCheckerTask;
     private ScheduledCancellable scheduledCancellable;
@@ -78,7 +89,6 @@ public class ResultProcessorTests extends OpenSearchTestCase {
 
         TestForecastResultProcessor(
             Setting<TimeValue> requestTimeoutSetting,
-            String entityResultAction,
             StatNames hcRequestCountStat,
             Settings settings,
             ClusterService clusterService,
@@ -89,17 +99,16 @@ public class ResultProcessorTests extends OpenSearchTestCase {
             ForecastStats stats,
             ForecastTaskManager taskManager,
             NamedXContentRegistry xContentRegistry,
-            Client client,
-            SecurityClientUtil clientUtil,
-            IndexNameExpressionResolver indexNameExpressionResolver,
+            DataAccess dataAccess,
             Class<ForecastResultResponse> transportResultResponseClazz,
             FeatureManager featureManager,
             AnalysisType analysisType,
-            boolean runOnce
+            boolean runOnce,
+            DiscoveryNodeSelector discoveryNodeSelector,
+            ForecastNodeCommunicator nodeCommunicator
         ) {
             super(
                 requestTimeoutSetting,
-                entityResultAction,
                 hcRequestCountStat,
                 settings,
                 clusterService,
@@ -110,18 +119,18 @@ public class ResultProcessorTests extends OpenSearchTestCase {
                 stats,
                 taskManager,
                 xContentRegistry,
-                client,
-                clientUtil,
-                indexNameExpressionResolver,
+                dataAccess,
                 transportResultResponseClazz,
                 featureManager,
                 analysisType,
-                runOnce
+                runOnce,
+                discoveryNodeSelector,
+                nodeCommunicator
             );
         }
 
         @Override
-        protected void imputeHC(long start, long end, String configId, String taskId) {
+        protected void imputeHC(long start, long end, String configId, String tenantId, String taskId) {
             imputeCalled = true;               // record invocation
         }
 
@@ -171,9 +180,10 @@ public class ResultProcessorTests extends OpenSearchTestCase {
             return scheduledCancellable;
         }).when(threadPool).scheduleWithFixedDelay(any(Runnable.class), any(TimeValue.class), anyString());
 
+        discoveryNodeSelector = mock(DiscoveryNodeSelector.class);
+
         TestForecastResultProcessor baseProcessor = new TestForecastResultProcessor(
             ForecastSettings.FORECAST_REQUEST_TIMEOUT,
-            entityResultAction,
             StatNames.FORECAST_HC_EXECUTE_REQUEST_COUNT,
             Settings.EMPTY,
             clusterService,
@@ -184,15 +194,210 @@ public class ResultProcessorTests extends OpenSearchTestCase {
             stats,
             taskManager,
             NamedXContentRegistry.EMPTY,
-            mock(Client.class),
-            mock(org.opensearch.timeseries.util.SecurityClientUtil.class),
-            mock(IndexNameExpressionResolver.class),
+            mock(DataAccess.class),
             ForecastResultResponse.class,
             mock(FeatureManager.class),
             AnalysisType.FORECAST,
-            false
+            false,
+            discoveryNodeSelector,
+            mock(ForecastNodeCommunicator.class)
         );
         resultProcessor = spy(baseProcessor);
+    }
+
+    public void testNoRouteToHostFailureAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .handlePredictionFailure(
+                new TransportException(
+                    "Failed to call single stream result API",
+                    new NoRouteToHostException("No route to host")
+                ),
+                configId,
+                nodeId,
+                failure
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testHttpConnectTimeoutFailureAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .handlePredictionFailure(
+                new TransportException(
+                    "Failed to call entity result API",
+                    new ConnectTimeoutException(
+                        "Connect to http://10.0.136.172:9200 [/10.0.136.172] failed: 60000 MILLISECONDS"
+                    )
+                ),
+                configId,
+                nodeId,
+                failure
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testHttpHostConnectionRefusedFailureAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .handlePredictionFailure(
+                new TransportException(
+                    "Failed to call entity result API",
+                    new HttpHostConnectException("Connect to http://10.0.124.48:9200 failed: Connection refused")
+                ),
+                configId,
+                nodeId,
+                failure
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testHttpDeadlineTimeoutFailureAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .handlePredictionFailure(
+                new TransportException(
+                    "Failed to call entity result API",
+                    DeadlineTimeoutException.from(Deadline.fromUnixMilliseconds(1L))
+                ),
+                configId,
+                nodeId,
+                failure
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testConnectionRequestTimeoutFailureAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .handlePredictionFailure(
+                new TransportException(
+                    "Failed to call entity result API",
+                    new ConnectionRequestTimeoutException("Timeout waiting for connection")
+                ),
+                configId,
+                nodeId,
+                failure
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testWrappedEndRunDeadlineTimeoutFailureAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .handlePredictionFailure(
+                new EndRunException(
+                    configId,
+                    CommonMessages.BUG_RESPONSE,
+                    DeadlineTimeoutException.from(Deadline.fromUnixMilliseconds(1L)),
+                    false
+                ),
+                configId,
+                nodeId,
+                failure
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testFindExceptionWrappedHttpConnectTimeoutAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .findException(
+                new TransportException(
+                    "Failed to call single stream result API",
+                    new ConnectTimeoutException(
+                        "Connect to http://10.0.136.172:9200 [/10.0.136.172] failed: 60000 MILLISECONDS"
+                    )
+                ),
+                configId,
+                failure,
+                nodeId
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testFindExceptionWrappedHttpHostConnectionRefusedAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .findException(
+                new TransportException(
+                    "Failed to call entity result API",
+                    new HttpHostConnectException("Connect to http://10.0.124.48:9200 failed: Connection refused")
+                ),
+                configId,
+                failure,
+                nodeId
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
+    }
+
+    public void testFindExceptionWrappedHttpDeadlineTimeoutAddsNodePressure() {
+        String configId = "configId";
+        String nodeId = "nodeId";
+        AtomicReference<Exception> failure = new AtomicReference<>();
+        when(discoveryNodeSelector.nodeExists(nodeId)).thenReturn(true);
+
+        resultProcessor
+            .findException(
+                new TransportException(
+                    "Failed to call entity result API",
+                    DeadlineTimeoutException.from(Deadline.fromUnixMilliseconds(1L))
+                ),
+                configId,
+                failure,
+                nodeId
+            );
+
+        assertNull(failure.get());
+        verify(nodeStateManager).addPressure(nodeId, configId);
     }
 
     public void testPageListenerRemovesNullModelNodeBeforeDispatch() {

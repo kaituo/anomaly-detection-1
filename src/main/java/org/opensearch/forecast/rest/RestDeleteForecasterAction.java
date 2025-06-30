@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
+import org.apache.commons.lang3.StringUtils;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.constant.ForecastCommonMessages;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
@@ -20,6 +22,7 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.transport.DeleteConfigRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -28,7 +31,11 @@ import com.google.common.collect.ImmutableList;
 public class RestDeleteForecasterAction extends BaseRestHandler {
     public static final String DELETE_FORECASTER_ACTION = "delete_forecaster";
 
-    public RestDeleteForecasterAction() {}
+    private final Settings settings;
+
+    public RestDeleteForecasterAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -36,14 +43,24 @@ public class RestDeleteForecasterAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ForecastEnabledSetting.isForecastEnabled()) {
             throw new IllegalStateException(ForecastCommonMessages.DISABLED_ERR_MSG);
         }
 
         try {
-            String forecasterId = request.param(FORECASTER_ID);
-            DeleteConfigRequest deleteForecasterRequest = new DeleteConfigRequest(forecasterId, ForecastIndex.CONFIG.getIndexName());
+            String forecasterId = request.param("forecasterID");
+            if (StringUtils.isEmpty(forecasterId)) {
+                throw new IllegalArgumentException("Request should contain forecasterID");
+            }
+            boolean multiTenancyEnabled = ForecastEnabledSetting.isForecastMultiTenancyEnabled(settings);
+            String tenantId = multiTenancyEnabled ? TenantAwareHelper.getTenantID(multiTenancyEnabled, request) : null;
+            DeleteConfigRequest deleteForecasterRequest = new DeleteConfigRequest(
+                forecasterId,
+                ForecastIndex.CONFIG.getIndexName(),
+                tenantId
+            );
             return channel -> client
                 .execute(DeleteForecasterAction.INSTANCE, deleteForecasterRequest, new RestToXContentListener<>(channel));
         } catch (IllegalArgumentException e) {

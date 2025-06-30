@@ -15,10 +15,10 @@ import java.time.Clock;
 import java.time.Duration;
 
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ratelimit.ADCheckpointMaintainWorker;
 import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.MemoryTracker.Origin;
 import org.opensearch.timeseries.caching.CacheBuffer;
@@ -45,32 +45,34 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * cache and all others in shared cache.
  */
 public class ADCacheBuffer extends
-    CacheBuffer<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADCheckpointMaintainWorker> {
+    CacheBuffer<ThresholdedRandomCutForest, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADCheckpointWriteWorker, ADCheckpointMaintainWorker> {
 
     public ADCacheBuffer(
         int minimumCapacity,
         Clock clock,
         MemoryTracker memoryTracker,
-        int checkpointIntervalHrs,
+        int checkpointIntervalMins,
         Duration modelTtl,
         long memoryConsumptionPerEntity,
         ADCheckpointWriteWorker checkpointWriteQueue,
         ADCheckpointMaintainWorker checkpointMaintainQueue,
         String configId,
-        PriorityTracker priorityTracker
+        PriorityTracker priorityTracker,
+        String tenantId
     ) {
         super(
             minimumCapacity,
             clock,
             memoryTracker,
-            checkpointIntervalHrs,
+            checkpointIntervalMins,
             modelTtl,
             memoryConsumptionPerEntity,
             checkpointWriteQueue,
             checkpointMaintainQueue,
             configId,
             Origin.REAL_TIME_DETECTOR,
-            priorityTracker
+            priorityTracker,
+            tenantId
         );
     }
 }

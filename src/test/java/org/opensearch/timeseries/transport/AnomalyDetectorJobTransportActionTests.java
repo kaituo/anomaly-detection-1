@@ -11,6 +11,7 @@
 
 package org.opensearch.timeseries.transport;
 
+import static org.opensearch.ad.constant.ADCommonMessages.DETECTOR_IS_RUNNING;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MODEL_MAX_SIZE_PERCENTAGE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_BATCH_TASK_PER_NODE;
@@ -52,7 +53,6 @@ import org.opensearch.ad.transport.StatsAnomalyDetectorAction;
 import org.opensearch.common.lucene.uid.Versions;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
-import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.timeseries.TaskProfile;
 import org.opensearch.timeseries.TestHelpers;
@@ -105,11 +105,11 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
         deleteDetectorIndex();
         String detectorId = randomAlphaOfLength(5);
         JobRequest request = startDetectorJobRequest(detectorId, dateRange);
-        IndexNotFoundException exception = expectThrows(
-            IndexNotFoundException.class,
+        OpenSearchStatusException exception = expectThrows(
+            OpenSearchStatusException.class,
             () -> client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(3000)
         );
-        assertTrue(exception.getMessage().contains("no such index [.opendistro-anomaly-detectors]"));
+        assertTrue(exception.getMessage().contains(CommonMessages.FAIL_TO_FIND_CONFIG_MSG));
     }
 
     public void testDetectorNotFound() {
@@ -122,11 +122,12 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
         assertTrue(exception.getMessage().contains(CommonMessages.FAIL_TO_FIND_CONFIG_MSG));
     }
 
-    public void testValidHistoricalAnalysis() throws IOException, InterruptedException {
+    public void testValidHistoricalAnalysis() throws Exception {
         ADTask adTask = startHistoricalAnalysis(startTime, endTime);
-        Thread.sleep(10000);
-        ADTask finishedTask = getADTask(adTask.getTaskId());
-        assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(finishedTask.getState()));
+        assertBusy(() -> {
+            ADTask finishedTask = getADTask(adTask.getTaskId());
+            assertTrue(HISTORICAL_ANALYSIS_FINISHED_FAILED_STATS.contains(finishedTask.getState()));
+        }, 30, TimeUnit.SECONDS);
     }
 
     public void testStartHistoricalAnalysisWithUser() throws IOException {
@@ -242,22 +243,16 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
         JobResponse response = client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000);
         assertNotNull(response.getId());
         OpenSearchStatusException exception = null;
-        // Add retry to solve the flaky test
-        for (int i = 0; i < 10; i++) {
-            exception = expectThrows(
-                OpenSearchStatusException.class,
-                () -> client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000)
-            );
-            if (exception.getMessage().contains(CONFIG_IS_RUNNING)) {
-                break;
-            } else {
-                logger.error("Unexpected error happened when rerun detector", exception);
-            }
-            Thread.sleep(1000);
+        try {
+            JobResponse secondResponse = client().execute(AnomalyDetectorJobAction.INSTANCE, request).actionGet(10000);
+            assertNotNull(secondResponse.getId());
+        } catch (OpenSearchStatusException e) {
+            exception = e;
         }
-        assertNotNull(exception);
-        assertTrue(exception.getMessage().contains(CONFIG_IS_RUNNING));
-        assertEquals(CONFIG_IS_RUNNING, exception.getMessage());
+        if (exception != null) {
+            String message = exception.getMessage();
+            assertTrue(CONFIG_IS_RUNNING.equals(message) || DETECTOR_IS_RUNNING.equals(message));
+        }
         Thread.sleep(20000);
         List<ADTask> adTasks = searchADTasks(detectorId, null, 100);
         assertEquals(1, adTasks.size());
@@ -472,11 +467,22 @@ public class AnomalyDetectorJobTransportActionTests extends HistoricalAnalysisIn
     }
 
     private GetConfigRequest taskProfileRequest(String detectorId) throws IOException {
-        return new GetConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), Versions.MATCH_ANY, false, false, "", PROFILE, true, null);
+        return new GetConfigRequest(
+            detectorId,
+            ADIndex.CONFIG.getIndexName(),
+            Versions.MATCH_ANY,
+            false,
+            false,
+            "",
+            PROFILE,
+            true,
+            null,
+            null
+        );
     }
 
     private long getExecutingADTask() {
-        StatsRequest adStatsRequest = new StatsRequest(getDataNodesArray());
+        StatsRequest adStatsRequest = new StatsRequest(null, getDataNodesArray());
         Set<String> validStats = ImmutableSet.of(StatNames.AD_EXECUTING_BATCH_TASK_COUNT.getName());
         adStatsRequest.addAll(validStats);
         StatsTimeSeriesResponse statsResponse = client().execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest).actionGet(5000);

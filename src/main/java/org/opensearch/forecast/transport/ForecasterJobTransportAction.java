@@ -15,39 +15,43 @@ import java.time.Clock;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.forecast.ExecuteForecastResultResponseRecorder;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.rest.handler.ForecastIndexJobActionHandler;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
+import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.task.ForecastTaskManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.BaseJobTransportAction;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ForecasterJobTransportAction extends
-    BaseJobTransportAction<ForecastIndex, ForecastIndexManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult, ForecastProfileAction, ExecuteForecastResultResponseRecorder, ForecastIndexJobActionHandler, Forecaster> {
+    BaseJobTransportAction<ForecastIndex, ForecastDelegatingDataManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult, ExecuteForecastResultResponseRecorder, ForecastIndexJobActionHandler> {
 
     @Inject
     public ForecasterJobTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
-        Client client,
         ClusterService clusterService,
         Settings settings,
         NamedXContentRegistry xContentRegistry,
-        ForecastIndexJobActionHandler forecastIndexJobActionHandler
+        ForecastIndexJobActionHandler forecastIndexJobActionHandler,
+        StateManager stateManager,
+        ForecastDelegatingDataManagement dataManagement,
+        RunContext runContext
     ) {
         super(
             transportService,
             actionFilters,
-            client,
             clusterService,
             settings,
             xContentRegistry,
@@ -59,7 +63,14 @@ public class ForecasterJobTransportAction extends
             Forecaster.class,
             forecastIndexJobActionHandler,
             Clock.systemUTC(), // inject cannot find clock due to OS limitation
-            Forecaster.class
+            stateManager,
+            dataManagement,
+            runContext
         );
+    }
+
+    @Override
+    protected Setting<Boolean> getMultiTenancyEnabledSetting() {
+        return ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED;
     }
 }

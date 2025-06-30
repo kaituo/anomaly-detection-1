@@ -12,7 +12,6 @@
 package org.opensearch.ad.transport;
 
 import static org.opensearch.ad.constant.ADCommonName.CUSTOM_RESULT_INDEX_PREFIX;
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_DETECTOR_UPPER_LIMIT;
 
 import java.util.ArrayList;
@@ -35,20 +34,23 @@ import org.opensearch.ad.transport.handler.ADSearchHandler;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.query.MatchAllQueryBuilder;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.Aggregations;
-import org.opensearch.search.aggregations.bucket.terms.StringTerms;
+import org.opensearch.search.aggregations.bucket.terms.Terms;
 import org.opensearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import com.google.common.annotations.VisibleForTesting;
 
+@SuppressForbidden(reason = "org.opensearch.cluster.service.ClusterService#state usage: Only meant to be used in single-tenant.")
 public class SearchAnomalyResultTransportAction extends HandledTransportAction<SearchRequest, SearchResponse> {
     public static final String RESULT_INDEX_AGG_NAME = "result_index";
 
@@ -56,7 +58,8 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
     private ADSearchHandler searchHandler;
     private final ClusterService clusterService;
     private final IndexNameExpressionResolver indexNameExpressionResolver;
-    private final Client client;
+    private final DataAccess dataAccess;
+    private final RunContext runContext;
 
     @Inject
     public SearchAnomalyResultTransportAction(
@@ -65,13 +68,15 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
         ADSearchHandler searchHandler,
         ClusterService clusterService,
         IndexNameExpressionResolver indexNameExpressionResolver,
-        Client client
+        DataAccess dataAccess,
+        RunContext runContext
     ) {
         super(SearchAnomalyResultAction.NAME, transportService, actionFilters, SearchRequest::new);
         this.searchHandler = searchHandler;
         this.clusterService = clusterService;
         this.indexNameExpressionResolver = indexNameExpressionResolver;
-        this.client = client;
+        this.dataAccess = dataAccess;
+        this.runContext = runContext;
     }
 
     @VisibleForTesting
@@ -85,7 +90,7 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
         boolean onlyQueryCustomResultIndex = true;
         for (String indexName : indices) {
             // If only query custom result index, don't need to set ALL_AD_RESULTS_INDEX_PATTERN in search request
-            if (ALL_AD_RESULTS_INDEX_PATTERN.equals(indexName)) {
+            if (ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN.equals(indexName)) {
                 onlyQueryCustomResultIndex = false;
             }
         }
@@ -94,6 +99,8 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
 
     @VisibleForTesting
     void calculateCustomResultIndices(Set<String> customResultIndices, String[] indices) {
+        // This action is only used in single-tenant mode; multi-tenancy uses standard search since no default result index exists.
+        // Resolving indices from cluster state is safe here.
         String[] concreteIndices = indexNameExpressionResolver
             .concreteIndexNames(clusterService.state(), IndicesOptions.lenientExpandOpen(), indices);
         // If concreteIndices is null or empty, don't throw exception. Detector list page will search both
@@ -135,8 +142,8 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
         List<String> targetIndices
     ) {
         Aggregations aggregations = allResultIndicesResponse.getAggregations();
-        StringTerms resultIndicesAgg = aggregations.get(RESULT_INDEX_AGG_NAME);
-        List<StringTerms.Bucket> buckets = resultIndicesAgg.getBuckets();
+        Terms resultIndicesAgg = aggregations.get(RESULT_INDEX_AGG_NAME);
+        List<? extends Terms.Bucket> buckets = resultIndicesAgg.getBuckets();
         Set<String> resultIndicesOfDetector = new HashSet<>();
         if (buckets == null) {
             searchHandler.search(request, ADCommonName.AD_RESOURCE_TYPE, listener);
@@ -170,7 +177,7 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
         SearchRequest request,
         ActionListener<SearchResponse> listener,
         boolean finalOnlyQueryCustomResultIndex,
-        ThreadContext.StoredContext context
+        RunContext.RestorableContext context
     ) {
         if (targetIndices.size() == 0) {
             // no need to make multi search
@@ -179,13 +186,16 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
         MultiSearchRequest multiSearchRequest = createMultiSearchRequest(targetIndices);
         List<String> readableIndices = new ArrayList<>();
         if (!finalOnlyQueryCustomResultIndex) {
-            readableIndices.add(ALL_AD_RESULTS_INDEX_PATTERN);
+            readableIndices.add(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN);
         }
 
         context.restore();
+
+        String tenantId = request.preference();
+
         // Send multiple search to check which index a user has permission to read. If search all indices directly,
         // search request will throw exception if user has no permission to search any index.
-        client.multiSearch(multiSearchRequest, ActionListener.wrap(multiSearchResponse -> {
+        dataAccess.multiSearch(multiSearchRequest, TenantContext.user(tenantId), ActionListener.wrap(multiSearchResponse -> {
             processMultiSearchResponse(multiSearchResponse, targetIndices, readableIndices, request, listener);
         }, multiSearchException -> {
             logger.error("Failed to search custom AD result indices", multiSearchException);
@@ -225,13 +235,14 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
         Set<String> customResultIndices
     ) {
         SearchRequest searchResultIndex = createSingleSearchRequest();
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
+        runContext.runWithSystemAuth(context -> {
             // Search result indices of all detectors. User may create index with same prefix of custom result index
             // which not used for AD, so we should avoid searching extra indices which not used by anomaly detectors.
             // Variable used in lambda expression should be final or effectively final, so copy to a final boolean and
             // use the final boolean in lambda below.
             boolean finalOnlyQueryCustomResultIndex = onlyQueryCustomResultIndex;
-            client.search(searchResultIndex, ActionListener.wrap(allResultIndicesResponse -> {
+            String tenantId = request.preference();
+            dataAccess.search(searchResultIndex, TenantContext.user(tenantId), ActionListener.wrap(allResultIndicesResponse -> {
                 List<String> targetIndices = new ArrayList<>();
                 processSingleSearchResponse(allResultIndicesResponse, request, listener, customResultIndices, targetIndices);
                 multiSearch(targetIndices, request, listener, finalOnlyQueryCustomResultIndex, context);
@@ -239,10 +250,10 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
                 logger.error("Failed to search result indices for all detectors", e);
                 listener.onFailure(e);
             }));
-        } catch (Exception e) {
-            logger.error(e);
-            listener.onFailure(e);
-        }
+        }, exception -> {
+            logger.error(exception);
+            listener.onFailure(exception);
+        });
     }
 
     @Override
@@ -266,7 +277,7 @@ public class SearchAnomalyResultTransportAction extends HandledTransportAction<S
         if (customResultIndices.size() == 0) {
             // onlyQueryCustomResultIndex is false in this branch
             // Search only default result index
-            request.indices(ALL_AD_RESULTS_INDEX_PATTERN);
+            request.indices(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN);
             searchHandler.search(request, ADCommonName.AD_RESOURCE_TYPE, listener);
             return;
         }

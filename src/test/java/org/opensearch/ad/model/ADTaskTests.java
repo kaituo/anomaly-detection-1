@@ -85,11 +85,42 @@ public class ADTaskTests extends OpenSearchSingleNodeTestCase {
         assertEquals("Parsing AD task doesn't work", adTask, parsedADTask);
     }
 
+    public void testRealtimeTaskXContentOmitsDetector() throws IOException {
+        String taskId = randomAlphaOfLength(5);
+        ADTask adTask = TestHelpers
+            .randomAdTask(
+                taskId,
+                TaskState.RUNNING,
+                Instant.now().truncatedTo(ChronoUnit.SECONDS),
+                randomAlphaOfLength(5),
+                true,
+                ADTaskType.REALTIME_HC_DETECTOR
+            );
+
+        String adTaskString = TestHelpers.xContentBuilderToString(adTask.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
+        assertFalse(adTaskString.contains("\"detector\""));
+
+        ADTask parsedADTask = ADTask.parse(TestHelpers.parser(adTaskString), taskId);
+        assertNull(parsedADTask.getDetector());
+        assertEquals(adTask.getConfigId(), parsedADTask.getConfigId());
+        assertEquals(adTask.getTaskType(), parsedADTask.getTaskType());
+    }
+
     public void testParseNullableFields() throws IOException {
         ADTask adTask = ADTask.builder().build();
         String adTaskString = TestHelpers.xContentBuilderToString(adTask.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
         ADTask parsedADTask = ADTask.parse(TestHelpers.parser(adTaskString));
         assertEquals("Parsing AD task doesn't work", adTask, parsedADTask);
+    }
+
+    public void testParseTenantIdWithoutDetector() throws IOException {
+        ADTask adTask = ADTask.builder().taskId(randomAlphaOfLength(5)).tenantId("tenant-a").build();
+        String adTaskString = TestHelpers.xContentBuilderToString(adTask.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
+        assertTrue(adTaskString.contains("\"tenant_id\":\"tenant-a\""));
+
+        ADTask parsedADTask = ADTask.parse(TestHelpers.parser(adTaskString), adTask.getTaskId());
+        assertEquals("Parsing AD task tenant id doesn't work", adTask, parsedADTask);
+        assertEquals("tenant-a", parsedADTask.getTenantId());
     }
 
 }

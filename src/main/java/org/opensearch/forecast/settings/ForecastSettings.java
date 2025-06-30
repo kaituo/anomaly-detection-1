@@ -57,7 +57,7 @@ public final class ForecastSettings {
         .intSetting("plugins.forecast.max_forecasters", 1000, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
 
     public static final Setting<Integer> MAX_HC_FORECASTERS = Setting
-        .intSetting("plugins.forecast.max_hc_forecasters", 10, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
+        .intSetting("plugins.forecast.max_hc_forecasters", 1000, 0, 10_000, Setting.Property.NodeScope, Setting.Property.Dynamic);
 
     // save partial zero-anomaly grade results after indexing pressure reaching the limit
     // Opendistro version has similar setting. I lowered the value to make room
@@ -390,4 +390,10 @@ public final class ForecastSettings {
     // ML
     // ======================================
     public static final int MINIMUM_SHINGLE_SIZE = 4;
+
+    // ======================================
+    // Multi-tenancy setting
+    // ======================================
+    public static final Setting<Boolean> FORECAST_MULTI_TENANCY_ENABLED = Setting
+        .boolSetting("plugins.forecast.multi_tenancy.enabled", false, Setting.Property.NodeScope, Setting.Property.Final);
 }

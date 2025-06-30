@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
+import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.constant.ForecastCommonMessages;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
@@ -23,6 +24,7 @@ import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.rest.RestJobAction;
 import org.opensearch.timeseries.transport.JobRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -37,6 +39,7 @@ public class RestForecasterJobAction extends RestJobAction {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ForecastEnabledSetting.isForecastEnabled()) {
             throw new IllegalStateException(ForecastCommonMessages.DISABLED_ERR_MSG);
@@ -46,9 +49,18 @@ public class RestForecasterJobAction extends RestJobAction {
             String forecasterId = request.param(FORECASTER_ID);
             String rawPath = request.rawPath();
             DateRange dateRange = parseInputDateRange(request);
+            Settings settings = client.settings();
+            String tenantId = TenantAwareHelper.getTenantID(ForecastEnabledSetting.isForecastMultiTenancyEnabled(settings), request);
 
             // false means we don't support backtesting and thus no need to stop backtesting
-            JobRequest forecasterJobRequest = new JobRequest(forecasterId, ForecastIndex.CONFIG.getIndexName(), dateRange, false, rawPath);
+            JobRequest forecasterJobRequest = new JobRequest(
+                forecasterId,
+                ForecastIndex.CONFIG.getIndexName(),
+                dateRange,
+                false,
+                rawPath,
+                tenantId
+            );
 
             return channel -> client.execute(ForecasterJobAction.INSTANCE, forecasterJobRequest, new RestToXContentListener<>(channel));
         } catch (IllegalArgumentException e) {

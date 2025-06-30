@@ -12,6 +12,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_REQUEST_TIMEOUT;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.BATCH_TASK_PIECE_INTERVAL_SECONDS;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR;
@@ -38,9 +39,9 @@ import org.opensearch.core.index.shard.ShardId;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
 import org.opensearch.search.internal.InternalSearchResponse;
@@ -48,10 +49,13 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
 import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.JobResponse;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
@@ -69,7 +73,6 @@ public class ForecastTaskManagerTests extends AbstractTimeSeriesTest {
         TaskCacheManager taskCacheManager = mock(TaskCacheManager.class);
         client = mock(Client.class);
         NamedXContentRegistry xContentRegistry = TestHelpers.xContentRegistry();
-        ForecastIndexManagement forecastIndices = mock(ForecastIndexManagement.class);
 
         Settings settings = Settings
             .builder()
@@ -92,16 +95,24 @@ public class ForecastTaskManagerTests extends AbstractTimeSeriesTest {
         ThreadPool threadPool = mock(ThreadPool.class);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         transportService = mock(TransportService.class);
+        DataAccess taskSearcher = new DefaultDataAccess(
+            client,
+            clusterService,
+            mock(SecurityClientUtil.class),
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
+        ForecastDelegatingDataManagement stateIndexStore = mock(ForecastDelegatingDataManagement.class);
+        when(stateIndexStore.doesStateIndexExist()).thenReturn(true);
 
         forecastTaskManager = spy(
             new ForecastTaskManager(
                 taskCacheManager,
-                client,
                 xContentRegistry,
-                forecastIndices,
                 clusterService,
                 Settings.EMPTY,
                 threadPool,
+                taskSearcher,
+                stateIndexStore,
                 nodeStateManager
             )
         );
@@ -154,7 +165,7 @@ public class ForecastTaskManagerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).update(any(), any());
 
-        forecastTaskManager.stopLatestRealtimeTask(configId, TaskState.STOPPED, null, transportService, listener);
+        forecastTaskManager.stopLatestRealtimeTask(configId, null, TaskState.STOPPED, null, transportService, listener);
 
         verify(client, times(1)).update(any(), any());
         verify(listener, never()).onFailure(any());

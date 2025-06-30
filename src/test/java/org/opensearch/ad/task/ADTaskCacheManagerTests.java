@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.After;
 import org.junit.Before;
 import org.opensearch.ad.model.ADTask;
@@ -167,6 +168,20 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
         adTaskCacheManager.add(detectorId, adTask);
         DuplicateTaskException e1 = expectThrows(DuplicateTaskException.class, () -> adTaskCacheManager.add(detectorId, adTask));
         assertEquals(DETECTOR_IS_RUNNING, e1.getMessage());
+    }
+
+    public void testRecordSuccessfulEntityTask() throws IOException {
+        String detectorId = randomAlphaOfLength(10);
+        adTaskCacheManager.recordSuccessfulEntityTask(detectorId);
+        assertEquals(0, adTaskCacheManager.getSuccessfulEntityTaskCount(detectorId));
+
+        adTaskCacheManager.add(detectorId, TestHelpers.randomAdTask(ADTaskType.HISTORICAL_HC_DETECTOR));
+        adTaskCacheManager.recordSuccessfulEntityTask(detectorId);
+        adTaskCacheManager.recordSuccessfulEntityTask(detectorId);
+        assertEquals(2, adTaskCacheManager.getSuccessfulEntityTaskCount(detectorId));
+
+        adTaskCacheManager.removeHistoricalTaskCache(detectorId);
+        assertEquals(0, adTaskCacheManager.getSuccessfulEntityTaskCount(detectorId));
     }
 
     public void testPutTaskWithMemoryExceedLimit() {
@@ -314,26 +329,26 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
         String newState = TaskState.INIT.name();
         Float newInitProgress = 0.0f;
         String newError = randomAlphaOfLength(5);
-        assertTrue(adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId1, newState, newInitProgress, newError));
+        assertTrue(adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId1, newState, newInitProgress, newError, null));
         // Init realtime task cache.
         adTaskCacheManager.initRealtimeTaskCache(detectorId1, 60_000);
 
-        adTaskCacheManager.updateRealtimeTaskCache(detectorId1, newState, newInitProgress, newError);
-        assertFalse(adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId1, newState, newInitProgress, newError));
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId1, newState, newInitProgress, newError, null);
+        assertFalse(adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId1, newState, newInitProgress, newError, null));
         assertArrayEquals(new String[] { detectorId1 }, adTaskCacheManager.getConfigIdsInRealtimeTaskCache());
 
         String detectorId2 = randomAlphaOfLength(10);
-        adTaskCacheManager.updateRealtimeTaskCache(detectorId2, newState, newInitProgress, newError);
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId2, newState, newInitProgress, newError, null);
         assertEquals(1, adTaskCacheManager.getConfigIdsInRealtimeTaskCache().length);
         adTaskCacheManager.initRealtimeTaskCache(detectorId2, 60_000);
-        adTaskCacheManager.updateRealtimeTaskCache(detectorId2, newState, newInitProgress, newError);
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId2, newState, newInitProgress, newError, null);
         assertEquals(2, adTaskCacheManager.getConfigIdsInRealtimeTaskCache().length);
 
         newState = TaskState.RUNNING.name();
         newInitProgress = 1.0f;
         newError = "test error";
-        assertTrue(adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId1, newState, newInitProgress, newError));
-        adTaskCacheManager.updateRealtimeTaskCache(detectorId1, newState, newInitProgress, newError);
+        assertTrue(adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId1, newState, newInitProgress, newError, null));
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId1, newState, newInitProgress, newError, null);
         assertEquals(newInitProgress, adTaskCacheManager.getRealtimeTaskCache(detectorId1).getInitProgress());
         assertEquals(newState, adTaskCacheManager.getRealtimeTaskCache(detectorId1).getState());
         assertEquals(newError, adTaskCacheManager.getRealtimeTaskCache(detectorId1).getError());
@@ -346,10 +361,40 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
 
     }
 
+    public void testRealtimeTaskChangeNeededWhenJobGenerationChanges() {
+        String detectorId = randomAlphaOfLength(10);
+        String state = TaskState.RUNNING.name();
+        Float initProgress = 1.0f;
+        String error = "";
+        long previousJobEnabledTime = Instant.now().minusSeconds(60).toEpochMilli();
+        long currentJobEnabledTime = Instant.now().toEpochMilli();
+
+        adTaskCacheManager.initRealtimeTaskCache(detectorId, 60_000);
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId, state, initProgress, error, previousJobEnabledTime);
+
+        assertTrue(
+            adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId, state, initProgress, error, currentJobEnabledTime)
+        );
+    }
+
+    public void testRealtimeTaskChangeNeededWhenReconciliationIsDue() {
+        String detectorId = randomAlphaOfLength(10);
+        String state = TaskState.RUNNING.name();
+        Float initProgress = 1.0f;
+        String error = "";
+        long jobEnabledTime = Instant.now().toEpochMilli();
+
+        adTaskCacheManager.initRealtimeTaskCache(detectorId, 60_000);
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId, state, initProgress, error, jobEnabledTime);
+        adTaskCacheManager.getRealtimeTaskCache(detectorId).setLastTaskUpdateTime(0L);
+
+        assertTrue(adTaskCacheManager.isRealtimeTaskChangeNeeded(detectorId, state, initProgress, error, jobEnabledTime));
+    }
+
     public void testUpdateRealtimeTaskCache() {
         String detectorId = randomAlphaOfLength(5);
         adTaskCacheManager.initRealtimeTaskCache(detectorId, 60_000);
-        adTaskCacheManager.updateRealtimeTaskCache(detectorId, null, null, null);
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId, null, null, null, null);
         RealtimeTaskCache realtimeTaskCache = adTaskCacheManager.getRealtimeTaskCache(detectorId);
         assertNull(realtimeTaskCache.getState());
         assertNull(realtimeTaskCache.getError());
@@ -358,14 +403,14 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
         String state = TaskState.RUNNING.name();
         Float initProgress = 0.1f;
         String error = randomAlphaOfLength(5);
-        adTaskCacheManager.updateRealtimeTaskCache(detectorId, state, initProgress, error);
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId, state, initProgress, error, null);
         realtimeTaskCache = adTaskCacheManager.getRealtimeTaskCache(detectorId);
         assertEquals(state, realtimeTaskCache.getState());
         assertEquals(error, realtimeTaskCache.getError());
         assertEquals(initProgress, realtimeTaskCache.getInitProgress());
 
         state = TaskState.STOPPED.name();
-        adTaskCacheManager.updateRealtimeTaskCache(detectorId, state, initProgress, error);
+        adTaskCacheManager.updateRealtimeTaskCache(detectorId, state, initProgress, error, null);
         realtimeTaskCache = adTaskCacheManager.getRealtimeTaskCache(detectorId);
         // we don't remove the cache when it is stopped
         assertNotNull(realtimeTaskCache);
@@ -381,9 +426,9 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
 
     public void testDeletedTask() {
         String taskId = randomAlphaOfLength(10);
-        adTaskCacheManager.addDeletedTask(taskId);
+        adTaskCacheManager.addDeletedTask(taskId, null);
         assertTrue(adTaskCacheManager.hasDeletedTask());
-        assertEquals(taskId, adTaskCacheManager.pollDeletedTask());
+        assertEquals(taskId, adTaskCacheManager.pollDeletedTask().getLeft());
         assertFalse(adTaskCacheManager.hasDeletedTask());
     }
 
@@ -539,9 +584,9 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
 
     public void testAddDeletedDetector() {
         String detectorId = randomAlphaOfLength(5);
-        adTaskCacheManager.addDeletedConfig(detectorId);
-        String polledDetectorId = adTaskCacheManager.pollDeletedConfig();
-        assertEquals(detectorId, polledDetectorId);
+        adTaskCacheManager.addDeletedConfig(detectorId, null);
+        Pair<String, String> polledDetector = adTaskCacheManager.pollDeletedConfig();
+        assertEquals(detectorId, polledDetector.getLeft());
         assertNull(adTaskCacheManager.pollDeletedConfig());
     }
 

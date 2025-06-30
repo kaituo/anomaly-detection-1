@@ -27,11 +27,13 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.common.Strings;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
-import org.opensearch.timeseries.indices.IndexManagement;
+import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.ModelState;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.util.DateUtils;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
@@ -39,7 +41,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * Convert from ModelRequest to CheckpointWriteRequest
  *
  */
-public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CacheType extends TimeSeriesCache<RCFModelType>> {
+public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CacheType extends TimeSeriesCache<RCFModelType>> {
     private static final Logger LOG = LogManager.getLogger(CheckPointMaintainRequestAdapter.class);
     private CheckpointDaoType checkpointDao;
     private String indexName;
@@ -71,8 +73,9 @@ public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRa
     public Optional<CheckpointWriteRequest> convert(CheckpointMaintainRequest request) {
         String configId = request.getConfigId();
         String modelId = request.getModelId();
+        String tenantId = request.getTenantId();
 
-        Optional<ModelState<RCFModelType>> stateToMaintain = cache.get().getForMaintainance(configId, modelId);
+        Optional<ModelState<RCFModelType>> stateToMaintain = cache.get().getForMaintainance(tenantId, configId, modelId);
         if (stateToMaintain.isPresent()) {
             ModelState<RCFModelType> state = stateToMaintain.get();
             if (!checkpointDao.shouldSave(state, false, checkpointInterval, clock)) {
@@ -87,6 +90,8 @@ public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRa
                     return Optional.empty();
                 }
 
+                String targetIndex = checkpointDao.resolveCheckpointIndexName(tenantId, configId, modelId, indexName);
+                addCheckpointMetadata(source, tenantId, targetIndex, modelId);
                 return Optional
                     .of(
                         new CheckpointWriteRequest(
@@ -96,7 +101,8 @@ public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRa
                             // If the document does not already exist, the contents of the upsert element
                             // are inserted as a new document.
                             // If the document exists, update fields in the map
-                            new UpdateRequest(indexName, modelId).docAsUpsert(true).doc(source)
+                            new UpdateRequest(targetIndex, modelId).docAsUpsert(true).doc(source),
+                            request.getTenantId()
                         )
                     );
             } catch (Exception e) {
@@ -112,5 +118,25 @@ public class CheckPointMaintainRequestAdapter<RCFModelType extends ThresholdedRa
             }
         }
         return Optional.empty();
+    }
+
+    private void addCheckpointMetadata(Map<String, Object> source, String tenantId, String checkpointIdentifier, String modelId) {
+        putIfNotBlank(source, CommonName.TENANT_ID_FIELD, tenantId);
+        if (false == Strings.isEmpty(tenantId)) {
+            try {
+                TenantAwareHelper.TenantComponents tenantComponents = TenantAwareHelper.parseTenantId(tenantId);
+                putIfNotBlank(source, CommonName.APPLICATION_ID_FIELD, tenantComponents.applicationId());
+                putIfNotBlank(source, CommonName.WORKSPACE_ID_FIELD, tenantComponents.workspaceId());
+            } catch (IllegalArgumentException e) {
+                LOG.debug("Unable to parse tenant id [{}] while adding checkpoint metadata", tenantId, e);
+            }
+        }
+        putIfNotBlank(source, CommonName.S3_REFERENCE_FIELD, checkpointDao.resolveCheckpointReference(checkpointIdentifier, modelId));
+    }
+
+    private void putIfNotBlank(Map<String, Object> source, String fieldName, String value) {
+        if (false == Strings.isEmpty(value)) {
+            source.put(fieldName, value);
+        }
     }
 }

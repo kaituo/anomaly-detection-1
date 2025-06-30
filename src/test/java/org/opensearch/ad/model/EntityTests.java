@@ -38,8 +38,16 @@ public class EntityTests extends AbstractTimeSeriesTest {
         String detectorId = "id";
         Entity entity = Entity.createEntityByReordering(Collections.emptyMap());
 
-        Optional<String> modelId = entity.getModelId(detectorId);
+        Optional<String> modelId = entity.getModelId(null, detectorId);
 
         assertTrue(!modelId.isPresent());
+    }
+
+    public void test_getModelId_doesNotIncludeTenantId() {
+        String detectorId = "detector-1";
+        Entity entityWithoutTenant = Entity.createSingleAttributeEntity("host", "server-1");
+        Entity entityWithTenant = Entity.createSingleAttributeEntity("host", "server-1");
+
+        assertEquals(entityWithoutTenant.getModelId(null, detectorId), entityWithTenant.getModelId("tenant-a", detectorId));
     }
 }

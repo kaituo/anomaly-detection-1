@@ -17,7 +17,6 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.timeseries.TestHelpers.createClusterState;
 import static org.opensearch.timeseries.TestHelpers.createSearchResponse;
 import static org.opensearch.timeseries.TestHelpers.matchAllRequest;
@@ -61,6 +60,11 @@ import org.opensearch.tasks.Task;
 import org.opensearch.telemetry.tracing.noop.NoopTracer;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.Transport;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
@@ -77,6 +81,8 @@ public class SearchAnomalyResultActionTests extends HistoricalAnalysisIntegTestC
     private ActionFilters actionFilters;
     private ADSearchHandler searchHandler;
     private IndexNameExpressionResolver indexNameExpressionResolver;
+    private DataAccess dataAccess;
+    private RunContext runContext;
     private PlainActionFuture<SearchResponse> future;
     private ClusterState clusterState;
     private SearchResponse searchResponse;
@@ -113,6 +119,13 @@ public class SearchAnomalyResultActionTests extends HistoricalAnalysisIntegTestC
         Settings settings = Settings.builder().build();
         threadContext = new ThreadContext(settings);
         when(threadPool.getThreadContext()).thenReturn(threadContext);
+        runContext = new ThreadRunContext(threadContext);
+        dataAccess = new DefaultDataAccess(
+            client,
+            clusterService,
+            mock(SecurityClientUtil.class),
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
 
         actionFilters = mock(ActionFilters.class);
         searchHandler = mock(ADSearchHandler.class);
@@ -123,7 +136,8 @@ public class SearchAnomalyResultActionTests extends HistoricalAnalysisIntegTestC
             searchHandler,
             clusterService,
             indexNameExpressionResolver,
-            client
+            dataAccess,
+            runContext
         );
     }
 
@@ -222,14 +236,7 @@ public class SearchAnomalyResultActionTests extends HistoricalAnalysisIntegTestC
 
     @Test
     public void testMultiSearch_NoOnlyQueryCustomResultIndex() {
-        action
-            .multiSearch(
-                Arrays.asList("test"),
-                mock(SearchRequest.class),
-                mock(PlainActionFuture.class),
-                false,
-                threadContext.stashContext()
-            );
+        action.multiSearch(Arrays.asList("test"), mock(SearchRequest.class), mock(PlainActionFuture.class), false, () -> {});
 
         verify(client).multiSearch(any(), any());
     }
@@ -291,7 +298,7 @@ public class SearchAnomalyResultActionTests extends HistoricalAnalysisIntegTestC
         String adResultId = createADResult(TestHelpers.randomAnomalyDetectResult());
 
         SearchResponse searchResponse = client()
-            .execute(SearchAnomalyResultAction.INSTANCE, matchAllRequest().indices(ALL_AD_RESULTS_INDEX_PATTERN))
+            .execute(SearchAnomalyResultAction.INSTANCE, matchAllRequest().indices(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN))
             .actionGet(10000);
         assertEquals(1, searchResponse.getInternalResponse().hits().getTotalHits().value());
 
@@ -302,7 +309,7 @@ public class SearchAnomalyResultActionTests extends HistoricalAnalysisIntegTestC
     public void testNoIndex() {
         deleteIndexIfExists(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS);
         SearchResponse searchResponse = client()
-            .execute(SearchAnomalyResultAction.INSTANCE, matchAllRequest().indices(ALL_AD_RESULTS_INDEX_PATTERN))
+            .execute(SearchAnomalyResultAction.INSTANCE, matchAllRequest().indices(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN))
             .actionGet(10000);
         assertEquals(0, searchResponse.getHits().getTotalHits().value());
     }

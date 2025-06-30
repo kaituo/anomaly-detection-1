@@ -80,6 +80,7 @@ public class CommonMessages {
     public static final String NO_SHARDS_FOUND_IN_INDEX = "No accessible shards found for indices %s "
         + "This could indicate: not enough data in index, connectivity issues, or permission problems.";
     public static final String FAIL_TO_GET_CONFIG_MSG = "Fail to get config";
+    public static final String TENANT_ID_REQUIRED_IN_MULTI_TENANCY_MODE = "Tenant ID is required in multi-tenancy mode";
 
     // ======================================
     // Index message
@@ -128,6 +129,7 @@ public class CommonMessages {
     // transport
     // ======================================
     public static final String CONFIG_ID_MISSING_MSG = "config ID is missing";
+    public static final String TENANT_ID_MISSING_MSG = "tenant ID is missing";
     public static final String MODEL_ID_MISSING_MSG = "model ID is missing";
     public static final String NO_DATA_MSG = "No data in current window between";
 

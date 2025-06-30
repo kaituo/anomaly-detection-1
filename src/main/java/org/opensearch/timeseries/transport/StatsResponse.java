@@ -96,7 +96,7 @@ public class StatsResponse implements ToXContentObject, Mergeable {
         for (Map.Entry<String, Object> clusterStat : clusterStats.entrySet()) {
             builder.field(clusterStat.getKey(), clusterStat.getValue());
         }
-        statsNodesResponse.toXContent(xContentBuilder, ToXContent.EMPTY_PARAMS);
+        statsNodesResponse.toXContentFragment(xContentBuilder, ToXContent.EMPTY_PARAMS);
         return xContentBuilder.endObject();
     }
 

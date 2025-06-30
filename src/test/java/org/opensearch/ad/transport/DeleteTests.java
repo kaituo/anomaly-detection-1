@@ -19,7 +19,6 @@ import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 import static org.opensearch.common.xcontent.XContentFactory.jsonBuilder;
@@ -39,13 +38,12 @@ import org.opensearch.action.ActionRequestValidationException;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
+import org.opensearch.ad.client.ADNodeCommunicator;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.io.stream.BytesStreamOutput;
-import org.opensearch.common.settings.Settings;
-import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.transport.TransportAddress;
@@ -53,7 +51,6 @@ import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.tasks.Task;
-import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
@@ -62,9 +59,7 @@ import org.opensearch.timeseries.transport.DeleteModelRequest;
 import org.opensearch.timeseries.transport.DeleteModelResponse;
 import org.opensearch.timeseries.transport.StopConfigRequest;
 import org.opensearch.timeseries.transport.StopConfigResponse;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import test.org.opensearch.ad.util.ClusterCreation;
 import test.org.opensearch.ad.util.JsonDeserializer;
@@ -74,10 +69,8 @@ public class DeleteTests extends AbstractTimeSeriesTest {
     private List<FailedNodeException> failures;
     private List<DeleteModelNodeResponse> deleteModelResponse;
     private String node1, node2, nodename1, nodename2;
-    private Client client;
     private ClusterService clusterService;
     private TransportService transportService;
-    private ThreadPool threadPool;
     private ActionFilters actionFilters;
     private Task task;
 
@@ -128,14 +121,9 @@ public class DeleteTests extends AbstractTimeSeriesTest {
             .thenReturn(ClusterCreation.state(new ClusterName("test"), discoveryNode2, discoveryNode1, discoveryNodes));
 
         transportService = mock(TransportService.class);
-        threadPool = mock(ThreadPool.class);
-        actionFilters = mock(ActionFilters.class);
-        Settings settings = Settings.builder().put("plugins.anomaly_detection.request_timeout", TimeValue.timeValueSeconds(10)).build();
+        actionFilters = new ActionFilters(emptySet());
         task = mock(Task.class);
         when(task.getId()).thenReturn(1000L);
-        client = mock(Client.class);
-        when(client.settings()).thenReturn(settings);
-        when(client.threadPool()).thenReturn(threadPool);
     }
 
     public void testSerialzationResponse() throws IOException {
@@ -173,6 +161,17 @@ public class DeleteTests extends AbstractTimeSeriesTest {
         StreamInput streamInput = output.bytes().streamInput();
         DeleteModelRequest readRequest = new DeleteModelRequest(streamInput);
         assertThat(request.getAdID(), equalTo(readRequest.getAdID()));
+        assertThat(readRequest.getTenantId(), is(nullValue()));
+    }
+
+    public void testSerialzationRequestDeleteModelWithTenant() throws IOException {
+        DeleteModelRequest request = new DeleteModelRequest("123", "tenant1");
+        BytesStreamOutput output = new BytesStreamOutput();
+        request.writeTo(output);
+        StreamInput streamInput = output.bytes().streamInput();
+        DeleteModelRequest readRequest = new DeleteModelRequest(streamInput);
+        assertThat(request.getAdID(), equalTo(readRequest.getAdID()));
+        assertThat(request.getTenantId(), equalTo(readRequest.getTenantId()));
     }
 
     public void testSerialzationRequestStopDetector() throws IOException {
@@ -210,15 +209,16 @@ public class DeleteTests extends AbstractTimeSeriesTest {
 
     @SuppressWarnings("unchecked")
     public void StopDetectorResponseTemplate(DetectorExecutionMode mode) throws Exception {
+        ADNodeCommunicator nodeCommunicator = mock(ADNodeCommunicator.class);
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             assertTrue(
                 String.format(Locale.ROOT, "The size of args is %d.  Its content is %s", args.length, Arrays.toString(args)),
-                args.length >= 3
+                args.length >= 2
             );
-            assertTrue(args[2] instanceof ActionListener);
+            assertTrue(args[1] instanceof ActionListener);
 
-            ActionListener<DeleteModelResponse> listener = (ActionListener<DeleteModelResponse>) args[2];
+            ActionListener<DeleteModelResponse> listener = (ActionListener<DeleteModelResponse>) args[1];
 
             assertTrue(listener != null);
             if (mode == DetectorExecutionMode.DELETE_MODEL_FAILURE) {
@@ -228,19 +228,18 @@ public class DeleteTests extends AbstractTimeSeriesTest {
             }
 
             return null;
-        }).when(client).execute(eq(DeleteADModelAction.INSTANCE), any(), any());
+        }).when(nodeCommunicator).deleteModel(any(), any());
 
         BulkByScrollResponse deleteByQueryResponse = mock(BulkByScrollResponse.class);
         when(deleteByQueryResponse.getDeleted()).thenReturn(10L);
 
         String detectorID = "123";
 
-        DiscoveryNodeFilterer nodeFilter = mock(DiscoveryNodeFilterer.class);
-        StopDetectorTransportAction action = new StopDetectorTransportAction(transportService, nodeFilter, actionFilters, client);
+        StopDetectorTransportAction action = new StopDetectorTransportAction(transportService, actionFilters, nodeCommunicator);
 
-        StopConfigRequest request = new StopConfigRequest().adID(detectorID);
+        StopConfigRequest request = new StopConfigRequest().adID(detectorID).tenantId("tenant1");
         PlainActionFuture<StopConfigResponse> listener = new PlainActionFuture<>();
-        action.doExecute(task, request, listener);
+        action.execute(task, request, listener);
 
         StopConfigResponse response = listener.actionGet();
         assertTrue(!response.success());

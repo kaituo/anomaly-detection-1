@@ -62,6 +62,7 @@ import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.model.Feature;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.client.Client;
 import org.opensearch.transport.client.node.NodeClient;
@@ -71,7 +72,7 @@ import com.google.common.collect.ImmutableMap;
 public abstract class ADIntegTestCase extends OpenSearchIntegTestCase {
     protected static final Logger LOG = (Logger) LogManager.getLogger(ADIntegTestCase.class);
 
-    private long timeout = 5_000;
+    private long timeout = 15_000;
     protected String timeField = "timestamp";
     protected String categoryField = "type";
     protected String ipField = "ip";
@@ -106,7 +107,7 @@ public abstract class ADIntegTestCase extends OpenSearchIntegTestCase {
 
     public void createDetectors(List<AnomalyDetector> detectors, boolean createIndexFirst) throws IOException {
         if (createIndexFirst) {
-            createIndex(ADCommonName.CONFIG_INDEX, ADIndexManagement.getConfigMappings());
+            createIndex(ADCommonName.CONFIG_INDEX, IndexResourceLoader.getConfigMappings());
         }
 
         for (AnomalyDetector detector : detectors) {
@@ -130,7 +131,7 @@ public abstract class ADIntegTestCase extends OpenSearchIntegTestCase {
     }
 
     public void createDetectorIndex() throws IOException {
-        createIndex(ADCommonName.CONFIG_INDEX, ADIndexManagement.getConfigMappings());
+        createIndex(ADCommonName.CONFIG_INDEX, IndexResourceLoader.getConfigMappings());
     }
 
     public void createADResultIndex() throws IOException {

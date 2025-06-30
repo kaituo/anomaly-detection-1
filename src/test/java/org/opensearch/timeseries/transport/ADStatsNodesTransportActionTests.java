@@ -28,12 +28,10 @@ import org.junit.Test;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
-import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.stats.ADStats;
 import org.opensearch.ad.stats.suppliers.ADModelsOnNodeSupplier;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.ADStatsNodesTransportAction;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
@@ -46,6 +44,7 @@ import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
 import org.opensearch.timeseries.stats.suppliers.IndexStatusSupplier;
 import org.opensearch.timeseries.stats.suppliers.SettableSupplier;
+import org.opensearch.timeseries.stats.suppliers.TenantAwareCounterSupplier;
 import org.opensearch.timeseries.util.IndexUtils;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
@@ -55,7 +54,7 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
     private ADStatsNodesTransportAction action;
     private ADStats adStats;
     private Map<String, TimeSeriesStat<?>> statsMap;
-    private String clusterStatName1, clusterStatName2;
+    private String clusterStatName1, clusterStatName2, tenantNodeStatName;
     private String nodeStatName1, nodeStatName2;
     private ADTaskManager adTaskManager;
 
@@ -67,15 +66,14 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
         Client client = client();
         Clock clock = mock(Clock.class);
         ThreadPool threadPool = mock(ThreadPool.class);
-        IndexNameExpressionResolver indexNameResolver = mock(IndexNameExpressionResolver.class);
-        IndexUtils indexUtils = new IndexUtils(clusterService(), indexNameResolver);
-        ADModelManager modelManager = mock(ADModelManager.class);
+        IndexUtils indexUtils = new IndexUtils(clusterService());
         ADCacheProvider cacheProvider = mock(ADCacheProvider.class);
         ADPriorityCache cache = mock(ADPriorityCache.class);
         when(cacheProvider.get()).thenReturn(cache);
 
         clusterStatName1 = "clusterStat1";
         clusterStatName2 = "clusterStat2";
+        tenantNodeStatName = "tenantNodeStat";
         nodeStatName1 = "nodeStat1";
         nodeStatName2 = "nodeStat2";
 
@@ -90,10 +88,8 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
         statsMap = new HashMap<String, TimeSeriesStat<?>>() {
             {
                 put(nodeStatName1, new TimeSeriesStat<>(false, new CounterSupplier()));
-                put(
-                    nodeStatName2,
-                    new TimeSeriesStat<>(false, new ADModelsOnNodeSupplier(modelManager, cacheProvider, settings, clusterService))
-                );
+                put(tenantNodeStatName, new TimeSeriesStat<>(false, new TenantAwareCounterSupplier()));
+                put(nodeStatName2, new TimeSeriesStat<>(false, new ADModelsOnNodeSupplier(cacheProvider, settings, clusterService)));
                 put(clusterStatName1, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index1")));
                 put(clusterStatName2, new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, "index2")));
                 put(InternalStatNames.JVM_HEAP_USAGE.getName(), new TimeSeriesStat<>(true, new SettableSupplier()));
@@ -124,7 +120,7 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
     @Test
     public void testNewNodeRequest() {
         String nodeId = "nodeId1";
-        StatsRequest adStatsRequest = new StatsRequest(nodeId);
+        StatsRequest adStatsRequest = new StatsRequest(null, nodeId);
 
         StatsNodeRequest adStatsNodeRequest1 = new StatsNodeRequest(adStatsRequest);
         StatsNodeRequest adStatsNodeRequest2 = action.newNodeRequest(adStatsRequest);
@@ -135,7 +131,7 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
     @Test
     public void testNodeOperation() {
         String nodeId = clusterService().localNode().getId();
-        StatsRequest adStatsRequest = new StatsRequest((nodeId));
+        StatsRequest adStatsRequest = new StatsRequest(null, nodeId);
         adStatsRequest.clear();
 
         Set<String> statsToBeRetrieved = new HashSet<>(Arrays.asList(nodeStatName1, nodeStatName2));
@@ -157,7 +153,7 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
     @Test
     public void testNodeOperationWithJvmHeapUsage() {
         String nodeId = clusterService().localNode().getId();
-        StatsRequest adStatsRequest = new StatsRequest((nodeId));
+        StatsRequest adStatsRequest = new StatsRequest(null, nodeId);
         adStatsRequest.clear();
 
         Set<String> statsToBeRetrieved = new HashSet<>(Arrays.asList(nodeStatName1, InternalStatNames.JVM_HEAP_USAGE.getName()));
@@ -174,5 +170,21 @@ public class ADStatsNodesTransportActionTests extends OpenSearchIntegTestCase {
         for (String statName : stats.keySet()) {
             assertTrue(statsToBeRetrieved.contains(statName));
         }
+    }
+
+    @Test
+    public void testNodeOperationUsesTenantAwareValue() {
+        String nodeId = clusterService().localNode().getId();
+        adStats.getStat(tenantNodeStatName).incrementForTenant("tenant-a");
+        adStats.getStat(tenantNodeStatName).incrementForTenant("tenant-a");
+        adStats.getStat(tenantNodeStatName).incrementForTenant("tenant-b");
+
+        StatsRequest adStatsRequest = new StatsRequest("tenant-a", nodeId);
+        adStatsRequest.clear();
+        adStatsRequest.addStat(tenantNodeStatName);
+
+        StatsNodeResponse response = action.nodeOperation(new StatsNodeRequest(adStatsRequest));
+
+        assertEquals(2L, response.getStatsMap().get(tenantNodeStatName));
     }
 }

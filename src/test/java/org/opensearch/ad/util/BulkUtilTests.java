@@ -23,6 +23,7 @@ import org.opensearch.action.index.IndexResponse;
 import org.opensearch.common.xcontent.XContentType;
 import org.opensearch.core.index.Index;
 import org.opensearch.core.index.shard.ShardId;
+import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.engine.VersionConflictEngineException;
 import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.timeseries.util.BulkUtil;
@@ -56,5 +57,30 @@ public class BulkUtilTests extends OpenSearchTestCase {
         List<IndexRequest> retry = BulkUtil.getFailedIndexRequest(request, response);
         assertEquals(1, retry.size());
         assertEquals(idPrefix + 0, retry.get(0).id());
+    }
+
+    public void testGetMissingResultIndexRequestsUsesBulkItemPosition() {
+        BulkItemResponse[] itemResponses = new BulkItemResponse[2];
+        String indexName = "missing-index";
+        itemResponses[0] = new BulkItemResponse(
+            0,
+            randomFrom(DocWriteRequest.OpType.values()),
+            new Failure(indexName, null, new IndexNotFoundException(indexName))
+        );
+        itemResponses[1] = new BulkItemResponse(
+            1,
+            randomFrom(DocWriteRequest.OpType.values()),
+            new Failure(indexName, null, new IndexNotFoundException(indexName))
+        );
+        BulkResponse response = new BulkResponse(itemResponses, 0);
+
+        BulkRequest request = new BulkRequest();
+        request.add(new IndexRequest(indexName).source(XContentType.JSON, "field", "first"));
+        request.add(new IndexRequest(indexName).source(XContentType.JSON, "field", "second"));
+
+        List<IndexRequest> retry = BulkUtil.getMissingResultIndexRequests(request, response);
+        assertEquals(2, retry.size());
+        assertEquals("first", retry.get(0).sourceAsMap().get("field"));
+        assertEquals("second", retry.get(1).sourceAsMap().get("field"));
     }
 }

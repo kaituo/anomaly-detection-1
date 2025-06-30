@@ -20,7 +20,34 @@ package org.opensearch.timeseries;
 public interface CleanState {
     /**
      * Remove state associated with a detector Id
-     * @param detectorId Detector Id
+     * @param tenantId Tenant Id
+     * @param configId Config Id
      */
-    void clear(String detectorId);
+    void clear(String tenantId, String configId);
+
+    /**
+     * Record the time at which a config's local model state was cleared.
+     *
+     * This is separate from {@link #clear(String, String)} because some callers clear
+     * local coordination cache during routing changes. Model deletion/stop workflows
+     * use this marker to make in-flight model work drop stale requests that were
+     * created before the clear, including requests for future scheduled data windows.
+     *
+     * @param tenantId Tenant Id
+     * @param configId Config Id
+     */
+    default void markConfigStateCleared(String tenantId, String configId) {}
+
+    /**
+     * Whether a request created at {@code requestEpochMillis} is stale
+     * because local model state for the config was cleared later.
+     *
+     * @param tenantId Tenant Id
+     * @param configId Config Id
+     * @param requestEpochMillis wall-clock request creation timestamp
+     * @return true when the request should be dropped as stale
+     */
+    default boolean isConfigStateClearedAfter(String tenantId, String configId, long requestEpochMillis) {
+        return false;
+    }
 }

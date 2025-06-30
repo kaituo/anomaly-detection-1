@@ -40,7 +40,7 @@ public class ValidateAnomalyDetectorRequestTests extends OpenSearchSingleNodeTes
         TimeValue requestTimeout = new TimeValue(1000L);
         String typeStr = "type";
 
-        ValidateConfigRequest request1 = new ValidateConfigRequest(AnalysisType.AD, detector, typeStr, 1, 1, 1, requestTimeout, 10);
+        ValidateConfigRequest request1 = new ValidateConfigRequest(AnalysisType.AD, detector, typeStr, 1, 1, 1, requestTimeout, 10, null);
 
         // Test serialization
         BytesStreamOutput output = new BytesStreamOutput();

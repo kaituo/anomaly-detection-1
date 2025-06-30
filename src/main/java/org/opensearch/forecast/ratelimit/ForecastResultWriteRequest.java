@@ -28,7 +28,19 @@ public class ForecastResultWriteRequest extends ResultWriteRequest<ForecastResul
         String resultIndex,
         String flattenResultIndex
     ) {
-        super(expirationEpochMs, forecasterId, priority, result, resultIndex, flattenResultIndex);
+        this(expirationEpochMs, forecasterId, priority, result, resultIndex, flattenResultIndex, null);
+    }
+
+    public ForecastResultWriteRequest(
+        long expirationEpochMs,
+        String forecasterId,
+        RequestPriority priority,
+        ForecastResult result,
+        String resultIndex,
+        String flattenResultIndex,
+        String dataSourceId
+    ) {
+        super(expirationEpochMs, forecasterId, priority, result, resultIndex, flattenResultIndex, result.getTenantId(), dataSourceId);
     }
 
     public ForecastResultWriteRequest(StreamInput in) throws IOException {

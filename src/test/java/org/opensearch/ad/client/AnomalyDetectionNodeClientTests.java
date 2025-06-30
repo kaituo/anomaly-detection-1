@@ -12,7 +12,6 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.ad.model.AnomalyDetector.DETECTOR_TYPE_FIELD;
 import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
 
@@ -131,19 +130,19 @@ public class AnomalyDetectionNodeClientTests extends HistoricalAnalysisIntegTest
     public void testSearchAnomalyResults_Empty() throws IOException {
         createADResultIndex();
         SearchResponse searchResponse = adClient
-            .searchAnomalyResults(TestHelpers.matchAllRequest().indices(ALL_AD_RESULTS_INDEX_PATTERN))
+            .searchAnomalyResults(TestHelpers.matchAllRequest().indices(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN))
             .actionGet(10000);
         assertEquals(0, searchResponse.getInternalResponse().hits().getTotalHits().value());
     }
 
     @Test
     public void testSearchAnomalyResults_Populated() throws IOException {
-        deleteIndexIfExists(ALL_AD_RESULTS_INDEX_PATTERN);
+        deleteIndexIfExists(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN);
         createADResultIndex();
         String adResultId = createADResult(TestHelpers.randomAnomalyDetectResult());
 
         SearchResponse searchResponse = adClient
-            .searchAnomalyResults(TestHelpers.matchAllRequest().indices(ALL_AD_RESULTS_INDEX_PATTERN))
+            .searchAnomalyResults(TestHelpers.matchAllRequest().indices(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN))
             .actionGet(10000);
 
         assertEquals(1, searchResponse.getInternalResponse().hits().getTotalHits().value());
@@ -153,7 +152,7 @@ public class AnomalyDetectionNodeClientTests extends HistoricalAnalysisIntegTest
     @Test
     public void testGetDetectorProfile_NoIndices() throws ExecutionException, InterruptedException {
         deleteIndexIfExists(ADCommonName.CONFIG_INDEX);
-        deleteIndexIfExists(ALL_AD_RESULTS_INDEX_PATTERN);
+        deleteIndexIfExists(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN);
         deleteIndexIfExists(ADCommonName.DETECTION_STATE_INDEX);
 
         GetConfigRequest profileRequest = new GetConfigRequest(
@@ -165,6 +164,7 @@ public class AnomalyDetectionNodeClientTests extends HistoricalAnalysisIntegTest
             "",
             "",
             false,
+            null,
             null
         );
 
@@ -231,6 +231,7 @@ public class AnomalyDetectionNodeClientTests extends HistoricalAnalysisIntegTest
             "",
             "",
             false,
+            null,
             null
         );
 
@@ -274,7 +275,8 @@ public class AnomalyDetectionNodeClientTests extends HistoricalAnalysisIntegTest
             10,
             5,
             org.opensearch.common.unit.TimeValue.timeValueSeconds(30),
-            2
+            2,
+            null
         );
 
         ValidateConfigResponse response = adClient.validateAnomalyDetector(validateRequest).actionGet(10000);

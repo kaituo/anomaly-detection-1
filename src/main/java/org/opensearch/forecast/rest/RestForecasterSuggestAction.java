@@ -71,6 +71,7 @@ public class RestForecasterSuggestAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected BaseRestHandler.RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ForecastEnabledSetting.isForecastEnabled()) {
             throw new IllegalStateException(ForecastCommonMessages.DISABLED_ERR_MSG);

@@ -16,8 +16,14 @@ import org.opensearch.action.update.UpdateRequest;
 public class CheckpointWriteRequest extends QueuedRequest {
     private final UpdateRequest updateRequest;
 
-    public CheckpointWriteRequest(long expirationEpochMs, String detectorId, RequestPriority priority, UpdateRequest updateRequest) {
-        super(expirationEpochMs, detectorId, priority);
+    public CheckpointWriteRequest(
+        long expirationEpochMs,
+        String detectorId,
+        RequestPriority priority,
+        UpdateRequest updateRequest,
+        String tenantId
+    ) {
+        super(expirationEpochMs, detectorId, priority, tenantId);
         this.updateRequest = updateRequest;
     }
 

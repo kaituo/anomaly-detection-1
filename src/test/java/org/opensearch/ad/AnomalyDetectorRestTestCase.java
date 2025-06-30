@@ -21,9 +21,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import org.apache.hc.core5.http.Header;
 import org.apache.hc.core5.http.HttpHeaders;
 import org.apache.hc.core5.http.message.BasicHeader;
 import org.apache.logging.log4j.LogManager;
@@ -135,8 +137,13 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
     }
 
     protected AnomalyDetector createAnomalyDetector(AnomalyDetector detector, Boolean refresh, RestClient client) throws IOException {
+        return createAnomalyDetector(detector, refresh, client, null);
+    }
+
+    protected AnomalyDetector createAnomalyDetector(AnomalyDetector detector, Boolean refresh, RestClient client, List<Header> headers)
+        throws IOException {
         Response response = TestHelpers
-            .makeRequest(client, "POST", TestHelpers.AD_BASE_DETECTORS_URI, ImmutableMap.of(), TestHelpers.toHttpEntity(detector), null);
+            .makeRequest(client, "POST", TestHelpers.AD_BASE_DETECTORS_URI, ImmutableMap.of(), TestHelpers.toHttpEntity(detector), headers);
         assertEquals("Create anomaly detector failed", RestStatus.CREATED, TestHelpers.restStatus(response));
 
         Map<String, Object> detectorJson = jsonXContent
@@ -148,7 +155,7 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
         do {
             i++;
             try {
-                detectorInIndex = getConfig(detectorId, client);
+                detectorInIndex = headers == null ? getConfig(detectorId, client) : getConfig(detectorId, headers, client);
                 assertNotNull(detectorInIndex);
                 break;
             } catch (Exception e) {
@@ -234,12 +241,21 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
         return (AnomalyDetector) getConfig(detectorId, header, false, false, client)[0];
     }
 
+    public AnomalyDetector getConfig(String detectorId, List<Header> headers, RestClient client) throws IOException {
+        return (AnomalyDetector) getConfig(detectorId, headers, false, false, client)[0];
+    }
+
     public ToXContentObject[] getConfig(String detectorId, boolean returnJob, RestClient client) throws IOException {
         BasicHeader header = new BasicHeader(HttpHeaders.CONTENT_TYPE, "application/json");
         return getConfig(detectorId, header, returnJob, false, client);
     }
 
     public ToXContentObject[] getConfig(String detectorId, BasicHeader header, boolean returnJob, boolean returnTask, RestClient client)
+        throws IOException {
+        return getConfig(detectorId, ImmutableList.of(header), returnJob, returnTask, client);
+    }
+
+    public ToXContentObject[] getConfig(String detectorId, List<Header> headers, boolean returnJob, boolean returnTask, RestClient client)
         throws IOException {
         Response response = TestHelpers
             .makeRequest(
@@ -248,7 +264,7 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
                 TestHelpers.AD_BASE_DETECTORS_URI + "/" + detectorId + "?job=" + returnJob + "&task=" + returnTask,
                 null,
                 "",
-                ImmutableList.of(header)
+                headers
             );
         assertEquals("Unable to get anomaly detector " + detectorId, RestStatus.OK, TestHelpers.restStatus(response));
         XContentParser parser = createAdParser(XContentType.JSON.xContent(), response.getEntity().getContent());
@@ -323,7 +339,8 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
                 detector.getFlattenResultIndexMapping(),
                 detector.getLastBreakingUIChangeTime(),
                 detector.getFrequency(),
-                detector.getAutoCreated()
+                detector.getAutoCreated(),
+                null
             ),
             detectorJob,
             historicalAdTask,
@@ -607,7 +624,8 @@ public abstract class AnomalyDetectorRestTestCase extends ODFERestTestCase {
             anomalyDetector.getFlattenResultIndexMapping(),
             Instant.now(),
             anomalyDetector.getFrequency(),
-            anomalyDetector.getAutoCreated()
+            anomalyDetector.getAutoCreated(),
+            null
         );
         return detector;
     }

@@ -15,6 +15,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.transport.SearchADTasksAction;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 
 import com.google.common.collect.ImmutableList;
@@ -28,13 +29,14 @@ public class RestSearchADTasksAction extends AbstractADSearchAction<ADTask> {
     private static final String URL_PATH = TimeSeriesAnalyticsPlugin.AD_BASE_DETECTORS_URI + "/tasks/_search";
     private final String SEARCH_ANOMALY_DETECTION_TASKS = "search_anomaly_detection_tasks";
 
-    public RestSearchADTasksAction() {
+    public RestSearchADTasksAction(Settings settings) {
         super(
             ImmutableList.of(),
             ImmutableList.of(Pair.of(URL_PATH, LEGACY_URL_PATH)),
             ADCommonName.DETECTION_STATE_INDEX,
             ADTask.class,
-            SearchADTasksAction.INSTANCE
+            SearchADTasksAction.INSTANCE,
+            settings
         );
     }
 

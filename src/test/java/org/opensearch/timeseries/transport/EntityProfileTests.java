@@ -12,6 +12,7 @@
 package org.opensearch.timeseries.transport;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -139,12 +140,12 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
         cacheProvider = mock(ADCacheProvider.class);
         ADPriorityCache cache = mock(ADPriorityCache.class);
         updates = 1L;
-        when(cache.getTotalUpdates(anyString(), anyString())).thenReturn(updates);
-        when(cache.isActive(anyString(), anyString())).thenReturn(isActive);
-        when(cache.getLastActiveTime(anyString(), anyString())).thenReturn(lastActiveTimestamp);
+        when(cache.getTotalUpdates(nullable(String.class), anyString(), anyString())).thenReturn(updates);
+        when(cache.isActive(nullable(String.class), anyString(), anyString())).thenReturn(isActive);
+        when(cache.getLastActiveTime(nullable(String.class), anyString(), anyString())).thenReturn(lastActiveTimestamp);
         Map<String, Long> modelSizeMap = new HashMap<>();
         modelSizeMap.put(modelId, modelSize);
-        when(cache.getModelSize(anyString())).thenReturn(modelSizeMap);
+        when(cache.getModelSize(anyString(), anyString())).thenReturn(modelSizeMap);
         when(cacheProvider.get()).thenReturn(cache);
 
         action = new ADEntityProfileTransportAction(actionFilters, transportService, settings, hashRing, clusterService, cacheProvider);
@@ -154,7 +155,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
 
         entity = Entity.createSingleAttributeEntity(categoryName, entityValue);
 
-        request = new EntityProfileRequest(detectorId, entity, state);
+        request = new EntityProfileRequest(detectorId, entity, state, null);
 
         normalTransportInterceptor = new TransportInterceptor() {
             @Override
@@ -289,7 +290,7 @@ public class EntityProfileTests extends AbstractTimeSeriesTest {
         when(hashRing.getOwningNodeWithSameLocalVersionForRealtime(anyString())).thenReturn(Optional.of(localNode));
         when(clusterService.localNode()).thenReturn(localNode);
 
-        request = new EntityProfileRequest(detectorId, entity, all);
+        request = new EntityProfileRequest(detectorId, entity, all, null);
         action.doExecute(task, request, future);
 
         EntityProfileResponse expectedResponse = new EntityProfileResponse(isActive, lastActiveTimestamp, updates, null);

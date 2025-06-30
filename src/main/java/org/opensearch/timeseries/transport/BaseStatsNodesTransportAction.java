@@ -82,7 +82,7 @@ public class BaseStatsNodesTransportAction extends
 
         for (String statName : stats.getNodeStats().keySet()) {
             if (statsToBeRetrieved.contains(statName)) {
-                statValues.put(statName, stats.getStats().get(statName).getValue());
+                statValues.put(statName, stats.getStats().get(statName).getValueForTenant(statsRequest.getTenantId()));
             }
         }
 

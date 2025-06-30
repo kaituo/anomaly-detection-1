@@ -29,11 +29,10 @@ public class ValidateForecasterActionHandlerTests extends AbstractForecasterActi
     protected ValidateForecasterActionHandler handler;
 
     public void testCreateOrUpdateConfigException() throws InterruptedException {
-        doThrow(IllegalArgumentException.class).when(forecastISM).doesConfigIndexExist();
+        doThrow(IllegalArgumentException.class).when(forecastIndexManagement).doesConfigIndexExist();
         handler = new ValidateForecasterActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             forecastISM,
             forecaster,
             requestTimeout,
@@ -47,7 +46,8 @@ public class ValidateForecasterActionHandlerTests extends AbstractForecasterActi
             searchFeatureDao,
             ValidationAspect.FORECASTER.getName(),
             clock,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -76,11 +76,11 @@ public class ValidateForecasterActionHandlerTests extends AbstractForecasterActi
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         handler = new ValidateForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             forecastISM,
             forecaster,
             requestTimeout,
@@ -94,7 +94,8 @@ public class ValidateForecasterActionHandlerTests extends AbstractForecasterActi
             searchFeatureDao,
             ValidationAspect.FORECASTER.getName(),
             clock,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {

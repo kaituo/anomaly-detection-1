@@ -14,6 +14,7 @@ package org.opensearch.ad.ratelimit;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -36,8 +37,8 @@ import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -93,14 +94,16 @@ public class CheckpointMaintainWorkerTests extends AbstractRateLimitingTest {
 
         ADPriorityCache cache = mock(ADPriorityCache.class);
         checkpointDao = mock(ADCheckpointDao.class);
+        when(checkpointDao.resolveCheckpointIndexName(nullable(String.class), anyString(), anyString(), anyString()))
+            .thenAnswer(invocation -> invocation.getArgument(3));
         String indexName = ADCommonName.CHECKPOINT_INDEX_NAME;
         Setting<TimeValue> checkpointInterval = AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ;
 
         ModelState<ThresholdedRandomCutForest> state = MLUtil
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
-        when(cache.getForMaintainance(anyString(), anyString())).thenReturn(Optional.of(state));
+        when(cache.getForMaintainance(nullable(String.class), anyString(), anyString())).thenReturn(Optional.of(state));
         adCacheProvider.set(cache);
-        CheckPointMaintainRequestAdapter<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADPriorityCache> adapter =
+        CheckPointMaintainRequestAdapter<ThresholdedRandomCutForest, ADIndex, ADDelegatingDataManagement, ADCheckpointDao, ADPriorityCache> adapter =
             new CheckPointMaintainRequestAdapter<>(
                 checkpointDao,
                 indexName,
@@ -134,8 +137,20 @@ public class CheckpointMaintainWorkerTests extends AbstractRateLimitingTest {
 
         // use Long.MAX_VALUE instead of Integer.MAX_VALUE. Integer.MAX_VALUE is only ~2.1 billion ms after the epoch (Jan 1970),
         // so it is far behind the stubbed current time (~1.7 trillion ms)
-        request = new CheckpointMaintainRequest(Long.MAX_VALUE, detectorId, RequestPriority.LOW, entity.getModelId(detectorId).get());
-        request2 = new CheckpointMaintainRequest(Long.MAX_VALUE, detectorId, RequestPriority.LOW, entity2.getModelId(detectorId).get());
+        request = new CheckpointMaintainRequest(
+            Long.MAX_VALUE,
+            detectorId,
+            RequestPriority.LOW,
+            entity.getModelId(null, detectorId).get(),
+            null
+        );
+        request2 = new CheckpointMaintainRequest(
+            Long.MAX_VALUE,
+            detectorId,
+            RequestPriority.LOW,
+            entity2.getModelId(null, detectorId).get(),
+            null
+        );
 
         requests = new ArrayList<>();
         requests.add(request);

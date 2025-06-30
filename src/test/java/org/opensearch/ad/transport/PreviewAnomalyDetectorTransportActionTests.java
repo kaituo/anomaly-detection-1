@@ -12,7 +12,9 @@
 package org.opensearch.ad.transport;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -25,10 +27,11 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -37,18 +40,16 @@ import org.opensearch.OpenSearchStatusException;
 import org.opensearch.Version;
 import org.opensearch.action.admin.indices.create.CreateIndexRequest;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.index.IndexRequest;
 import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.AnomalyDetectorRunner;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.ClusterState;
@@ -60,21 +61,26 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.commons.ConfigConstants;
+import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchSingleNodeTestCase;
-import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.Features;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import com.google.common.collect.ImmutableMap;
 
@@ -87,6 +93,8 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     private ADModelManager modelManager;
     private Task task;
     private CircuitBreakerService circuitBreaker;
+    private StateManager stateManager;
+    private ADDelegatingDataManagement dataManagement;
 
     @Override
     @Before
@@ -130,15 +138,25 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
         runner = new AnomalyDetectorRunner(modelManager, featureManager, AnomalyDetectorSettings.MAX_PREVIEW_RESULTS);
         circuitBreaker = mock(CircuitBreakerService.class);
         when(circuitBreaker.isOpen()).thenReturn(false);
+        stateManager = mock(StateManager.class);
+        dataManagement = mock(ADDelegatingDataManagement.class);
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.empty());
+            return null;
+        }).when(stateManager).getConfig(any(), any(), eq(AnalysisType.AD), anyBoolean(), any());
+        RunContext runContext = new SdkRunContext();
         action = new PreviewAnomalyDetectorTransportAction(
             Settings.EMPTY,
             mock(TransportService.class),
             clusterService,
             mock(ActionFilters.class),
-            client(),
             runner,
             xContentRegistry(),
-            circuitBreaker
+            circuitBreaker,
+            stateManager,
+            dataManagement,
+            runContext
         );
     }
 
@@ -147,7 +165,13 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportAction() throws IOException, InterruptedException {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
-        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(detector, detector.getId(), Instant.now(), Instant.now());
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
+            detector,
+            detector.getId(),
+            Instant.now(),
+            Instant.now(),
+            null
+        );
         ActionListener<PreviewAnomalyDetectorResponse> previewResponse = new ActionListener<PreviewAnomalyDetectorResponse>() {
             @Override
             public void onResponse(PreviewAnomalyDetectorResponse response) {
@@ -184,12 +208,66 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
     }
 
+    @SuppressWarnings("unchecked")
+    @Test
+    public void testPreviewTransportActionSetsTenantOnInlineDetector() throws IOException, InterruptedException {
+        final CountDownLatch inProgressLatch = new CountDownLatch(1);
+        final AtomicReference<String> previewTenantId = new AtomicReference<>();
+        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
+        detector.setTenantId(null);
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
+            detector,
+            detector.getId(),
+            Instant.now(),
+            Instant.now(),
+            "tenant-a"
+        );
+        ActionListener<PreviewAnomalyDetectorResponse> previewResponse = new ActionListener<PreviewAnomalyDetectorResponse>() {
+            @Override
+            public void onResponse(PreviewAnomalyDetectorResponse response) {
+                try {
+                    XContentBuilder previewBuilder = response.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS);
+                    Assert.assertNotNull(previewBuilder);
+                    inProgressLatch.countDown();
+                } catch (IOException e) {
+                    Assert.assertTrue(false);
+                }
+            }
+
+            @Override
+            public void onFailure(Exception e) {
+                Assert.assertTrue(false);
+            }
+        };
+
+        doReturn(TestHelpers.randomThresholdingResults()).when(modelManager).getPreviewResults(any(), any());
+
+        doAnswer(responseMock -> {
+            AnomalyDetector previewDetector = responseMock.getArgument(0);
+            previewTenantId.set(previewDetector.getTenantId());
+            ActionListener<Features> listener = responseMock.getArgument(3);
+            listener.onResponse(TestHelpers.randomFeatures());
+            return null;
+        }).when(featureManager).getPreviewFeatures(any(), anyLong(), anyLong(), any());
+
+        action.doExecute(task, request, previewResponse);
+
+        assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
+        assertEquals("tenant-a", previewTenantId.get());
+    }
+
     @Test
     public void testPreviewTransportActionWithNoFeature() throws IOException, InterruptedException {
         // Detector with no feature, Preview should fail
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(Collections.emptyList());
-        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(detector, detector.getId(), Instant.now(), Instant.now());
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
+            detector,
+            detector.getId(),
+            Instant.now(),
+            Instant.now(),
+            null
+        );
         ActionListener<PreviewAnomalyDetectorResponse> previewResponse = new ActionListener<PreviewAnomalyDetectorResponse>() {
             @Override
             public void onResponse(PreviewAnomalyDetectorResponse response) {
@@ -210,7 +288,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportActionWithNoDetector() throws IOException, InterruptedException {
         // When detectorId is null, preview should fail
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(null, "123", Instant.now(), Instant.now());
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(null, "123", Instant.now(), Instant.now(), null);
         ActionListener<PreviewAnomalyDetectorResponse> previewResponse = new ActionListener<PreviewAnomalyDetectorResponse>() {
             @Override
             public void onResponse(PreviewAnomalyDetectorResponse response) {
@@ -219,7 +297,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
 
             @Override
             public void onFailure(Exception e) {
-                Assert.assertTrue(e.getMessage().contains("Could not execute get query to find detector"));
+                Assert.assertTrue(e.getMessage().contains("Can't find anomaly detector with id:123"));
                 inProgressLatch.countDown();
             }
         };
@@ -231,7 +309,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportActionWithDetectorID() throws IOException, InterruptedException {
         // When AD index does not exist, cannot query the detector
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(null, "1234", Instant.now(), Instant.now());
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(null, "1234", Instant.now(), Instant.now(), null);
         ActionListener<PreviewAnomalyDetectorResponse> previewResponse = new ActionListener<PreviewAnomalyDetectorResponse>() {
             @Override
             public void onResponse(PreviewAnomalyDetectorResponse response) {
@@ -240,7 +318,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
 
             @Override
             public void onFailure(Exception e) {
-                Assert.assertTrue(e.getMessage().contains("Could not execute get query to find detector"));
+                Assert.assertTrue(e.getMessage().contains("Can't find anomaly detector with id:1234"));
                 inProgressLatch.countDown();
             }
         };
@@ -252,7 +330,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportActionWithIndex() throws IOException, InterruptedException {
         // When AD index exists, and detector does not exist
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(null, "1234", Instant.now(), Instant.now());
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(null, "1234", Instant.now(), Instant.now(), null);
         Settings indexSettings = Settings.builder().put("index.number_of_shards", 5).put("index.number_of_replicas", 1).build();
         CreateIndexRequest indexRequest = new CreateIndexRequest(ADCommonName.CONFIG_INDEX, indexSettings);
         client().admin().indices().create(indexRequest).actionGet();
@@ -277,40 +355,40 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportActionNoContext() throws IOException, InterruptedException {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         Settings settings = Settings.builder().put(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES.getKey(), true).build();
-        Client client = mock(Client.class);
         ThreadContext threadContext = new ThreadContext(settings);
         threadContext.putTransient(ConfigConstants.OPENSEARCH_SECURITY_USER_INFO_THREAD_CONTEXT, "alice|odfe,aes|engineering,operations");
-        org.opensearch.threadpool.ThreadPool mockThreadPool = mock(ThreadPool.class);
-        when(client.threadPool()).thenReturn(mockThreadPool);
-        when(mockThreadPool.getThreadContext()).thenReturn(threadContext);
+        RunContext runContext = new ThreadRunContext(threadContext);
+        StateManager stateManager = mock(StateManager.class);
+        ADDelegatingDataManagement dataManagement = mock(ADDelegatingDataManagement.class);
+        User resourceUser = new User("bob", Collections.singletonList("sales"), Collections.emptyList(), Collections.emptyList());
+        AnomalyDetector existingDetector = mock(AnomalyDetector.class);
+        when(existingDetector.getUser()).thenReturn(resourceUser);
+        when(dataManagement.doesConfigIndexExist()).thenReturn(true);
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(existingDetector));
+            return null;
+        }).when(stateManager).getConfig(any(), any(), any(AnalysisType.class), anyBoolean(), any());
         PreviewAnomalyDetectorTransportAction previewAction = new PreviewAnomalyDetectorTransportAction(
             settings,
             mock(TransportService.class),
             clusterService,
             mock(ActionFilters.class),
-            client,
             runner,
             xContentRegistry(),
-            circuitBreaker
+            circuitBreaker,
+            stateManager,
+            dataManagement,
+            runContext
         );
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
-        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(detector, detector.getId(), Instant.now(), Instant.now());
-
-        GetResponse getDetectorResponse = TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX);
-        doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            assertTrue(
-                String.format(Locale.ROOT, "The size of args is %d.  Its content is %s", args.length, Arrays.toString(args)),
-                args.length == 2
-            );
-
-            assertTrue(args[0] instanceof GetRequest);
-            assertTrue(args[1] instanceof ActionListener);
-
-            ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
-            listener.onResponse(getDetectorResponse);
-            return null;
-        }).when(client).get(any(GetRequest.class), any());
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
+            detector,
+            detector.getId(),
+            Instant.now(),
+            Instant.now(),
+            null
+        );
 
         ActionListener<PreviewAnomalyDetectorResponse> responseActionListener = new ActionListener<PreviewAnomalyDetectorResponse>() {
             @Override
@@ -333,7 +411,7 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testPreviewTransportActionWithDetector() throws IOException, InterruptedException {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         CreateIndexResponse createResponse = TestHelpers
-            .createIndex(client().admin(), ADCommonName.CONFIG_INDEX, ADIndexManagement.getConfigMappings());
+            .createIndex(client().admin(), ADCommonName.CONFIG_INDEX, IndexResourceLoader.getConfigMappings());
         Assert.assertNotNull(createResponse);
 
         AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
@@ -347,7 +425,8 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
             null,
             indexResponse.getId(),
             Instant.now(),
-            Instant.now()
+            Instant.now(),
+            null
         );
         ActionListener<PreviewAnomalyDetectorResponse> previewResponse = new ActionListener<PreviewAnomalyDetectorResponse>() {
             @Override
@@ -372,6 +451,11 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
                 Assert.assertTrue(false);
             }
         };
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(detector));
+            return null;
+        }).when(stateManager).getConfig(eq(indexResponse.getId()), any(), eq(AnalysisType.AD), anyBoolean(), any());
         doReturn(TestHelpers.randomThresholdingResults()).when(modelManager).getPreviewResults(any(), any());
 
         doAnswer(responseMock -> {
@@ -388,7 +472,13 @@ public class PreviewAnomalyDetectorTransportActionTests extends OpenSearchSingle
     public void testCircuitBreakerOpen() throws IOException, InterruptedException {
         // preview has no detector id
         AnomalyDetector detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(null, Arrays.asList("a"));
-        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(detector, detector.getId(), Instant.now(), Instant.now());
+        PreviewAnomalyDetectorRequest request = new PreviewAnomalyDetectorRequest(
+            detector,
+            detector.getId(),
+            Instant.now(),
+            Instant.now(),
+            null
+        );
 
         when(circuitBreaker.isOpen()).thenReturn(true);
 

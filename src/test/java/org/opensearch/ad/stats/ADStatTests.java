@@ -18,6 +18,8 @@ import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
 import org.opensearch.timeseries.stats.suppliers.SettableSupplier;
+import org.opensearch.timeseries.stats.suppliers.TenantAwareCounterSupplier;
+import org.opensearch.timeseries.stats.suppliers.TenantAwareSettableSupplier;
 
 public class ADStatTests extends OpenSearchTestCase {
 
@@ -47,6 +49,18 @@ public class ADStatTests extends OpenSearchTestCase {
     }
 
     @Test
+    public void testTenantAwareSetValue() {
+        TimeSeriesStat<Long> stat = new TimeSeriesStat<>(false, new TenantAwareSettableSupplier());
+
+        stat.setValueForTenant("tenant-a", 10L);
+        stat.setValueForTenant("tenant-b", 20L);
+
+        assertEquals(10L, (long) stat.getValueForTenant("tenant-a"));
+        assertEquals(20L, (long) stat.getValueForTenant("tenant-b"));
+        assertEquals(0L, (long) stat.getValueForTenant("tenant-c"));
+    }
+
+    @Test
     public void testIncrement() {
         TimeSeriesStat<Long> incrementStat = new TimeSeriesStat<>(false, new CounterSupplier());
 
@@ -58,6 +72,20 @@ public class ADStatTests extends OpenSearchTestCase {
         // Ensure that no problems occur for a stat that cannot be incremented
         TimeSeriesStat<String> nonIncStat = new TimeSeriesStat<>(false, new TestSupplier());
         nonIncStat.increment();
+    }
+
+    @Test
+    public void testTenantAwareIncrement() {
+        TimeSeriesStat<Long> stat = new TimeSeriesStat<>(false, new TenantAwareCounterSupplier());
+
+        stat.incrementForTenant("tenant-a");
+        stat.incrementForTenant("tenant-a");
+        stat.incrementForTenant("tenant-b");
+
+        assertEquals(2L, (long) stat.getValueForTenant("tenant-a"));
+        assertEquals(1L, (long) stat.getValueForTenant("tenant-b"));
+        assertEquals(0L, (long) stat.getValueForTenant("tenant-c"));
+        assertEquals(3L, (long) stat.getValue());
     }
 
     private class TestSupplier implements Supplier<String> {

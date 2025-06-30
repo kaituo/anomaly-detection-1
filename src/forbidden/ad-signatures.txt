@@ -13,5 +13,16 @@
  * permissions and limitations under the License.
  */
  
- @defaultMessage use format with Locale
- java.lang.String#format(java.lang.String,java.lang.Object[])
+@defaultMessage use format with Locale
+java.lang.String#format(java.lang.String,java.lang.Object[])
+
+@defaultMessage Transport client usage is forbidden; use multi-tenant-safe access paths.
+org.opensearch.transport.client.Client
+
+@defaultMessage Avoid direct ClusterService#state() usage.
+org.opensearch.cluster.service.ClusterService#state()
+
+@defaultMessage Avoid direct TransportService#sendRequest usage; use multi-tenant-safe access paths.
+org.opensearch.transport.TransportService#sendRequest(org.opensearch.cluster.node.DiscoveryNode,java.lang.String,org.opensearch.transport.TransportRequest,org.opensearch.transport.TransportResponseHandler)
+org.opensearch.transport.TransportService#sendRequest(org.opensearch.cluster.node.DiscoveryNode,java.lang.String,org.opensearch.transport.TransportRequest,org.opensearch.transport.TransportRequestOptions,org.opensearch.transport.TransportResponseHandler)
+org.opensearch.transport.TransportService#sendRequest(org.opensearch.transport.Transport$Connection,java.lang.String,org.opensearch.transport.TransportRequest,org.opensearch.transport.TransportRequestOptions,org.opensearch.transport.TransportResponseHandler)

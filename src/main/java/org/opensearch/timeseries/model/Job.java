@@ -32,6 +32,7 @@ import org.opensearch.jobscheduler.spi.schedule.IntervalSchedule;
 import org.opensearch.jobscheduler.spi.schedule.Schedule;
 import org.opensearch.jobscheduler.spi.schedule.ScheduleParser;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ParseUtils;
 
@@ -63,9 +64,9 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
     public static final String ENABLED_TIME_FIELD = "enabled_time";
     public static final String DISABLED_TIME_FIELD = "disabled_time";
     public static final String USER_FIELD = "user";
-    private static final String RESULT_INDEX_FIELD = "result_index";
-    private static final String TYPE_FIELD = "type";
-
+    public static final String RESULT_INDEX_FIELD = "result_index";
+    public static final String TYPE_FIELD = "type";
+    public static final String TENANT_ID_FIELD = CommonName.TENANT_ID_FIELD;
     // name is config id
     private final String name;
     private final Schedule schedule;
@@ -76,6 +77,7 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
     private final Instant lastUpdateTime;
     private final Long lockDurationSeconds;
     private final User user;
+    private final String tenantId;
     private String resultIndex;
     private AnalysisType analysisType;
 
@@ -89,6 +91,7 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
         Instant lastUpdateTime,
         Long lockDurationSeconds,
         User user,
+        String tenantId,
         String resultIndex,
         AnalysisType type
     ) {
@@ -101,6 +104,7 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
         this.lastUpdateTime = lastUpdateTime;
         this.lockDurationSeconds = lockDurationSeconds;
         this.user = user;
+        this.tenantId = tenantId;
         this.resultIndex = resultIndex;
         this.analysisType = type;
     }
@@ -125,6 +129,7 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
         }
         resultIndex = input.readOptionalString();
         this.analysisType = input.readEnum(AnalysisType.class);
+        tenantId = input.readOptionalString();
     }
 
     @Override
@@ -133,17 +138,22 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
             .startObject()
             .field(NAME_FIELD, name)
             .field(SCHEDULE_FIELD, schedule)
-            .field(WINDOW_DELAY_FIELD, windowDelay)
             .field(IS_ENABLED_FIELD, isEnabled)
             .field(ENABLED_TIME_FIELD, enabledTime.toEpochMilli())
             .field(LAST_UPDATE_TIME_FIELD, lastUpdateTime.toEpochMilli())
             .field(LOCK_DURATION_SECONDS, lockDurationSeconds)
             .field(TYPE_FIELD, analysisType);
+        if (windowDelay != null) {
+            xContentBuilder.field(WINDOW_DELAY_FIELD, windowDelay);
+        }
         if (disabledTime != null) {
             xContentBuilder.field(DISABLED_TIME_FIELD, disabledTime.toEpochMilli());
         }
         if (user != null) {
             xContentBuilder.field(USER_FIELD, user);
+        }
+        if (tenantId != null) {
+            xContentBuilder.field(TENANT_ID_FIELD, tenantId);
         }
         if (resultIndex != null) {
             xContentBuilder.field(RESULT_INDEX_FIELD, resultIndex);
@@ -174,6 +184,7 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
         }
         output.writeOptionalString(resultIndex);
         output.writeEnum(analysisType);
+        output.writeOptionalString(tenantId);
     }
 
     public static Job parse(XContentParser parser) throws IOException {
@@ -187,6 +198,7 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
         Instant lastUpdateTime = null;
         Long lockDurationSeconds = TimeSeriesSettings.DEFAULT_JOB_LOC_DURATION_SECONDS;
         User user = null;
+        String tenantId = null;
         String resultIndex = null;
         String analysisType = null;
 
@@ -203,7 +215,9 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
                     schedule = ScheduleParser.parse(parser);
                     break;
                 case WINDOW_DELAY_FIELD:
-                    windowDelay = TimeConfiguration.parse(parser);
+                    if (parser.currentToken() != XContentParser.Token.VALUE_NULL) {
+                        windowDelay = TimeConfiguration.parse(parser);
+                    }
                     break;
                 case IS_ENABLED_FIELD:
                     isEnabled = parser.booleanValue();
@@ -229,6 +243,9 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
                 case TYPE_FIELD:
                     analysisType = parser.text();
                     break;
+                case TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -244,10 +261,9 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
             lastUpdateTime,
             lockDurationSeconds,
             user,
+            tenantId,
             resultIndex,
-            (Strings.isEmpty(analysisType) || AnalysisType.AD == AnalysisType.valueOf(analysisType))
-                ? AnalysisType.AD
-                : AnalysisType.FORECAST
+            Strings.isEmpty(analysisType) ? AnalysisType.AD : AnalysisType.valueOf(analysisType)
         );
     }
 
@@ -268,12 +284,13 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
             && Objects.equal(getLastUpdateTime(), that.getLastUpdateTime())
             && Objects.equal(getLockDurationSeconds(), that.getLockDurationSeconds())
             && Objects.equal(getCustomResultIndexOrAlias(), that.getCustomResultIndexOrAlias())
+            && Objects.equal(getTenantId(), that.getTenantId())
             && Objects.equal(getAnalysisType(), that.getAnalysisType());
     }
 
     @Override
     public int hashCode() {
-        return Objects.hashCode(name, schedule, isEnabled, enabledTime, lastUpdateTime, analysisType);
+        return Objects.hashCode(name, schedule, isEnabled, enabledTime, lastUpdateTime, tenantId, analysisType);
     }
 
     @Override
@@ -325,4 +342,9 @@ public class Job implements Writeable, ToXContentObject, ScheduledJobParameter {
     public AnalysisType getAnalysisType() {
         return analysisType;
     }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
 }

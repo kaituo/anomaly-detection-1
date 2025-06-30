@@ -21,25 +21,28 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.Strings;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.model.Config;
 
 public class TimeSeriesSafeSecurityInjector extends SafeSecurityInjector {
     private static final Logger LOG = LogManager.getLogger(TimeSeriesSafeSecurityInjector.class);
-    private NodeStateManager nodeStateManager;
+    private StateManager nodeStateManager;
     private AnalysisType context;
+    private final String tenantId;
 
     public TimeSeriesSafeSecurityInjector(
         String configId,
+        String tenantId,
         Settings settings,
         ThreadContext tc,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         AnalysisType context
     ) {
         super(configId, settings, tc);
         this.nodeStateManager = stateManager;
         this.context = context;
+        this.tenantId = tenantId;
     }
 
     public void injectUserRolesFromConfig(ActionListener<Void> injectListener) {
@@ -72,7 +75,7 @@ public class TimeSeriesSafeSecurityInjector extends SafeSecurityInjector {
         // We don't accept a passed-in Config because the caller might mistakenly not insert any user info in the
         // constructed Config and thus poses risks. In the case, if the user is null, we will give admin role.
         // maybe used by run once. Don't cache to be safe
-        nodeStateManager.getConfig(id, context, false, getConfigListener);
+        nodeStateManager.getConfig(id, tenantId, context, false, getConfigListener);
     }
 
     public void injectUserRoles(User user) {

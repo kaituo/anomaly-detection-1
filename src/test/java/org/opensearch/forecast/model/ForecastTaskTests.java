@@ -35,4 +35,15 @@ public class ForecastTaskTests extends OpenSearchTestCase {
         ForecastTask parsedForecastTask = ForecastTask.parse(TestHelpers.parser(forecastTaskString));
         assertEquals("Parsing forecast task doesn't work", originalTask, parsedForecastTask);
     }
+
+    public void testParseTenantIdWithoutForecaster() throws IOException {
+        ForecastTask originalTask = new ForecastTask.Builder().taskId("task123").tenantId("tenant-a").build();
+        String forecastTaskString = TestHelpers
+            .xContentBuilderToString(originalTask.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
+        assertTrue(forecastTaskString.contains("\"tenant_id\":\"tenant-a\""));
+
+        ForecastTask parsedForecastTask = ForecastTask.parse(TestHelpers.parser(forecastTaskString));
+        assertEquals("Parsing forecast task tenant id doesn't work", originalTask, parsedForecastTask);
+        assertEquals("tenant-a", parsedForecastTask.getTenantId());
+    }
 }

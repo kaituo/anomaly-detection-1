@@ -11,4 +11,27 @@ grant {
   permission javax.management.MBeanTrustPermission "register";
   permission java.lang.RuntimePermission "getClassLoader";
   permission java.lang.RuntimePermission "setContextClassLoader";
+
+  // aws credential file access
+  permission java.io.FilePermission "<<ALL FILES>>", "read";
+  permission java.io.FilePermission "/bin/sh", "execute";
+  permission java.io.FilePermission "/bin/zsh", "execute";
+
+  // AWS credentials needed for clients
+  permission java.io.FilePermission "${user.home}/.aws/-", "read";
+  // allow AWS SDK to read credential env-vars
+  permission java.lang.RuntimePermission "getenv.AWS_CONFIG_FILE";
+  permission java.lang.RuntimePermission "getenv.AWS_SHARED_CREDENTIALS_FILE";
+  permission java.lang.RuntimePermission "getenv.AWS_ACCESS_KEY_ID";
+  permission java.lang.RuntimePermission "getenv.AWS_SECRET_ACCESS_KEY";
+  permission java.lang.RuntimePermission "getenv.AWS_SESSION_TOKEN";
+  permission java.lang.RuntimePermission "getenv.AWS_PROFILE";
+  permission java.lang.RuntimePermission "getenv.AWS_REGION";
+  permission java.lang.RuntimePermission "getenv.AWS_DEFAULT_REGION";
+  permission java.lang.RuntimePermission "getenv.AWS_CONTAINER_CREDENTIALS_RELATIVE_URI";
+  permission java.lang.RuntimePermission "getenv.AWS_CONTAINER_CREDENTIALS_FULL_URI";
+  permission java.lang.RuntimePermission "getenv.AWS_CONTAINER_AUTHORIZATION_TOKEN";
+  permission java.lang.RuntimePermission "getenv.AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE";
+  permission java.lang.RuntimePermission "getenv.AWS_EC2_METADATA_DISABLED";
+
 };

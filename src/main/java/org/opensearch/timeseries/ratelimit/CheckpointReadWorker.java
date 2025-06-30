@@ -36,14 +36,13 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.IntermediateResult;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -54,6 +53,7 @@ import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.util.ActionListenerExecutor;
@@ -61,10 +61,11 @@ import org.opensearch.timeseries.util.ExceptionUtil;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointType, ColdStarterType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, IndexManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>>
+public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointType, ColdStarterType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, DataManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointType, CheckpointWriteWorkerType, ColdStarterType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>>
     extends BatchWorker<FeatureRequest, MultiGetRequest, MultiGetResponse> {
 
     private static final Logger LOG = LogManager.getLogger(CheckpointReadWorker.class);
+    private static final int MAX_CHECKPOINT_READ_OVERLOAD_RETRIES = 1;
 
     protected final ModelManagerType modelManager;
     protected final CheckpointType checkpointDao;
@@ -94,7 +95,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
         ModelManagerType modelManager,
         CheckpointType checkpointDao,
         ColdStartWorkerType entityColdStartWorker,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         Provider<? extends TimeSeriesCache<RCFModelType>> cacheProvider,
         Duration stateTtl,
         CheckpointWriteWorkerType checkpointWriteWorker,
@@ -139,6 +140,10 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
 
     @Override
     protected void executeBatchRequest(MultiGetRequest request, ActionListener<MultiGetResponse> listener) {
+        if (request.getItems().isEmpty()) {
+            listener.onResponse(new MultiGetResponse(new MultiGetItemResponse[0]));
+            return;
+        }
         checkpointDao.batchRead(request, listener);
     }
 
@@ -150,14 +155,19 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
      * @return The converted multi-get request
      */
     @Override
-    protected MultiGetRequest toBatchRequest(List<FeatureRequest> toProcess) {
+    protected MultiGetRequest toBatchRequest(List<FeatureRequest> toProcess, String tenantId, String dataSourceId) {
         MultiGetRequest multiGetRequest = new MultiGetRequest();
         for (FeatureRequest request : toProcess) {
+            if (isStaleAfterConfigStateClear(request)) {
+                continue;
+            }
             String modelId = request.getModelId();
             if (null == modelId) {
                 continue;
             }
-            multiGetRequest.add(new MultiGetRequest.Item(checkpointIndexName, modelId));
+            String indexName = checkpointDao
+                .resolveCheckpointIndexName(request.getTenantId(), request.getConfigId(), modelId, checkpointIndexName);
+            multiGetRequest.add(new MultiGetRequest.Item(indexName, modelId));
         }
         return multiGetRequest;
     }
@@ -165,6 +175,10 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
     @Override
     protected ActionListener<MultiGetResponse> getResponseListener(List<FeatureRequest> toProcess, MultiGetRequest batchRequest) {
         return ActionListener.wrap(response -> {
+            List<FeatureRequest> activeRequests = filterStaleRequests(toProcess);
+            if (activeRequests.isEmpty()) {
+                return;
+            }
 
             final MultiGetItemResponse[] itemResponses = response.getResponses();
             Map<String, MultiGetItemResponse> successfulRequests = new HashMap<>();
@@ -172,6 +186,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
             // lazy init since we don't expect retryable requests to happen often
             Set<String> retryableRequests = null;
             Set<String> notFoundModels = null;
+            Set<String> overloadedModels = null;
             boolean printedUnexpectedFailure = false;
             // contain requests that we will set the detector's exception to
             // EndRunException (stop now = false)
@@ -181,8 +196,8 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                 if (itemResponse.isFailed()) {
 
                     final Exception failure = itemResponse.getFailure().getFailure();
-                    if (failure instanceof IndexNotFoundException) {
-                        for (FeatureRequest origRequest : toProcess) {
+                    if (failure instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(failure)) {
+                        for (FeatureRequest origRequest : activeRequests) {
                             // If it is checkpoint index not found exception, I don't
                             // need to retry as checkpoint read is bound to fail. Just
                             // send everything to the cold start queue and return.
@@ -197,6 +212,10 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                     } else if (ExceptionUtil.isOverloaded(failure)) {
                         LOG.error("too many get model checkpoint requests or shard not available");
                         setCoolDownStart();
+                        if (overloadedModels == null) {
+                            overloadedModels = new HashSet<>();
+                        }
+                        overloadedModels.add(modelId);
                     } else {
                         // some unexpected bug occurred or cluster is unstable (e.g., ClusterBlockException) or index is red (e.g.
                         // NoShardAvailableActionException) while fetching a checkpoint. As this might happen for a large amount
@@ -221,9 +240,11 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                 }
             }
 
+            retryableRequests = handleOverloadedCheckpointReadModels(activeRequests, overloadedModels, retryableRequests);
+
             // deal with not found model
             if (notFoundModels != null) {
-                for (FeatureRequest origRequest : toProcess) {
+                for (FeatureRequest origRequest : activeRequests) {
                     String modelId = origRequest.getModelId();
                     if (modelId != null && notFoundModels.contains(modelId)) {
                         // submit to cold start queue
@@ -237,7 +258,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
             // We cannot just loop over stopDetectorRequests instead of toProcess
             // because we need detector id from toProcess' elements. stopDetectorRequests only has model id.
             if (stopDetectorRequests != null) {
-                for (FeatureRequest origRequest : toProcess) {
+                for (FeatureRequest origRequest : activeRequests) {
                     String modelId = origRequest.getModelId();
                     if (modelId != null && stopDetectorRequests.containsKey(modelId)) {
                         String configID = origRequest.getConfigId();
@@ -256,19 +277,84 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                 // don't need to proceed further since no checkpoint is available
                 return;
             }
-            processCheckpointIteration(0, toProcess, successfulRequests, retryableRequests);
+            processCheckpointIteration(0, activeRequests, successfulRequests, retryableRequests);
         }, exception -> {
             LOG.warn("Exception while processing checkpoints", exception);
             if (ExceptionUtil.isOverloaded(exception)) {
                 LOG.error("too many get model checkpoint requests or shard not available");
                 setCoolDownStart();
+                retryOrColdStartOverloadedCheckpointReads(filterStaleRequests(toProcess));
             } else if (ExceptionUtil.isRetryAble(exception)) {
                 // retry all of them
                 putAll(toProcess);
             } else {
-                LOG.error("Fail to restore models", exception);
+                LOG.error("Failed to restore models", exception);
             }
         });
+    }
+
+    private Set<String> handleOverloadedCheckpointReadModels(
+        List<FeatureRequest> activeRequests,
+        Set<String> overloadedModels,
+        Set<String> retryableRequests
+    ) {
+        if (overloadedModels == null || overloadedModels.isEmpty()) {
+            return retryableRequests;
+        }
+
+        Set<String> updatedRetryableRequests = retryableRequests;
+        for (FeatureRequest origRequest : activeRequests) {
+            String modelId = origRequest.getModelId();
+            if (modelId == null || false == overloadedModels.contains(modelId)) {
+                continue;
+            }
+
+            if (shouldRetryCheckpointReadAfterOverload(origRequest)) {
+                if (updatedRetryableRequests == null) {
+                    updatedRetryableRequests = new HashSet<>();
+                }
+                updatedRetryableRequests.add(modelId);
+            } else {
+                LOG
+                    .warn(
+                        "checkpoint read overload retry exhausted config={} model={}; falling back to cold start",
+                        origRequest.getConfigId(),
+                        modelId
+                    );
+                coldStartWorker.put(origRequest);
+            }
+        }
+        return updatedRetryableRequests;
+    }
+
+    private void retryOrColdStartOverloadedCheckpointReads(List<FeatureRequest> activeRequests) {
+        for (FeatureRequest origRequest : activeRequests) {
+            String modelId = origRequest.getModelId();
+            if (modelId == null) {
+                continue;
+            }
+
+            if (shouldRetryCheckpointReadAfterOverload(origRequest)) {
+                LOG.warn("checkpoint read overload retry scheduled config={} model={}", origRequest.getConfigId(), modelId);
+                super.put(origRequest);
+            } else {
+                LOG
+                    .warn(
+                        "checkpoint read overload retry exhausted config={} model={}; falling back to cold start",
+                        origRequest.getConfigId(),
+                        modelId
+                    );
+                coldStartWorker.put(origRequest);
+            }
+        }
+    }
+
+    private boolean shouldRetryCheckpointReadAfterOverload(FeatureRequest request) {
+        if (request.getCheckpointReadOverloadRetryCount() >= MAX_CHECKPOINT_READ_OVERLOAD_RETRIES) {
+            return false;
+        }
+        request.incrementCheckpointReadOverloadRetryCount();
+        return true;
     }
 
     protected void processCheckpointIteration(
@@ -286,6 +372,9 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
         boolean processNextInCallBack = false;
         try {
             FeatureRequest origRequest = toProcess.get(i);
+            if (isStaleAfterConfigStateClear(origRequest)) {
+                return;
+            }
 
             String modelId = origRequest.getModelId();
             if (null == modelId) {
@@ -297,20 +386,37 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
             MultiGetItemResponse checkpointResponse = successfulRequests.get(modelId);
 
             if (checkpointResponse != null) {
+                LOG
+                    .info(
+                        "checkpoint read hit config={} model={} foundDoc={}",
+                        configId,
+                        modelId,
+                        checkpointResponse.getResponse().isExists()
+                    );
                 // successful requests
                 ModelState<RCFModelType> modelState = checkpointDao
-                    .processHCGetResponse(checkpointResponse.getResponse(), modelId, configId);
+                    .processHCGetResponse(checkpointResponse.getResponse(), modelId, configId, origRequest.getTenantId());
 
                 if (null == modelState) {
+                    LOG.warn("checkpoint read produced null model state config={} model={}; falling back to cold start", configId, modelId);
                     // checkpoint is not available (e.g., too big or corrupted); cold start again
                     // a long history can cause some entity not being able to initialized in time.
                     coldStartWorker.put(origRequest);
                     return;
                 }
 
+                LOG
+                    .info(
+                        "checkpoint restored model state config={} model={} entityPresent={}",
+                        configId,
+                        modelId,
+                        modelState.getEntity().isPresent()
+                    );
+
                 nodeStateManager
                     .getConfig(
                         configId,
+                        origRequest.getTenantId(),
                         context,
                         true,
                         processIterationUsingConfig(
@@ -327,7 +433,10 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                 processNextInCallBack = true;
             } else if (retryableRequests != null && retryableRequests.contains(modelId)) {
                 // failed requests
+                LOG.warn("checkpoint read retry scheduled config={} model={}", configId, modelId);
                 super.put(origRequest);
+            } else {
+                LOG.warn("checkpoint read miss config={} model={}; no checkpoint response available", configId, modelId);
             }
         } finally {
             if (false == processNextInCallBack) {
@@ -347,6 +456,11 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
         String modelId
     ) {
         return ActionListenerExecutor.wrap(configOptional -> {
+            if (isStaleAfterConfigStateClear(origRequest)) {
+                processCheckpointIteration(index + 1, toProcess, successfulRequests, retryableRequests);
+                return;
+            }
+
             if (configOptional.isEmpty()) {
                 LOG.warn(new ParameterizedMessage("Config [{}] is not available.", configId));
                 processCheckpointIteration(index + 1, toProcess, successfulRequests, retryableRequests);
@@ -367,9 +481,16 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                     config,
                     origRequest.getTaskId(),
                     ActionListener.wrap(processed -> {
+                        if (isStaleAfterConfigStateClear(origRequest)) {
+                            processCheckpointIteration(index + 1, toProcess, successfulRequests, retryableRequests);
+                            return;
+                        }
+
+                        LOG.info("checkpoint restore processed sample config={} model={} processed={}", configId, modelId, processed);
                         if (processed) {
                             // try to load to cache
                             boolean loaded = cacheProvider.get().hostIfPossible(config, restoredModelState);
+                            LOG.info("checkpoint restore hostIfPossible config={} model={} loaded={}", configId, modelId, loaded);
 
                             if (false == loaded) {
                                 // not in memory. Maybe cold entities or long interval entities
@@ -377,6 +498,7 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
                                 checkpointWriteWorker
                                     .write(
                                         restoredModelState,
+                                        config.getTenantId(),
                                         true,
                                         config.isLongFrequency() ? RequestPriority.MEDIUM : RequestPriority.LOW
                                     );
@@ -395,5 +517,30 @@ public abstract class CheckpointReadWorker<RCFModelType extends ThresholdedRando
             nodeStateManager.setException(configId, exception);
             processCheckpointIteration(index + 1, toProcess, successfulRequests, retryableRequests);
         }, threadPool.executor(threadPoolName));
+    }
+
+    private List<FeatureRequest> filterStaleRequests(List<FeatureRequest> requests) {
+        List<FeatureRequest> activeRequests = new java.util.ArrayList<>(requests.size());
+        for (FeatureRequest request : requests) {
+            if (false == isStaleAfterConfigStateClear(request)) {
+                activeRequests.add(request);
+            }
+        }
+        return activeRequests;
+    }
+
+    private boolean isStaleAfterConfigStateClear(FeatureRequest request) {
+        boolean stale = nodeStateManager
+            .isConfigStateClearedAfter(request.getTenantId(), request.getConfigId(), request.getRequestTimeMillis());
+        if (stale) {
+            LOG
+                .info(
+                    "Skipping stale checkpoint read request for config [{}], tenant [{}], request created at [{}] because model state was cleared later.",
+                    request.getConfigId(),
+                    request.getTenantId(),
+                    request.getRequestTimeMillis()
+                );
+        }
+        return stale;
     }
 }

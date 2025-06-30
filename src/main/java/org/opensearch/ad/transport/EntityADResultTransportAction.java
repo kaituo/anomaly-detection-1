@@ -14,9 +14,9 @@ package org.opensearch.ad.transport;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
@@ -29,12 +29,12 @@ import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
 import org.opensearch.ad.ratelimit.ADColdEntityWorker;
 import org.opensearch.ad.ratelimit.ADColdStartWorker;
 import org.opensearch.ad.ratelimit.ADSaveResultStrategy;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.transport.AbstractEntityResultTransportAction;
 import org.opensearch.transport.TransportService;
@@ -61,7 +61,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * juxtaposition to limit resource usage.
  */
 public class EntityADResultTransportAction extends
-    AbstractEntityResultTransportAction<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADColdStart, ADModelManager, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker, ADRealTimeInferencer, ADCheckpointReadWorker, ADColdEntityWorker> {
+    AbstractEntityResultTransportAction<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADColdStart, ADModelManager, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADCheckpointWriteWorker, ADColdStartWorker, ADRealTimeInferencer, ADCheckpointReadWorker, ADColdEntityWorker> {
 
     @Inject
     public EntityADResultTransportAction(
@@ -69,8 +69,7 @@ public class EntityADResultTransportAction extends
         TransportService transportService,
         CircuitBreakerService adCircuitBreakerService,
         ADCacheProvider entityCache,
-        NodeStateManager stateManager,
-        ADIndexManagement indexUtil,
+        StateManager stateManager,
         ADCheckpointReadWorker checkpointReadQueue,
         ADColdEntityWorker coldEntityQueue,
         ThreadPool threadPool,
@@ -84,11 +83,10 @@ public class EntityADResultTransportAction extends
             entityCache,
             stateManager,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             checkpointReadQueue,
             coldEntityQueue,
             inferencer
         );
     }
-
 }

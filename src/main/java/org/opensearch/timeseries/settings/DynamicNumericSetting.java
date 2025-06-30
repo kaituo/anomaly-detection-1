@@ -24,7 +24,7 @@ import org.opensearch.common.settings.Settings;
  * as the enclosing instances are not singleton (i.e. deleted after use).
  *
  */
-public abstract class DynamicNumericSetting {
+public class DynamicNumericSetting {
     private static Logger logger = LogManager.getLogger(DynamicNumericSetting.class);
 
     private ClusterService clusterService;
@@ -40,7 +40,7 @@ public abstract class DynamicNumericSetting {
     private void setSettingsUpdateConsumers() {
         for (Setting<?> setting : settings.values()) {
             clusterService.getClusterSettings().addSettingsUpdateConsumer(setting, newVal -> {
-                logger.info("[AD] The value of setting [{}] changed to [{}]", setting.getKey(), newVal);
+                logger.info("The value of setting [{}] changed to [{}]", setting.getKey(), newVal);
                 latestSettings.put(setting.getKey(), newVal);
             });
         }

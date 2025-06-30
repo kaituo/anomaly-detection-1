@@ -47,11 +47,11 @@ import org.junit.runner.RunWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
 import org.opensearch.timeseries.feature.FeatureManager;
@@ -114,7 +114,7 @@ public class FeatureManagerTests {
 
         ExecutorService executorService = mock(ExecutorService.class);
 
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();

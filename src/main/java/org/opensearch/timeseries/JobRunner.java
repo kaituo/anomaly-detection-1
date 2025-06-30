@@ -5,6 +5,8 @@
 
 package org.opensearch.timeseries;
 
+import java.time.Instant;
+
 import org.opensearch.ad.ADJobProcessor;
 import org.opensearch.forecast.ForecastJobProcessor;
 import org.opensearch.jobscheduler.spi.JobExecutionContext;
@@ -38,10 +40,10 @@ public class JobRunner implements ScheduledJobRunner {
         Job jobParameter = (Job) scheduledJobParameter;
         switch (jobParameter.getAnalysisType()) {
             case AD:
-                ADJobProcessor.getInstance().process(jobParameter, context);
+                ADJobProcessor.getInstance().process(jobParameter, context, Instant.now());
                 break;
             case FORECAST:
-                ForecastJobProcessor.getInstance().process(jobParameter, context);
+                ForecastJobProcessor.getInstance().process(jobParameter, context, Instant.now());
                 break;
             default:
                 throw new IllegalArgumentException("Analysis type is not supported, type: : " + jobParameter.getAnalysisType());

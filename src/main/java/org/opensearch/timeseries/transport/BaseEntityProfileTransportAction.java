@@ -29,6 +29,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.caching.CacheProvider;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
 import org.opensearch.timeseries.cluster.HashRing;
@@ -46,6 +47,10 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 /**
  * Transport action to get entity profile.
+ *
+ * @param <RCFModelType> the RCF model type
+ * @param <CacheType> the cache implementation type
+ * @param <CacheProviderType> the cache provider type
  */
 public class BaseEntityProfileTransportAction<RCFModelType extends ThresholdedRandomCutForest, CacheType extends TimeSeriesCache<RCFModelType>, CacheProviderType extends CacheProvider<RCFModelType, CacheType>>
     extends HandledTransportAction<EntityProfileRequest, EntityProfileResponse> {
@@ -86,11 +91,12 @@ public class BaseEntityProfileTransportAction<RCFModelType extends ThresholdedRa
     }
 
     @Override
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: only in single-tenant.")
     protected void doExecute(Task task, EntityProfileRequest request, ActionListener<EntityProfileResponse> listener) {
 
         String adID = request.getConfigID();
         Entity entityValue = request.getEntityValue();
-        Optional<String> modelIdOptional = entityValue.getModelId(adID);
+        Optional<String> modelIdOptional = entityValue.getModelId(request.getTenantId(), adID);
         if (false == modelIdOptional.isPresent()) {
             listener.onFailure(new TimeSeriesException(adID, NO_MODEL_ID_FOUND_MSG));
             return;
@@ -110,14 +116,14 @@ public class BaseEntityProfileTransportAction<RCFModelType extends ThresholdedRa
             Set<EntityProfileName> profilesToCollect = request.getProfilesToCollect();
             EntityProfileResponse.Builder builder = new EntityProfileResponse.Builder();
             if (profilesToCollect.contains(EntityProfileName.ENTITY_INFO)) {
-                builder.setActive(cache.isActive(adID, modelId));
-                builder.setLastActiveMs(cache.getLastActiveTime(adID, modelId));
+                builder.setActive(cache.isActive(request.getTenantId(), adID, modelId));
+                builder.setLastActiveMs(cache.getLastActiveTime(request.getTenantId(), adID, modelId));
             }
             if (profilesToCollect.contains(EntityProfileName.INIT_PROGRESS) || profilesToCollect.contains(EntityProfileName.STATE)) {
-                builder.setTotalUpdates(cache.getTotalUpdates(adID, modelId));
+                builder.setTotalUpdates(cache.getTotalUpdates(request.getTenantId(), adID, modelId));
             }
             if (profilesToCollect.contains(EntityProfileName.MODELS)) {
-                Optional<ModelProfile> modleProfile = cache.getModelProfile(adID, modelId);
+                Optional<ModelProfile> modleProfile = cache.getModelProfile(request.getTenantId(), adID, modelId);
                 if (modleProfile.isPresent()) {
                     builder.setModelProfile(new ModelProfileOnNode(nodeId, modleProfile.get()));
                 }

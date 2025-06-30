@@ -20,14 +20,14 @@ import java.util.Optional;
 import java.util.Random;
 import java.util.function.Function;
 
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.CheckpointMaintainRequest;
 import org.opensearch.timeseries.ratelimit.CheckpointMaintainWorker;
@@ -52,7 +52,7 @@ public class ADCheckpointMaintainWorker extends CheckpointMaintainWorker {
         int maintenanceFreqConstant,
         ADCheckpointWriteWorker checkpointWriteQueue,
         Duration stateTtl,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         Function<CheckpointMaintainRequest, Optional<CheckpointWriteRequest>> converter
     ) {
         super(
@@ -64,7 +64,7 @@ public class ADCheckpointMaintainWorker extends CheckpointMaintainWorker {
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,

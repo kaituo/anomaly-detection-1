@@ -9,9 +9,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -39,6 +37,8 @@ import org.opensearch.search.aggregations.metrics.NumericMetricsAggregation;
 import org.opensearch.search.aggregations.pipeline.BucketHelpers;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
@@ -48,8 +48,6 @@ import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.ValidationAspect;
 import org.opensearch.timeseries.model.ValidationIssueType;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
 
 public class IntervalCalculation {
     private final Logger logger = LogManager.getLogger(IntervalCalculation.class);
@@ -58,8 +56,7 @@ public class IntervalCalculation {
     private static final int MAX_SPLIT_DEPTH = 10;
 
     private final AggregationPrep aggregationPrep;
-    private final Client client;
-    private final SecurityClientUtil clientUtil;
+    private final DataAccess dataAccess;
     private final User user;
     private final AnalysisType context;
     private final Clock clock;
@@ -72,8 +69,7 @@ public class IntervalCalculation {
     public IntervalCalculation(
         Config config,
         TimeValue requestTimeout,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         User user,
         AnalysisType context,
         Clock clock,
@@ -83,8 +79,7 @@ public class IntervalCalculation {
         boolean validate
     ) {
         this.aggregationPrep = new AggregationPrep(searchFeatureDao, requestTimeout, config);
-        this.client = client;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
         this.user = user;
         this.context = context;
         this.clock = clock;
@@ -133,15 +128,7 @@ public class IntervalCalculation {
             // using the original context in listener as user roles have no permissions for internal operations like fetching a
             // checkpoint
             logger.debug("Interval explore search request: {}", searchRequest);
-            clientUtil
-                .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                    searchRequest,
-                    client::search,
-                    user,
-                    client,
-                    context,
-                    searchResponseListener
-                );
+            dataAccess.searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config), context, searchResponseListener);
         } catch (ValidationException ex) {
             listener.onFailure(ex);
         }
@@ -223,15 +210,7 @@ public class IntervalCalculation {
             // checkpoint
             SearchRequest searchRequest = aggregationPrep.createSearchRequest(currentIntervalToTry, currentTimeStampBounds, topEntity, 0);
             logger.debug("next search request: {}", searchRequest);
-            clientUtil
-                .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                    searchRequest,
-                    client::search,
-                    user,
-                    client,
-                    context,
-                    this
-                );
+            dataAccess.searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config), context, this);
         }
 
         @Override
@@ -344,12 +323,13 @@ public class IntervalCalculation {
         final ActionListener<SearchResponse> boundsRequestListener = ActionListener.wrap(r -> {
             logger.debug("Min and max timestamp response: {}", r);
 
-            // Fail earlier if we aren't able to get any bounds from the query
-            if (r.getTotalShards() == 0 || r.getSuccessfulShards() == 0) {
-                String errorMsg = String
-                    .format(Locale.ROOT, CommonMessages.NO_SHARDS_FOUND_IN_INDEX, Arrays.toString(config.getIndices().toArray()));
-                logger.error(errorMsg);
-                listener.onFailure(new ValidationException(errorMsg, ValidationIssueType.INDICES, ValidationAspect.MODEL));
+            /*
+             * Do not use shard counters as the success signal here. AOSS Serverless can return
+             * _shards.total == 0 and _shards.successful == 0 even when the response contains
+             * valid hits and aggregations. The bounds aggregations are what this flow needs.
+             */
+            if (r.getAggregations() == null) {
+                listener.onResponse(null);
                 return;
             }
 
@@ -367,7 +347,7 @@ public class IntervalCalculation {
                 return;
             }
 
-            long totalDocs = r.getHits().getTotalHits() == null ? 0L : r.getHits().getTotalHits().value();
+            long totalDocs = r.getHits() == null || r.getHits().getTotalHits() == null ? 0L : r.getHits().getTotalHits().value();
 
             if (totalDocs < 2) {
                 logger.debug("Exit early due to few docs");
@@ -397,15 +377,7 @@ public class IntervalCalculation {
 
         });
 
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                boundsReq,
-                client::search,
-                user,
-                client,
-                context,
-                boundsRequestListener
-            );
+        dataAccess.searchWithInjectedSecurity(boundsReq, user, TenantContext.user(config), context, boundsRequestListener);
     }
 
     /* ----------------------------------------------------------------------
@@ -644,15 +616,7 @@ public class IntervalCalculation {
             listener.onFailure(e);
         });
 
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                user,
-                client,
-                context,
-                minIntervalSearchListener
-            );
+        dataAccess.searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config), context, minIntervalSearchListener);
     }
 
     /**
@@ -707,15 +671,7 @@ public class IntervalCalculation {
             listener.onFailure(e);
         });
 
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                user,
-                client,
-                context,
-                autoDateSearchListener
-            );
+        dataAccess.searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config), context, autoDateSearchListener);
 
     }
 

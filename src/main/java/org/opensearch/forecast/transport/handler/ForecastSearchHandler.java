@@ -14,16 +14,25 @@ package org.opensearch.forecast.transport.handler;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.settings.ForecastSettings;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.transport.handler.SearchHandler;
 import org.opensearch.timeseries.util.PluginClient;
-import org.opensearch.transport.client.Client;
 
 /**
  * Handle general search request, check user role and return search response.
  */
 public class ForecastSearchHandler extends SearchHandler {
 
-    public ForecastSearchHandler(Settings settings, ClusterService clusterService, Client client, PluginClient pluginClient) {
-        super(settings, clusterService, client, pluginClient, ForecastSettings.FORECAST_FILTER_BY_BACKEND_ROLES);
+    @SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: PluginClient is only used for the single-tenant/resource-authz path; multi-tenant resource sharing is unsupported.")
+    public ForecastSearchHandler(
+        Settings settings,
+        ClusterService clusterService,
+        PluginClient pluginClient,
+        DataAccess searcher,
+        RunContext runContext
+    ) {
+        super(settings, clusterService, pluginClient, searcher, ForecastSettings.FORECAST_FILTER_BY_BACKEND_ROLES, runContext);
     }
 }

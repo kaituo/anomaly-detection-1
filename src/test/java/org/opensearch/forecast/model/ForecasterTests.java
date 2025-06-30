@@ -94,7 +94,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
             flattenResultIndexMapping,
             lastUpdateTime,
             forecastInterval,
-            autoCreated
+            autoCreated,
+            null
         );
 
         assertEquals(forecasterId, forecaster.getId());
@@ -151,7 +152,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 flattenResultIndexMapping,
                 lastUpdateTime,
                 forecastInterval,
-                autoCreated
+                autoCreated,
+                null
             );
         });
 
@@ -193,7 +195,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 flattenResultIndexMapping,
                 lastUpdateTime,
                 forecastInterval,
-                autoCreated
+                autoCreated,
+                null
             );
         });
 
@@ -235,7 +238,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 flattenResultIndexMapping,
                 lastUpdateTime,
                 forecastInterval,
-                autoCreated
+                autoCreated,
+                null
             );
         });
 
@@ -277,7 +281,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 flattenResultIndexMapping,
                 lastUpdateTime,
                 forecastInterval,
-                autoCreated
+                autoCreated,
+                null
             );
         });
 
@@ -319,7 +324,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 flattenResultIndexMapping,
                 lastUpdateTime,
                 forecastInterval,
-                autoCreated
+                autoCreated,
+                null
             );
         });
 
@@ -360,7 +366,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
             flattenResultIndexMapping,
             lastUpdateTime,
             forecastInterval,
-            autoCreated
+            autoCreated,
+            null
         );
 
         assertEquals(resultIndex, forecaster.getCustomResultIndexOrAlias());
@@ -399,7 +406,8 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
                 flattenResultIndexMapping,
                 lastUpdateTime,
                 forecastInterval,
-                autoCreated
+                autoCreated,
+                null
             );
         });
 
@@ -415,6 +423,24 @@ public class ForecasterTests extends AbstractTimeSeriesTest {
         LOG.info(forecasterString);
         Forecaster parsedForecaster = Forecaster.parse(TestHelpers.parser(forecasterString));
         assertEquals("Parsing forecaster doesn't work", forecaster, parsedForecaster);
+    }
+
+    public void testParseWithApplicationId() throws IOException {
+        Forecaster forecaster = TestHelpers.randomForecaster();
+        forecaster.setApplicationId("app-1");
+        String forecasterString = TestHelpers
+            .xContentBuilderToString(forecaster.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
+        Forecaster parsedForecaster = Forecaster.parse(TestHelpers.parser(forecasterString));
+        assertEquals("Parsing forecaster with application_id doesn't work", forecaster, parsedForecaster);
+    }
+
+    public void testParseWithDataSourceId() throws IOException {
+        Forecaster forecaster = TestHelpers.randomForecaster();
+        forecaster.setDataSourceId("ds-1");
+        String forecasterString = TestHelpers
+            .xContentBuilderToString(forecaster.toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS));
+        Forecaster parsedForecaster = Forecaster.parse(TestHelpers.parser(forecasterString));
+        assertEquals("Parsing forecaster with data_source_id doesn't work", forecaster, parsedForecaster);
     }
 
     public void testParseEmptyMetaData() throws IOException {

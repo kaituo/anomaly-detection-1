@@ -12,9 +12,8 @@
 package org.opensearch.timeseries.util;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
+import java.util.function.Predicate;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -23,37 +22,58 @@ import org.opensearch.action.bulk.BulkItemResponse;
 import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.index.IndexRequest;
+import org.opensearch.core.rest.RestStatus;
 
 public class BulkUtil {
     private static final Logger logger = LogManager.getLogger(BulkUtil.class);
 
     public static List<IndexRequest> getFailedIndexRequest(BulkRequest bulkRequest, BulkResponse bulkResponse) {
+        return getFailedIndexRequests(bulkRequest, bulkResponse, response -> ExceptionUtil.isRetryAble(response.getFailure().getStatus()));
+    }
+
+    public static List<IndexRequest> getMissingResultIndexRequests(BulkRequest bulkRequest, BulkResponse bulkResponse) {
+        return getFailedIndexRequests(bulkRequest, bulkResponse, BulkUtil::isIndexNotFoundFailure);
+    }
+
+    private static boolean isIndexNotFoundFailure(BulkItemResponse response) {
+        BulkItemResponse.Failure failure = response.getFailure();
+        String failureMessage = response.getFailureMessage();
+        return failure != null
+            && (failure.getStatus() == RestStatus.NOT_FOUND
+                || ExceptionUtil.isIndexNotFoundInMessage(failure.getCause())
+                || (failureMessage != null && failureMessage.contains("index_not_found_exception")));
+    }
+
+    private static List<IndexRequest> getFailedIndexRequests(
+        BulkRequest bulkRequest,
+        BulkResponse bulkResponse,
+        Predicate<BulkItemResponse> shouldInclude
+    ) {
         List<IndexRequest> res = new ArrayList<>();
 
         if (bulkResponse == null || bulkRequest == null) {
             return res;
         }
 
-        Set<String> failedId = new HashSet<>();
+        List<DocWriteRequest<?>> requests = bulkRequest.requests();
         for (BulkItemResponse response : bulkResponse.getItems()) {
             if (response.isFailed()) {
                 logger.info("bulk indexing failure: {}", response.getFailureMessage());
-                if (ExceptionUtil.isRetryAble(response.getFailure().getStatus())) {
-                    failedId.add(response.getId());
+                if (shouldInclude.test(response)) {
+                    int itemId = response.getItemId();
+                    if (itemId >= 0 && itemId < requests.size()) {
+                        DocWriteRequest<?> request = requests.get(itemId);
+                        try {
+                            res.add((IndexRequest) request);
+                        } catch (ClassCastException e) {
+                            logger.error("We only support IndexRequest");
+                            throw e;
+                        }
+                    } else {
+                        logger.warn("Failed bulk item id [{}] is out of range for request size [{}]", itemId, requests.size());
+                    }
                 }
             }
-        }
-
-        for (DocWriteRequest<?> request : bulkRequest.requests()) {
-            try {
-                if (failedId.contains(request.id())) {
-                    res.add((IndexRequest) request);
-                }
-            } catch (ClassCastException e) {
-                logger.error("We only support IndexRequest");
-                throw e;
-            }
-
         }
         return res;
     }

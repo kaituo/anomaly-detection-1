@@ -13,8 +13,12 @@ import org.opensearch.action.support.nodes.BaseNodesResponse;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.core.common.io.stream.StreamOutput;
+import org.opensearch.core.xcontent.ToXContentObject;
+import org.opensearch.core.xcontent.XContentBuilder;
 
-public class ADHCImputeNodesResponse extends BaseNodesResponse<ADHCImputeNodeResponse> {
+public class ADHCImputeNodesResponse extends BaseNodesResponse<ADHCImputeNodeResponse> implements ToXContentObject {
+    public static final String NODES_JSON_KEY = "nodes";
+
     public ADHCImputeNodesResponse(StreamInput in) throws IOException {
         super(new ClusterName(in), in.readList(ADHCImputeNodeResponse::readNodeResponse), in.readList(FailedNodeException::new));
     }
@@ -33,4 +37,20 @@ public class ADHCImputeNodesResponse extends BaseNodesResponse<ADHCImputeNodeRes
         out.writeList(nodes);
     }
 
+    @Override
+    public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
+        builder.startObject();
+        builder.startArray(NODES_JSON_KEY);
+        for (ADHCImputeNodeResponse nodeResp : getNodes()) {
+            builder.startObject();
+            builder.field("node_id", nodeResp.getNode().getId());
+            if (nodeResp.getPreviousException() != null) {
+                builder.field("exception", nodeResp.getPreviousException().getMessage());
+            }
+            builder.endObject();
+        }
+        builder.endArray();
+        builder.endObject();
+        return builder;
+    }
 }

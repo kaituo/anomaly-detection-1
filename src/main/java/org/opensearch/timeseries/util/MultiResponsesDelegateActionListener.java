@@ -23,7 +23,9 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.timeseries.model.Mergeable;
 
 /**
- * A listener wrapper to help send multiple requests asynchronously and return one final responses together
+ * A listener wrapper to help send multiple requests asynchronously and return one final response together.
+ *
+ * @param <T> the mergeable response type
  */
 public class MultiResponsesDelegateActionListener<T extends Mergeable> implements ActionListener<T> {
     private static final Logger LOG = LogManager.getLogger(MultiResponsesDelegateActionListener.class);

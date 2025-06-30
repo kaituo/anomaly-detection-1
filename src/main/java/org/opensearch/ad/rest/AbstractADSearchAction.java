@@ -12,6 +12,8 @@ import org.opensearch.action.ActionType;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.timeseries.rest.AbstractSearchAction;
 
@@ -22,8 +24,18 @@ public abstract class AbstractADSearchAction<T extends ToXContentObject> extends
         List<Pair<String, String>> deprecatedPaths,
         String index,
         Class<T> clazz,
-        ActionType<SearchResponse> actionType
+        ActionType<SearchResponse> actionType,
+        Settings settings
     ) {
-        super(urlPaths, deprecatedPaths, index, clazz, actionType, ADEnabledSetting::isADEnabled, ADCommonMessages.DISABLED_ERR_MSG);
+        super(
+            urlPaths,
+            deprecatedPaths,
+            index,
+            clazz,
+            actionType,
+            ADEnabledSetting::isADEnabled,
+            ADCommonMessages.DISABLED_ERR_MSG,
+            () -> AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings)
+        );
     }
 }

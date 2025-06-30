@@ -13,11 +13,15 @@ package org.opensearch.ad.transport;
 
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.settings.Setting;
+import org.opensearch.common.settings.Settings;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.transport.BaseSearchConfigInfoTransportAction;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class SearchAnomalyDetectorInfoTransportAction extends BaseSearchConfigInfoTransportAction {
 
@@ -25,9 +29,24 @@ public class SearchAnomalyDetectorInfoTransportAction extends BaseSearchConfigIn
     public SearchAnomalyDetectorInfoTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
-        Client client,
-        ClusterService clusterService
+        ClusterService clusterService,
+        DataAccess dataAccess,
+        Settings settings,
+        RunContext runContext
     ) {
-        super(transportService, actionFilters, client, SearchAnomalyDetectorInfoAction.NAME, ADCommonName.CONFIG_INDEX);
+        super(
+            transportService,
+            actionFilters,
+            dataAccess,
+            SearchAnomalyDetectorInfoAction.NAME,
+            ADCommonName.CONFIG_INDEX,
+            settings,
+            runContext
+        );
+    }
+
+    @Override
+    protected Setting<Boolean> getMultiTenancyEnabledSetting() {
+        return AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED;
     }
 }

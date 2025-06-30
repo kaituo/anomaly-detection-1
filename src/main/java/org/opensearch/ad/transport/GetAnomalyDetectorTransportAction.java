@@ -20,61 +20,68 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.ADEntityProfileRunner;
 import org.opensearch.ad.ADTaskProfileRunner;
 import org.opensearch.ad.AnomalyDetectorProfileRunner;
+import org.opensearch.ad.client.ADNodeCommunicator;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskProfile;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.DetectorProfile;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.model.EntityProfile;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.transport.BaseGetConfigTransportAction;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class GetAnomalyDetectorTransportAction extends
-    BaseGetConfigTransportAction<GetAnomalyDetectorResponse, ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement, ADTaskManager, AnomalyDetector, ADEntityProfileAction, ADEntityProfileRunner, ADTaskProfile, DetectorProfile, ADProfileAction, ADTaskProfileRunner, AnomalyDetectorProfileRunner> {
+    BaseGetConfigTransportAction<GetAnomalyDetectorResponse, ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADDelegatingDataManagement, ADTaskManager, AnomalyDetector, ADEntityProfileRunner, ADTaskProfile, DetectorProfile, ADProfileAction, ADTaskProfileRunner, AnomalyDetectorProfileRunner> {
 
     public static final Logger LOG = LogManager.getLogger(GetAnomalyDetectorTransportAction.class);
 
     @Inject
     public GetAnomalyDetectorTransportAction(
         TransportService transportService,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         ActionFilters actionFilters,
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
+        StateManager stateManager,
+        ADNodeCommunicator nodeCommunicator,
         Settings settings,
         NamedXContentRegistry xContentRegistry,
         ADTaskManager adTaskManager,
-        ADTaskProfileRunner adTaskProfileRunner
+        ADTaskProfileRunner adTaskProfileRunner,
+        ADDelegatingDataManagement dataManagement,
+        RunContext runContext
     ) {
         super(
             transportService,
             nodeFilter,
             actionFilters,
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
+            stateManager,
+            nodeCommunicator,
             settings,
             xContentRegistry,
             adTaskManager,
             GetAnomalyDetectorAction.NAME,
             AnomalyDetector.class,
-            AnomalyDetector.PARSE_FIELD_NAME,
             ADTaskType.ALL_DETECTOR_TASK_TYPES,
             ADTaskType.REALTIME_HC_DETECTOR.name(),
             ADTaskType.REALTIME_SINGLE_ENTITY.name(),
@@ -82,7 +89,9 @@ public class GetAnomalyDetectorTransportAction extends
             ADTaskType.HISTORICAL_SINGLE_ENTITY.name(),
             AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES,
             adTaskProfileRunner,
-            ADIndex.CONFIG.getIndexName()
+            ADIndex.CONFIG.getIndexName(),
+            dataManagement,
+            runContext
         );
     }
 
@@ -131,34 +140,33 @@ public class GetAnomalyDetectorTransportAction extends
 
     @Override
     protected ADEntityProfileRunner createEntityProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
-        NamedXContentRegistry xContentRegistry,
-        long requiredSamples
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager stateManager,
+        NamedXContentRegistry xContentRegistry
     ) {
-        return new ADEntityProfileRunner(client, clientUtil, xContentRegistry, TimeSeriesSettings.NUM_MIN_SAMPLES);
+        return new ADEntityProfileRunner(nodeCommunicator, dataAccess, stateManager, TimeSeriesSettings.NUM_MIN_SAMPLES);
     }
 
     @Override
     protected AnomalyDetectorProfileRunner createProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
         NamedXContentRegistry xContentRegistry,
-        DiscoveryNodeFilterer nodeFilter,
-        long requiredSamples,
+        DiscoveryNodeSelector nodeFilter,
         TransportService transportService,
         ADTaskManager taskManager,
         ADTaskProfileRunner taskProfileRunner
     ) {
         return new AnomalyDetectorProfileRunner(
-            client,
-            clientUtil,
+            nodeCommunicator,
             xContentRegistry,
             nodeFilter,
             TimeSeriesSettings.NUM_MIN_SAMPLES,
             transportService,
             taskManager,
-            taskProfileRunner
+            taskProfileRunner,
+            dataAccess
         );
     }
 
@@ -167,6 +175,11 @@ public class GetAnomalyDetectorTransportAction extends
     protected void adjustState(Optional<ADTask> taskOptional, Job job) {
         // TODO Auto-generated method stub
 
+    }
+
+    @Override
+    protected Setting<Boolean> getMultiTenancyEnabledSetting() {
+        return AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED;
     }
 
 }

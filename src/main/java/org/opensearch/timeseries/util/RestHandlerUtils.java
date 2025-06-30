@@ -27,6 +27,7 @@ import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.search.SearchPhaseExecutionException;
 import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.common.Nullable;
+import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
 import org.opensearch.common.xcontent.XContentHelper;
 import org.opensearch.common.xcontent.XContentType;
@@ -92,6 +93,14 @@ public final class RestHandlerUtils {
     public static final String NODE_ID = "nodeId";
     public static final String STATS = "stats";
     public static final String STAT = "stat";
+    public static final String ENTITY_PROFILE = "_entity_profile";
+    public static final String ENTITY_RESULT = "_entity_result";
+    public static final String SINGLE_STREAM_RESULT = "_single_stream_result";
+    public static final String FORWARD_TASK = "_forward_task";
+    public static final String AD_TASK_REMOTE = "_ad_task_remote";
+    public static final String DELETE_MODEL = "_delete_model";
+    public static final String STATS_NODES = "_stats/nodes";
+    public static final String HC_IMPUTE = "_hc_impute";
 
     // AD constants
     public static final String DETECTOR_ID = "detectorID";
@@ -106,6 +115,31 @@ public final class RestHandlerUtils {
     public static final String TOP_FORECASTS = "_topForecasts";
 
     private RestHandlerUtils() {}
+
+    /**
+     * Promotes a nonblank request header into a ThreadContext transient with the same key.
+     * Existing transient values are preserved because upstream-authenticated values must win.
+     */
+    public static void promoteHeaderToTransient(RestRequest request, ThreadContext threadContext, String contextKey) {
+        if (request == null || threadContext == null || contextKey == null || contextKey.trim().isEmpty()) {
+            return;
+        }
+        String trimmedContextKey = contextKey.trim();
+        if (threadContext.getTransient(trimmedContextKey) != null) {
+            return;
+        }
+
+        String headerValue = request.header(trimmedContextKey);
+        if (headerValue == null) {
+            return;
+        }
+        String trimmedHeaderValue = headerValue.trim();
+        if (trimmedHeaderValue.isEmpty()) {
+            return;
+        }
+
+        threadContext.putTransient(trimmedContextKey, trimmedHeaderValue);
+    }
 
     /**
      * Checks to see if the request came from OpenSearch-Dashboards, if so we want to return the UI Metadata from the document.

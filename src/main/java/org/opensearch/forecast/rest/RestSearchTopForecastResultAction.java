@@ -17,9 +17,11 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.forecast.constant.ForecastCommonMessages;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
+import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.transport.SearchTopForecastResultAction;
 import org.opensearch.forecast.transport.SearchTopForecastResultRequest;
 import org.opensearch.rest.BaseRestHandler;
@@ -27,6 +29,7 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.util.RestHandlerUtils;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -47,8 +50,11 @@ public class RestSearchTopForecastResultAction extends BaseRestHandler {
             RestHandlerUtils.TOP_FORECASTS
         );
     private final String SEARCH_TOP_FORECASTS_ACTION = "search_top_forecasts";
+    private final Settings settings;
 
-    public RestSearchTopForecastResultAction() {}
+    public RestSearchTopForecastResultAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -56,6 +62,7 @@ public class RestSearchTopForecastResultAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
 
         // Throw error if disabled
@@ -82,9 +89,10 @@ public class RestSearchTopForecastResultAction extends BaseRestHandler {
         } else {
             throw new IllegalStateException(ForecastCommonMessages.FORECASTER_ID_MISSING_MSG);
         }
+        String tenantId = TenantAwareHelper.getTenantID(ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED.get(settings), request);
         XContentParser parser = request.contentParser();
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-        return SearchTopForecastResultRequest.parse(parser, forecasterId);
+        return SearchTopForecastResultRequest.parse(parser, forecasterId, tenantId);
     }
 
     @Override

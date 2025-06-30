@@ -1,7 +1,7 @@
 {
   "dynamic": false,
   "_meta": {
-    "schema_version": 5
+    "schema_version": 6
   },
   "properties": {
     "schema_version": {
@@ -18,6 +18,9 @@
       "type": "keyword"
     },
     "stopped_by": {
+      "type": "keyword"
+    },
+    "tenant_id": {
       "type": "keyword"
     },
     "detector_id": {

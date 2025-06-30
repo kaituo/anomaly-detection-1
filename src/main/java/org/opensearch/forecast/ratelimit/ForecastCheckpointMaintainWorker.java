@@ -17,11 +17,11 @@ import java.util.function.Function;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.CheckpointMaintainRequest;
 import org.opensearch.timeseries.ratelimit.CheckpointMaintainWorker;
@@ -47,7 +47,7 @@ public class ForecastCheckpointMaintainWorker extends CheckpointMaintainWorker {
         int maintenanceFreqConstant,
         RateLimitedRequestWorker<CheckpointWriteRequest> targetQueue,
         Duration stateTtl,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         Function<CheckpointMaintainRequest, Optional<CheckpointWriteRequest>> converter
     ) {
         super(
@@ -59,7 +59,7 @@ public class ForecastCheckpointMaintainWorker extends CheckpointMaintainWorker {
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,

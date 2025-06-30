@@ -15,17 +15,26 @@ public abstract class QueuedRequest {
     protected long expirationEpochMs;
     protected String configId;
     protected RequestPriority priority;
+    protected String tenantId;
+    protected String dataSourceId;
 
     /**
      *
      * @param expirationEpochMs Request expiry time in milliseconds
      * @param configId Detector Id
      * @param priority how urgent the request is
+     * @param tenantId Tenant Id for multi-tenancy
      */
-    protected QueuedRequest(long expirationEpochMs, String configId, RequestPriority priority) {
+    protected QueuedRequest(long expirationEpochMs, String configId, RequestPriority priority, String tenantId) {
+        this(expirationEpochMs, configId, priority, tenantId, null);
+    }
+
+    protected QueuedRequest(long expirationEpochMs, String configId, RequestPriority priority, String tenantId, String dataSourceId) {
         this.expirationEpochMs = expirationEpochMs;
         this.configId = configId;
         this.priority = priority;
+        this.tenantId = tenantId;
+        this.dataSourceId = dataSourceId;
     }
 
     protected QueuedRequest() {}
@@ -57,5 +66,21 @@ public abstract class QueuedRequest {
 
     public void setExpirationEpochMs(long expirationEpochMs) {
         this.expirationEpochMs = expirationEpochMs;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
+    }
+
+    public String getDataSourceId() {
+        return dataSourceId;
+    }
+
+    public void setDataSourceId(String dataSourceId) {
+        this.dataSourceId = dataSourceId;
     }
 }

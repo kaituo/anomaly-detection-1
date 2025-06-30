@@ -21,7 +21,6 @@ import static org.opensearch.forecast.settings.ForecastSettings.FORECAST_RESULT_
 import static org.opensearch.forecast.settings.ForecastSettings.FORECAST_STATE_INDEX_MAPPING_FILE;
 
 import java.io.IOException;
-import java.util.EnumMap;
 import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
@@ -44,21 +43,20 @@ import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.indices.IndexManagement;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.indices.TimeSeriesIndex;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
     private static final Logger logger = LogManager.getLogger(ForecastIndexManagement.class);
-
-    // The index name pattern to query all the forecast result history indices
-    public static final String FORECAST_RESULT_HISTORY_INDEX_PATTERN = "<opensearch-forecast-results-history-{now/d}-1>";
-
-    // The index name pattern to query all forecast results, history and current forecast results
-    public static final String ALL_FORECAST_RESULTS_INDEX_PATTERN = "opensearch-forecast-results*";
 
     /**
      * Constructor function
@@ -77,9 +75,10 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
         ClusterService clusterService,
         ThreadPool threadPool,
         Settings settings,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         int maxUpdateRunningTimes,
-        NamedXContentRegistry xContentRegistry
+        NamedXContentRegistry xContentRegistry,
+        DataAccess dataAccess
     )
         throws IOException {
         super(
@@ -98,9 +97,10 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
             xContentRegistry,
             Forecaster::parse,
             ForecastCommonName.CUSTOM_RESULT_INDEX_PREFIX,
-            ForecastCommonName.CONFIG_INDEX
+            ForecastCommonName.CONFIG_INDEX,
+            List.of(ForecastCommonName.FORECAST_RESULT_INDEX_PREFIX),
+            dataAccess
         );
-        this.indexStates = new EnumMap<ForecastIndex, IndexState>(ForecastIndex.class);
 
         this.clusterService
             .getClusterSettings()
@@ -126,7 +126,7 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
      * @throws IOException IOException if mapping file can't be read correctly
      */
     public static String getResultMappings() throws IOException {
-        return getMappings(FORECAST_RESULTS_INDEX_MAPPING_FILE);
+        return IndexResourceLoader.getMappings(FORECAST_RESULTS_INDEX_MAPPING_FILE);
     }
 
     /**
@@ -136,8 +136,8 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
      * @throws IOException IOException if mapping file can't be read correctly
      */
     public static String getStateMappings() throws IOException {
-        String forecastStateMappings = getMappings(FORECAST_STATE_INDEX_MAPPING_FILE);
-        String forecasterIndexMappings = getConfigMappings();
+        String forecastStateMappings = IndexResourceLoader.getMappings(FORECAST_STATE_INDEX_MAPPING_FILE);
+        String forecasterIndexMappings = IndexResourceLoader.getConfigMappings();
         forecasterIndexMappings = forecasterIndexMappings
             .substring(forecasterIndexMappings.indexOf("\"properties\""), forecasterIndexMappings.lastIndexOf("}"));
         return forecastStateMappings.replace("FORECASTER_INDEX_MAPPING_PLACE_HOLDER", forecasterIndexMappings);
@@ -150,7 +150,7 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
      * @throws IOException IOException if mapping file can't be read correctly
      */
     public static String getCheckpointMappings() throws IOException {
-        return getMappings(FORECAST_CHECKPOINT_INDEX_MAPPING_FILE);
+        return IndexResourceLoader.getMappings(FORECAST_CHECKPOINT_INDEX_MAPPING_FILE);
     }
 
     /**
@@ -225,8 +225,8 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
     protected void rolloverAndDeleteHistoryIndex() {
         rolloverAndDeleteHistoryIndex(
             ForecastCommonName.FORECAST_RESULT_INDEX_ALIAS,
-            ALL_FORECAST_RESULTS_INDEX_PATTERN,
-            FORECAST_RESULT_HISTORY_INDEX_PATTERN,
+            ForecastCommonName.ALL_FORECAST_RESULTS_INDEX_PATTERN,
+            ForecastCommonName.FORECAST_RESULT_HISTORY_INDEX_PATTERN,
             ForecastIndex.RESULT
         );
     }
@@ -235,10 +235,9 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
      * Create config index directly.
      *
      * @param actionListener action called after create index
-     * @throws IOException IOException from {@link IndexManagement#getConfigMappings}
      */
     @Override
-    public void initConfigIndex(ActionListener<CreateIndexResponse> actionListener) throws IOException {
+    public void initConfigIndex(ActionListener<CreateIndexResponse> actionListener) {
         super.initConfigIndex(markMappingUpToDate(ForecastIndex.CONFIG, actionListener));
     }
 
@@ -253,22 +252,24 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
     }
 
     @Override
-    protected IndexRequest createDummyIndexRequest(String resultIndex) throws IOException {
+    protected IndexRequest createDummyIndexRequest(String resultIndex, String dummyId) throws IOException {
         ForecastResult dummyResult = ForecastResult.getDummyResult();
+        String requestDummyId = dummyId == null ? DUMMY_FORECAST_RESULT_ID : DUMMY_FORECAST_RESULT_ID + "-" + dummyId;
         return new IndexRequest(resultIndex)
-            .id(DUMMY_FORECAST_RESULT_ID)
+            .id(requestDummyId)
             .source(dummyResult.toXContent(XContentBuilder.builder(XContentType.JSON.xContent()), ToXContent.EMPTY_PARAMS));
     }
 
     @Override
-    protected DeleteRequest createDummyDeleteRequest(String resultIndex) throws IOException {
-        return new DeleteRequest(resultIndex).id(DUMMY_FORECAST_RESULT_ID);
+    protected DeleteRequest createDummyDeleteRequest(String resultIndex, String dummyId) throws IOException {
+        String requestDummyId = dummyId == null ? DUMMY_FORECAST_RESULT_ID : DUMMY_FORECAST_RESULT_ID + "-" + dummyId;
+        return new DeleteRequest(resultIndex).id(requestDummyId);
     }
 
     @Override
     public void initDefaultResultIndexDirectly(ActionListener<CreateIndexResponse> actionListener) {
         initResultIndexDirectly(
-            FORECAST_RESULT_HISTORY_INDEX_PATTERN,
+            ForecastCommonName.FORECAST_RESULT_HISTORY_INDEX_PATTERN,
             ForecastIndex.RESULT.getIndexName(),
             false,
             true,
@@ -278,8 +279,20 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
     }
 
     @Override
-    public void initCustomResultIndexDirectly(String resultIndex, ActionListener<CreateIndexResponse> actionListener) {
-        initResultIndexDirectly(getCustomResultIndexPattern(resultIndex), resultIndex, false, false, ForecastIndex.RESULT, actionListener);
+    public void initCustomResultIndexDirectly(
+        String resultIndex,
+        ActionListener<CreateIndexResponse> actionListener,
+        String tenantId,
+        String dataSourceId
+    ) {
+        initResultIndexDirectly(
+            TimeSeriesIndex.getCustomResultIndexPattern(resultIndex),
+            resultIndex,
+            false,
+            false,
+            ForecastIndex.RESULT,
+            actionListener
+        );
     }
 
     public <T> void validateDefaultResultIndexForBackendJob(
@@ -294,7 +307,8 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
                 ForecastCommonName.FORECAST_RESULT_INDEX_ALIAS,
                 () -> executeWithSecurityContext(configId, user, roles, function, listener, ForecastCommonName.FORECAST_RESULT_INDEX_ALIAS),
                 false,
-                listener
+                listener,
+                null
             );
         } else {
             initDefaultResultIndex(configId, user, roles, function, listener);
@@ -342,7 +356,7 @@ public class ForecastIndexManagement extends IndexManagement<ForecastIndex> {
             validateResultIndexAndExecute(indexOrAlias, () -> {
                 injectSecurity.close();
                 function.execute();
-            }, true, wrappedListener);
+            }, true, wrappedListener, null);
         } catch (Exception e) {
             logger.error("Failed to validate custom index for backend job " + securityLogId, e);
             listener.onFailure(e);

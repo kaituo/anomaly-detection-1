@@ -16,20 +16,22 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.action.FailedNodeException;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.transport.CronAction;
 import org.opensearch.timeseries.transport.CronRequest;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class HourlyCron implements Runnable {
     private static final Logger LOG = LogManager.getLogger(HourlyCron.class);
     public static final String SUCCEEDS_LOG_MSG = "Hourly maintenance succeeds";
     public static final String NODE_EXCEPTION_LOG_MSG = "Hourly maintenance of node has exception";
     public static final String EXCEPTION_LOG_MSG = "Hourly maintenance has exception.";
-    private DiscoveryNodeFilterer nodeFilter;
+    private DiscoveryNodeSelector nodeFilter;
     private Client client;
 
-    public HourlyCron(Client client, DiscoveryNodeFilterer nodeFilter) {
+    public HourlyCron(Client client, DiscoveryNodeSelector nodeFilter) {
         this.nodeFilter = nodeFilter;
         this.client = client;
     }

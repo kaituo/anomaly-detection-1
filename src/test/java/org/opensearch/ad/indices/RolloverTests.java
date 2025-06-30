@@ -64,6 +64,7 @@ import org.opensearch.search.internal.InternalSearchResponse;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.client.AdminClient;
@@ -80,6 +81,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
     private ClusterState clusterState;
     private ClusterService clusterService;
     private NamedXContentRegistry namedXContentRegistry;
+    private DataAccess dataAccess;
     private long defaultMaxDocs;
     private int numberOfNodes;
 
@@ -121,6 +123,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
 
         namedXContentRegistry = TestHelpers.xContentRegistry();
 
+        dataAccess = mock(DataAccess.class);
         adIndices = new ADIndexManagement(
             client,
             clusterService,
@@ -128,7 +131,8 @@ public class RolloverTests extends AbstractTimeSeriesTest {
             settings,
             nodeFilter,
             TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-            namedXContentRegistry
+            namedXContentRegistry,
+            dataAccess
         );
 
         clusterAdminClient = mock(ClusterAdminClient.class);
@@ -136,7 +140,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
 
         doAnswer(invocation -> {
             ClusterStateRequest clusterStateRequest = invocation.getArgument(0);
-            assertEquals(ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN, clusterStateRequest.indices()[0]);
+            assertEquals(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN, clusterStateRequest.indices()[0]);
             @SuppressWarnings("unchecked")
             ActionListener<ClusterStateResponse> listener = (ActionListener<ClusterStateResponse>) invocation.getArgument(1);
             listener.onResponse(new ClusterStateResponse(clusterName, clusterState, true));
@@ -154,7 +158,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
         assertEquals(new MaxDocsCondition(defaultMaxDocs * numberOfNodes), conditions.get(MaxDocsCondition.NAME));
 
         CreateIndexRequest createIndexRequest = request.getCreateIndexRequest();
-        assertEquals(ADIndexManagement.AD_RESULT_HISTORY_INDEX_PATTERN, createIndexRequest.index());
+        assertEquals(ADCommonName.AD_RESULT_HISTORY_INDEX_PATTERN, createIndexRequest.index());
         assertTrue(createIndexRequest.mappings().contains("data_start_time"));
     }
 
@@ -194,7 +198,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
             assertEquals(new MaxDocsCondition(defaultMaxDocs * numberOfNodes), conditions.get(MaxDocsCondition.NAME));
 
             CreateIndexRequest createIndexRequest = request.getCreateIndexRequest();
-            assertEquals(ADIndexManagement.AD_RESULT_HISTORY_INDEX_PATTERN, createIndexRequest.index());
+            assertEquals(ADCommonName.AD_RESULT_HISTORY_INDEX_PATTERN, createIndexRequest.index());
             assertTrue(createIndexRequest.mappings().contains("data_start_time"));
             listener.onResponse(new RolloverResponse(null, null, Collections.emptyMap(), request.isDryRun(), true, true, true));
             return null;
@@ -278,7 +282,29 @@ public class RolloverTests extends AbstractTimeSeriesTest {
 
         adIndices.rolloverAndDeleteHistoryIndex();
         verify(indicesClient, times(1)).rolloverIndex(any(), any());
-        verify(client, times(1)).search(any(), any());
+        verify(dataAccess, times(1)).search(any(), any(), any());
+    }
+
+    public void testAossSkipsResultRollover() throws IOException {
+        Settings aossSettings = Settings.builder().put(AnomalyDetectorSettings.REMOTE_METADATA_SERVICE_NAME.getKey(), "aoss").build();
+        DiscoveryNodeFilterer nodeFilter = mock(DiscoveryNodeFilterer.class);
+        when(nodeFilter.getNumberOfEligibleDataNodes()).thenReturn(numberOfNodes);
+        ADIndexManagement aossIndices = new ADIndexManagement(
+            client,
+            clusterService,
+            mock(ThreadPool.class),
+            aossSettings,
+            nodeFilter,
+            TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
+            namedXContentRegistry,
+            dataAccess
+        );
+
+        aossIndices.rolloverAndDeleteHistoryIndex();
+
+        verify(indicesClient, never()).rolloverIndex(any(), any());
+        verify(clusterAdminClient, never()).state(any(), any());
+        verify(dataAccess, never()).search(any(), any(), any());
     }
 
     public void testCustomResultIndexFound_RolloverCustomResultIndex_withConditions_shouldSucceed() throws IOException {
@@ -287,7 +313,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
         adIndices.rolloverAndDeleteHistoryIndex();
 
         verify(indicesClient, times(1)).rolloverIndex(any(), any());
-        verify(client, times(1)).search(any(), any());
+        verify(dataAccess, times(1)).search(any(), any(), any());
     }
 
     private void setUpGetConfigs_withNoCustomResultIndexAlias() {
@@ -309,7 +335,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
             + "{\"interval\":5,\"unit\":\"Minutes\"}},\"detector_type\":\"MULTI_ENTITY\",\"rules\":[]}";
 
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
             SearchHit config = SearchHit.fromXContent(TestHelpers.parser(detectorString));
             SearchHits searchHits = new SearchHits(new SearchHit[] { config }, new TotalHits(1, TotalHits.Relation.EQUAL_TO), Float.NaN);
             InternalSearchResponse response = new InternalSearchResponse(
@@ -333,7 +359,7 @@ public class RolloverTests extends AbstractTimeSeriesTest {
             );
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).search(any(), any(), any());
     }
 
     private void setUpRolloverSuccessForCustomIndex() {
@@ -393,11 +419,11 @@ public class RolloverTests extends AbstractTimeSeriesTest {
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[2];
             setUpRolloverSuccessForCustomIndex();
             listener.onResponse(createSearchResponse(parsedDetector));
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).search(any(), any(), any());
 
     }
 }

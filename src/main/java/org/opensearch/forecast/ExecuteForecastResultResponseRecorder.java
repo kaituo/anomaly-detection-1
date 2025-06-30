@@ -11,52 +11,52 @@ import java.util.ArrayList;
 import java.util.Optional;
 
 import org.opensearch.commons.authuser.User;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
-import org.opensearch.forecast.transport.ForecastProfileAction;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ExecuteResultResponseRecorder;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.ResultResponse;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 
 public class ExecuteForecastResultResponseRecorder extends
-    ExecuteResultResponseRecorder<ForecastIndex, ForecastIndexManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult, ForecastProfileAction> {
+    ExecuteResultResponseRecorder<ForecastIndex, ForecastDelegatingDataManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult> {
 
     public ExecuteForecastResultResponseRecorder(
-        ForecastIndexManagement indexManagement,
-        ResultBulkIndexingHandler<ForecastResult, ForecastIndex, ForecastIndexManagement> resultHandler,
+        ResultBulkIndexingHandler<ForecastResult, ForecastIndex, ForecastDelegatingDataManagement> resultHandler,
         ForecastTaskManager taskManager,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         ThreadPool threadPool,
-        Client client,
-        NodeStateManager nodeStateManager,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager nodeStateManager,
         Clock clock,
-        int rcfMinSamples
+        int forecastResultMappingVersion
     ) {
         super(
-            indexManagement,
             resultHandler,
             taskManager,
             nodeFilter,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
-            client,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
+            nodeCommunicator,
+            dataAccess,
             nodeStateManager,
             clock,
             ForecastIndex.RESULT,
             AnalysisType.FORECAST,
-            ForecastProfileAction.INSTANCE
+            forecastResultMappingVersion
         );
     }
 
@@ -65,9 +65,11 @@ public class ExecuteForecastResultResponseRecorder extends
         String configId,
         Instant dataStartTime,
         Instant dataEndTime,
+        Instant executeStartTime,
         Instant executeEndTime,
         String errorMessage,
-        User user
+        User user,
+        String tenantId
     ) {
         return new ForecastResult(
             configId,
@@ -75,21 +77,22 @@ public class ExecuteForecastResultResponseRecorder extends
             new ArrayList<FeatureData>(),
             dataStartTime,
             dataEndTime,
+            executeStartTime,
             executeEndTime,
-            Instant.now(),
             errorMessage,
             Optional.empty(), // single-stream forecasters have no entity
             user,
-            indexManagement.getSchemaVersion(resultIndex)
+            resultMappingVersion,
+            tenantId
         );
     }
 
     @Override
-    protected void updateRealtimeTask(ResultResponse<ForecastResult> response, String configId, Clock clock) {
+    protected void updateRealtimeTask(ResultResponse<ForecastResult> response, String configId, String tenantId, Clock clock) {
         if (taskManager.skipUpdateRealtimeTask(configId, response.getError())) {
             return;
         }
 
-        delayedUpdate(response, configId, clock);
+        delayedUpdate(response, configId, tenantId, clock);
     }
 }

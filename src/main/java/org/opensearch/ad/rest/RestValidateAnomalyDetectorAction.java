@@ -21,6 +21,7 @@ import java.util.Locale;
 
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.ValidateAnomalyDetectorAction;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
@@ -34,6 +35,7 @@ import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.model.ConfigValidationIssue;
 import org.opensearch.timeseries.rest.RestValidateAction;
 import org.opensearch.timeseries.transport.ValidateConfigRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -44,18 +46,8 @@ import com.google.common.collect.ImmutableList;
 public class RestValidateAnomalyDetectorAction extends AbstractAnomalyDetectorAction {
     private static final String VALIDATE_ANOMALY_DETECTOR_ACTION = "validate_anomaly_detector_action";
 
-    private RestValidateAction validateAction;
-
     public RestValidateAnomalyDetectorAction(Settings settings, ClusterService clusterService) {
         super(settings, clusterService);
-        this.validateAction = new RestValidateAction(
-            AnalysisType.AD,
-            maxSingleEntityDetectors,
-            maxMultiEntityDetectors,
-            maxAnomalyFeatures,
-            maxCategoricalFields,
-            requestTimeout
-        );
     }
 
     @Override
@@ -79,6 +71,7 @@ public class RestValidateAnomalyDetectorAction extends AbstractAnomalyDetectorAc
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected BaseRestHandler.RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
@@ -89,9 +82,19 @@ public class RestValidateAnomalyDetectorAction extends AbstractAnomalyDetectorAc
         // we have to get the param from a subclass of BaseRestHandler. Otherwise, we cannot parse the type out of request params
         String typesStr = request.param(TYPE);
 
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
+        RestValidateAction validateAction = new RestValidateAction(
+            AnalysisType.AD,
+            maxSingleEntityDetectors,
+            maxMultiEntityDetectors,
+            maxAnomalyFeatures,
+            maxCategoricalFields,
+            requestTimeout
+        );
+
         return channel -> {
             try {
-                ValidateConfigRequest validateAnomalyDetectorRequest = validateAction.prepareRequest(request, client, typesStr);
+                ValidateConfigRequest validateAnomalyDetectorRequest = validateAction.prepareRequest(request, client, typesStr, tenantId);
                 client
                     .execute(ValidateAnomalyDetectorAction.INSTANCE, validateAnomalyDetectorRequest, new RestToXContentListener<>(channel));
             } catch (Exception ex) {

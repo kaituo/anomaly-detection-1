@@ -22,16 +22,18 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class SecurityClientUtil {
     private static final String INJECTION_ID = "direct";
-    private NodeStateManager nodeStateManager;
+    private StateManager nodeStateManager;
     private Settings settings;
 
     @Inject
-    public SecurityClientUtil(NodeStateManager nodeStateManager, Settings settings) {
+    public SecurityClientUtil(StateManager nodeStateManager, Settings settings) {
         this.nodeStateManager = nodeStateManager;
         this.settings = settings;
     }
@@ -51,6 +53,7 @@ public class SecurityClientUtil {
         Request request,
         BiConsumer<Request, ActionListener<Response>> consumer,
         String configId,
+        String tenantId,
         Client client,
         AnalysisType context,
         ActionListener<Response> listener
@@ -59,6 +62,7 @@ public class SecurityClientUtil {
         try (
             TimeSeriesSafeSecurityInjector injectSecurity = new TimeSeriesSafeSecurityInjector(
                 configId,
+                tenantId,
                 settings,
                 threadContext,
                 nodeStateManager,
@@ -84,6 +88,7 @@ public class SecurityClientUtil {
      * @param request request body
      * @param consumer request method, functional interface to operate as a client request like client::get
      * @param user User info
+     * @param tenantId tenant id
      * @param client OpenSearch client
      * @param listener needed to handle response
      */
@@ -91,6 +96,7 @@ public class SecurityClientUtil {
         Request request,
         BiConsumer<Request, ActionListener<Response>> consumer,
         User user,
+        String tenantId,
         Client client,
         AnalysisType context,
         ActionListener<Response> listener
@@ -109,6 +115,7 @@ public class SecurityClientUtil {
         try (
             TimeSeriesSafeSecurityInjector injectSecurity = new TimeSeriesSafeSecurityInjector(
                 INJECTION_ID,
+                tenantId,
                 settings,
                 threadContext,
                 nodeStateManager,
@@ -128,6 +135,7 @@ public class SecurityClientUtil {
      * @param action transport action
      * @param request request body
      * @param user User info
+     * @param tenantId tenant id
      * @param client OpenSearch client
      * @param listener needed to handle response
      */
@@ -135,6 +143,7 @@ public class SecurityClientUtil {
         ActionType<Response> action,
         Request request,
         User user,
+        String tenantId,
         Client client,
         AnalysisType context,
         ActionListener<Response> listener
@@ -145,6 +154,7 @@ public class SecurityClientUtil {
         try (
             TimeSeriesSafeSecurityInjector injectSecurity = new TimeSeriesSafeSecurityInjector(
                 INJECTION_ID,
+                tenantId,
                 settings,
                 threadContext,
                 nodeStateManager,

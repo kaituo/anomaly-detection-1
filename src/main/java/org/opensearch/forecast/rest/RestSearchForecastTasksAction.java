@@ -11,6 +11,7 @@
 
 package org.opensearch.forecast.rest;
 
+import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.transport.SearchForecastTasksAction;
@@ -26,13 +27,14 @@ public class RestSearchForecastTasksAction extends AbstractForecastSearchAction<
     private static final String URL_PATH = TimeSeriesAnalyticsPlugin.FORECAST_FORECASTERS_URI + "/tasks/_search";
     private final String SEARCH_FORECASTER_TASKS = "search_forecaster_tasks";
 
-    public RestSearchForecastTasksAction() {
+    public RestSearchForecastTasksAction(Settings settings) {
         super(
             ImmutableList.of(URL_PATH),
             ImmutableList.of(),
             ForecastIndex.STATE.getIndexName(),
             ForecastTask.class,
-            SearchForecastTasksAction.INSTANCE
+            SearchForecastTasksAction.INSTANCE,
+            settings
         );
     }
 

@@ -15,77 +15,93 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
-import org.opensearch.ad.cluster.diskcleanup.ADCheckpointIndexRetention;
-import org.opensearch.cluster.LocalNodeClusterManagerListener;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.lifecycle.LifecycleListener;
-import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.forecast.cluster.diskcleanup.ForecastCheckpointIndexRetention;
+import org.opensearch.forecast.settings.ForecastEnabledSetting;
+import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.threadpool.Scheduler.Cancellable;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.cluster.diskcleanup.IndexCleanup;
-import org.opensearch.timeseries.util.ClientUtil;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.util.DateUtils;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.client.Client;
 
 import com.google.common.annotations.VisibleForTesting;
 
-public class ClusterManagerEventListener implements LocalNodeClusterManagerListener {
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
+public class ClusterManagerEventListener implements ClusterManagerTask {
+
+    private static final Logger LOG = LogManager.getLogger(ClusterManagerEventListener.class);
 
     private Cancellable adCheckpointIndexRetentionCron;
     private Cancellable forecastCheckpointIndexRetentionCron;
     private Cancellable hourlyCron;
     private ClusterService clusterService;
     private ThreadPool threadPool;
-    private Client client;
+    private final Client client;
+    private final CheckpointDaoInterface<?> adCheckpointStore;
+    private final CheckpointDaoInterface<?> forecastCheckpointStore;
     private Clock clock;
-    private ClientUtil clientUtil;
-    private DiscoveryNodeFilterer nodeFilter;
+    private DiscoveryNodeSelector nodeFilter;
     private Duration adCheckpointTtlDuration;
     private Duration forecastCheckpointTtlDuration;
 
     public ClusterManagerEventListener(
+        Client client,
+        CheckpointDaoInterface<?> adCheckpointStore,
+        CheckpointDaoInterface<?> forecastCheckpointStore
+    ) {
+        this.client = Objects.requireNonNull(client, "client must not be null");
+        this.adCheckpointStore = Objects.requireNonNull(adCheckpointStore, "adCheckpointStore must not be null");
+        this.forecastCheckpointStore = Objects.requireNonNull(forecastCheckpointStore, "forecastCheckpointStore must not be null");
+    }
+
+    @Override
+    public void init(
         ClusterService clusterService,
         ThreadPool threadPool,
-        Client client,
         Clock clock,
-        ClientUtil clientUtil,
-        DiscoveryNodeFilterer nodeFilter,
-        Setting<TimeValue> adCheckpointTtl,
-        Setting<TimeValue> forecastCheckpointTtl,
-        Settings settings
+        DiscoveryNodeSelector nodeFilter,
+        Settings settings,
+        DataAccess dataAccess
     ) {
+        boolean adMultiTenancyEnabled = AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings);
+        boolean forecastMultiTenancyEnabled = ForecastEnabledSetting.isForecastMultiTenancyEnabled(settings);
+
+        boolean multiTenancyEnabled = adMultiTenancyEnabled || forecastMultiTenancyEnabled;
+        // only used in single-tenant mode
+        if (multiTenancyEnabled) {
+            return;
+        }
+
         this.clusterService = clusterService;
         this.threadPool = threadPool;
-        this.client = client;
         this.clusterService.addLocalNodeClusterManagerListener(this);
         this.clock = clock;
-        this.clientUtil = clientUtil;
         this.nodeFilter = nodeFilter;
 
-        this.adCheckpointTtlDuration = DateUtils.toDuration(adCheckpointTtl.get(settings));
-        this.forecastCheckpointTtlDuration = DateUtils.toDuration(forecastCheckpointTtl.get(settings));
+        this.adCheckpointTtlDuration = DateUtils.toDuration(AnomalyDetectorSettings.AD_CHECKPOINT_TTL.get(settings));
+        this.forecastCheckpointTtlDuration = DateUtils.toDuration(ForecastSettings.FORECAST_CHECKPOINT_TTL.get(settings));
 
-        clusterService.getClusterSettings().addSettingsUpdateConsumer(adCheckpointTtl, it -> {
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(AnomalyDetectorSettings.AD_CHECKPOINT_TTL, it -> {
             this.adCheckpointTtlDuration = DateUtils.toDuration(it);
             cancel(adCheckpointIndexRetentionCron);
-            IndexCleanup indexCleanup = new IndexCleanup(client, clientUtil, clusterService);
-            adCheckpointIndexRetentionCron = threadPool
-                .scheduleWithFixedDelay(
-                    new ADCheckpointIndexRetention(adCheckpointTtlDuration, clock, indexCleanup),
-                    TimeValue.timeValueHours(24),
-                    executorName()
-                );
-            forecastCheckpointIndexRetentionCron = threadPool
-                .scheduleWithFixedDelay(
-                    new ForecastCheckpointIndexRetention(forecastCheckpointTtlDuration, clock, indexCleanup),
-                    TimeValue.timeValueHours(24),
-                    executorName()
-                );
+            adCheckpointIndexRetentionCron = scheduleAdCheckpointRetention();
+        });
+
+        clusterService.getClusterSettings().addSettingsUpdateConsumer(ForecastSettings.FORECAST_CHECKPOINT_TTL, it -> {
+            this.forecastCheckpointTtlDuration = DateUtils.toDuration(it);
+            cancel(forecastCheckpointIndexRetentionCron);
+            forecastCheckpointIndexRetentionCron = scheduleForecastCheckpointRetention();
         });
     }
 
@@ -103,28 +119,29 @@ public class ClusterManagerEventListener implements LocalNodeClusterManagerListe
         }
 
         if (adCheckpointIndexRetentionCron == null) {
-            IndexCleanup indexCleanup = new IndexCleanup(client, clientUtil, clusterService);
-            adCheckpointIndexRetentionCron = threadPool
-                .scheduleWithFixedDelay(
-                    new ADCheckpointIndexRetention(adCheckpointTtlDuration, clock, indexCleanup),
-                    TimeValue.timeValueHours(24),
-                    executorName()
-                );
-            forecastCheckpointIndexRetentionCron = threadPool
-                .scheduleWithFixedDelay(
-                    new ForecastCheckpointIndexRetention(forecastCheckpointTtlDuration, clock, indexCleanup),
-                    TimeValue.timeValueHours(24),
-                    executorName()
-                );
-            clusterService.addLifecycleListener(new LifecycleListener() {
-                @Override
-                public void beforeStop() {
-                    cancel(adCheckpointIndexRetentionCron);
-                    adCheckpointIndexRetentionCron = null;
-                    cancel(forecastCheckpointIndexRetentionCron);
-                    forecastCheckpointIndexRetentionCron = null;
-                }
-            });
+            adCheckpointIndexRetentionCron = scheduleAdCheckpointRetention();
+            if (adCheckpointIndexRetentionCron != null) {
+                clusterService.addLifecycleListener(new LifecycleListener() {
+                    @Override
+                    public void beforeStop() {
+                        cancel(adCheckpointIndexRetentionCron);
+                        adCheckpointIndexRetentionCron = null;
+                    }
+                });
+            }
+        }
+
+        if (forecastCheckpointIndexRetentionCron == null) {
+            forecastCheckpointIndexRetentionCron = scheduleForecastCheckpointRetention();
+            if (forecastCheckpointIndexRetentionCron != null) {
+                clusterService.addLifecycleListener(new LifecycleListener() {
+                    @Override
+                    public void beforeStop() {
+                        cancel(forecastCheckpointIndexRetentionCron);
+                        forecastCheckpointIndexRetentionCron = null;
+                    }
+                });
+            }
         }
     }
 
@@ -155,5 +172,23 @@ public class ClusterManagerEventListener implements LocalNodeClusterManagerListe
 
     private String executorName() {
         return ThreadPool.Names.GENERIC;
+    }
+
+    private Cancellable scheduleAdCheckpointRetention() {
+        return threadPool
+            .scheduleWithFixedDelay(
+                adCheckpointStore.createRetentionTask(adCheckpointTtlDuration, clock),
+                TimeValue.timeValueHours(24),
+                executorName()
+            );
+    }
+
+    private Cancellable scheduleForecastCheckpointRetention() {
+        return threadPool
+            .scheduleWithFixedDelay(
+                forecastCheckpointStore.createRetentionTask(forecastCheckpointTtlDuration, clock),
+                TimeValue.timeValueHours(24),
+                executorName()
+            );
     }
 }

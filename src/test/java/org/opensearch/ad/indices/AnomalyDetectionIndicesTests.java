@@ -11,6 +11,8 @@
 
 package org.opensearch.ad.indices;
 
+import static org.mockito.Mockito.mock;
+
 import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
@@ -23,9 +25,11 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.indices.IndexManagementIntegTestCase;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 
 public class AnomalyDetectionIndicesTests extends IndexManagementIntegTestCase<ADIndex, ADIndexManagement> {
 
@@ -51,8 +55,9 @@ public class AnomalyDetectionIndicesTests extends IndexManagementIntegTestCase<A
             .put("plugins.anomaly_detection.request_timeout", TimeValue.timeValueSeconds(10))
             .build();
 
-        nodeFilter = new DiscoveryNodeFilterer(clusterService());
+        nodeFilter = new DiscoveryNodeFilterer(clusterService(), mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class));
 
+        DataAccess dataAccess = mock(DataAccess.class);
         indices = new ADIndexManagement(
             client(),
             clusterService(),
@@ -60,7 +65,8 @@ public class AnomalyDetectionIndicesTests extends IndexManagementIntegTestCase<A
             settings,
             nodeFilter,
             TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-            NamedXContentRegistry.EMPTY
+            NamedXContentRegistry.EMPTY,
+            dataAccess
         );
     }
 
@@ -73,19 +79,19 @@ public class AnomalyDetectionIndicesTests extends IndexManagementIntegTestCase<A
         indices.initConfigIndexIfAbsent(TestHelpers.createActionListener(response -> {
             boolean acknowledged = response.isAcknowledged();
             assertTrue(acknowledged);
-        }, failure -> { throw new RuntimeException("should not recreate index"); }));
+        }, failure -> { throw new RuntimeException("should not recreate index"); }), null);
         TestHelpers.waitForIndexCreationToComplete(client(), ADCommonName.CONFIG_INDEX);
     }
 
     public void testAnomalyDetectorIndexExistsAndNotRecreate() throws IOException {
         indices.initConfigIndexIfAbsent(TestHelpers.createActionListener(response -> response.isAcknowledged(), failure -> {
             throw new RuntimeException("should not recreate index");
-        }));
+        }), null);
         TestHelpers.waitForIndexCreationToComplete(client(), ADCommonName.CONFIG_INDEX);
         if (client().admin().indices().prepareExists(ADCommonName.CONFIG_INDEX).get().isExists()) {
             indices.initConfigIndexIfAbsent(TestHelpers.createActionListener(response -> {
                 throw new RuntimeException("should not recreate index " + ADCommonName.CONFIG_INDEX);
-            }, failure -> { throw new RuntimeException("should not recreate index " + ADCommonName.CONFIG_INDEX); }));
+            }, failure -> { throw new RuntimeException("should not recreate index " + ADCommonName.CONFIG_INDEX); }), null);
         }
     }
 
@@ -119,11 +125,12 @@ public class AnomalyDetectionIndicesTests extends IndexManagementIntegTestCase<A
     }
 
     public void testGetDetectionStateIndexMapping() throws IOException {
-        String detectorIndexMappings = ADIndexManagement.getConfigMappings();
+        String detectorIndexMappings = IndexResourceLoader.getConfigMappings();
         detectorIndexMappings = detectorIndexMappings
             .substring(detectorIndexMappings.indexOf("\"properties\""), detectorIndexMappings.lastIndexOf("}"));
         String detectionStateIndexMapping = ADIndexManagement.getStateMappings();
         assertTrue(detectionStateIndexMapping.contains(detectorIndexMappings));
+        assertTrue(detectionStateIndexMapping.contains("\"tenant_id\""));
     }
 
     public void testValidateCustomIndexForBackendJob() throws IOException, InterruptedException {

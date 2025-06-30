@@ -42,6 +42,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -105,11 +106,11 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
             .build();
 
         doAnswer(invocation -> {
-            ActionListener<GetResponse> listener = invocation.getArgument(2);
+            ActionListener<GetResponse> listener = invocation.getArgument(1);
 
             listener.onResponse(TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX));
             return null;
-        }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
+        }).when(client).get(any(GetRequest.class), any(ActionListener.class));
 
         for (int z = 1; z <= numberOfTrials; z++) {
             long seed = z;
@@ -117,9 +118,8 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
             // recreate in each loop; otherwise, we will have heap overflow issue.
             searchFeatureDao = spy(
                 new SearchFeatureDao(
-                    client,
                     xContentRegistry(), // Important. Without this, ParseUtils cannot parse anything
-                    securityCientUtil,
+                    mock(DataAccess.class),
                     clusterService,
                     TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
                     clock,
@@ -174,7 +174,8 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
                 mock(FeatureManager.class),
                 mock(MemoryTracker.class),
                 settings,
-                clusterService
+                clusterService,
+                stateManager
             );
 
             // create labelled data
@@ -228,8 +229,9 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
             entity = Entity.createSingleAttributeEntity("field", entityName + z);
             ModelState<ThresholdedRandomCutForest> modelState = new ModelState<>(
                 null,
-                entity.getModelId(detectorId).get(),
+                entity.getModelId(null, detectorId).get(),
                 detector.getId(),
+                null,
                 ModelManager.ModelType.TRCF.getName(),
                 clock,
                 priority,
@@ -254,7 +256,10 @@ public class HCADModelPerfTests extends AbstractCosineDataTest {
                         new double[] {},
                         dataStartTimeMs,
                         entity,
-                        null
+                        null,
+                        null,
+                        null,
+                        clock.millis()
                     ),
                     detector.getId(),
                     modelState,

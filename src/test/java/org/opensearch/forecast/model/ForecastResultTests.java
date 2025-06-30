@@ -49,6 +49,7 @@ public class ForecastResultTests extends OpenSearchTestCase {
         float[] forecastsUppers = new float[] { 1.5f, 2.5f, 3.5f, 4.5f };
         float[] forecastsLowers = new float[] { 0.5f, 1.5f, 2.5f, 3.5f };
         String taskId = "testTaskId";
+        String tenantId = "tenantId";
 
         // Act
         result = ForecastResult
@@ -69,7 +70,8 @@ public class ForecastResultTests extends OpenSearchTestCase {
                 forecastsValues,
                 forecastsUppers,
                 forecastsLowers,
-                taskId
+                taskId,
+                tenantId
             );
     }
 

@@ -13,18 +13,18 @@ package org.opensearch.ad.rest.handler;
 
 import java.time.Clock;
 
-import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.rest.RestRequest;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
 
 /**
  * Anomaly detector REST action handler to process POST request.
@@ -32,32 +32,10 @@ import org.opensearch.transport.client.Client;
  */
 public class ValidateAnomalyDetectorActionHandler extends AbstractAnomalyDetectorActionHandler<ValidateConfigResponse> {
 
-    /**
-     * Constructor function.
-     *
-     * @param clusterService                  ClusterService
-     * @param client                          ES node client that executes actions on the local node
-     * @param clientUtil                      AD client utility
-     * @param anomalyDetectionIndices         anomaly detector index manager
-     * @param anomalyDetector                 anomaly detector instance
-     * @param requestTimeout                  request time out configuration
-     * @param maxSingleEntityAnomalyDetectors max single-entity anomaly detectors allowed
-     * @param maxMultiEntityAnomalyDetectors  max multi-entity detectors allowed
-     * @param maxAnomalyFeatures              max features allowed per detector
-     * @param maxCategoricalFields            max number of categorical fields
-     * @param method                          Rest Method type
-     * @param xContentRegistry                Registry which is used for XContentParser
-     * @param user                            User context
-     * @param searchFeatureDao                Search feature DAO
-     * @param validationType                  Specified type for validation
-     * @param clock                           Clock object to know when to timeout
-     * @param settings                        Node settings
-     */
     public ValidateAnomalyDetectorActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
-        ADIndexManagement anomalyDetectionIndices,
+        DataAccess dataAccess,
+        ADDelegatingDataManagement anomalyDetectionIndices,
         Config anomalyDetector,
         TimeValue requestTimeout,
         Integer maxSingleEntityAnomalyDetectors,
@@ -70,12 +48,12 @@ public class ValidateAnomalyDetectorActionHandler extends AbstractAnomalyDetecto
         SearchFeatureDao searchFeatureDao,
         String validationType,
         Clock clock,
-        Settings settings
+        Settings settings,
+        RunContext runContext
     ) {
         super(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             null,
             anomalyDetectionIndices,
             Config.NO_ID,
@@ -96,7 +74,8 @@ public class ValidateAnomalyDetectorActionHandler extends AbstractAnomalyDetecto
             validationType,
             true,
             clock,
-            settings
+            settings,
+            runContext
         );
     }
 }

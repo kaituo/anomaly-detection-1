@@ -27,15 +27,18 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
     public static String MODEL_TYPE_KEY = "model_type";
     public static String LAST_USED_TIME_KEY = "last_used_time";
     public static String LAST_CHECKPOINT_TIME_KEY = "last_checkpoint_time";
+    public static String LAST_PROCESSED_DATA_END_TIME_KEY = "last_processed_data_end_time";
     public static String PRIORITY_KEY = "priority";
 
     protected T model;
     protected String modelId;
     protected String configId;
+    protected String tenantId;
     protected String modelType;
     // time when the ML model was used last time
     protected Instant lastUsedTime;
     protected Instant lastCheckpointTime;
+    protected Instant lastProcessedDataEndTime;
     protected Clock clock;
     protected float priority;
     protected Deque<Sample> samples;
@@ -47,6 +50,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
      * @param model ML model
      * @param modelId Id of model partition
      * @param configId Id of analysis this model partition is used for
+     * @param tenantId Id of tenant this model partition belongs to
      * @param modelType type of model
      * @param clock UTC clock
      * @param priority Priority of the model state.  Used in multi-entity detectors' cache.
@@ -57,6 +61,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
         T model,
         String modelId,
         String configId,
+        String tenantId,
         String modelType,
         Clock clock,
         float priority,
@@ -66,10 +71,12 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
         this.model = model;
         this.modelId = modelId;
         this.configId = configId;
+        this.tenantId = tenantId;
         this.modelType = modelType;
         this.lastUsedTime = clock.instant();
         // this is inaccurate until we find the last checkpoint time from disk
         this.lastCheckpointTime = Instant.MIN;
+        this.lastProcessedDataEndTime = Instant.MIN;
         this.clock = clock;
         this.priority = priority;
         this.entity = entity;
@@ -82,11 +89,12 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
      * @param model ML model
      * @param modelId Id of model partition
      * @param configId Id of analysis this model partition is used for
+     * @param tenantId Id of tenant this model partition belongs to
      * @param modelType type of model
      * @param clock UTC clock
      */
-    public ModelState(T model, String modelId, String configId, String modelType, Clock clock) {
-        this(model, modelId, configId, modelType, clock, 0, Optional.empty(), new ArrayDeque<>());
+    public ModelState(T model, String modelId, String configId, String tenantId, String modelType, Clock clock) {
+        this(model, modelId, configId, tenantId, modelType, clock, 0, Optional.empty(), new ArrayDeque<>());
     }
 
     /**
@@ -134,6 +142,21 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
         this.lastCheckpointTime = lastCheckpointTime;
     }
 
+    public Instant getLastProcessedDataEndTime() {
+        return lastProcessedDataEndTime;
+    }
+
+    public void setLastProcessedDataEndTime(Instant lastProcessedDataEndTime) {
+        if (lastProcessedDataEndTime != null && lastProcessedDataEndTime.isAfter(this.lastProcessedDataEndTime)) {
+            this.lastProcessedDataEndTime = lastProcessedDataEndTime;
+            this.lastUsedTime = clock.instant();
+        }
+    }
+
+    public boolean hasProcessedDataEndTime(Instant dataEndTime) {
+        return dataEndTime != null && !Instant.MIN.equals(lastProcessedDataEndTime) && !dataEndTime.isAfter(lastProcessedDataEndTime);
+    }
+
     /**
      * Returns priority of the ModelState
      * @return the priority
@@ -159,6 +182,15 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
      */
     public String getConfigId() {
         return configId;
+    }
+
+    /**
+     * Gets the Tenant ID of the model
+     *
+     * @return the tenant id associated with the model
+     */
+    public String getTenantId() {
+        return tenantId;
     }
 
     /**
@@ -225,6 +257,7 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
             {
                 put(CommonName.MODEL_ID_FIELD, modelId);
                 put(CommonName.CONFIG_ID_KEY, configId);
+                put(CommonName.TENANT_ID_FIELD, tenantId);
                 put(MODEL_TYPE_KEY, modelType);
                 /* A stats API broadcasts requests to all nodes and renders node responses using toXContent.
                  *
@@ -235,8 +268,11 @@ public class ModelState<T> implements org.opensearch.timeseries.ExpiringState {
                  *  a long instead of the Instant object itself as
                  *  StreamOutput::writeGenericValue only recognizes built-in types.*/
                 put(LAST_USED_TIME_KEY, lastUsedTime.toEpochMilli());
-                if (lastCheckpointTime != Instant.MIN) {
+                if (!Instant.MIN.equals(lastCheckpointTime)) {
                     put(LAST_CHECKPOINT_TIME_KEY, lastCheckpointTime.toEpochMilli());
+                }
+                if (!Instant.MIN.equals(lastProcessedDataEndTime)) {
+                    put(LAST_PROCESSED_DATA_END_TIME_KEY, lastProcessedDataEndTime.toEpochMilli());
                 }
                 if (entity.isPresent()) {
                     put(CommonName.ENTITY_KEY, entity.get().toStat());

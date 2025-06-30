@@ -13,13 +13,10 @@ package org.opensearch.forecast.task;
 
 import static org.opensearch.action.DocWriteResponse.Result.CREATED;
 import static org.opensearch.forecast.constant.ForecastCommonMessages.FORECASTER_IS_RUNNING;
-import static org.opensearch.forecast.indices.ForecastIndexManagement.ALL_FORECAST_RESULTS_INDEX_PATTERN;
 import static org.opensearch.forecast.model.ForecastTask.FORECASTER_ID_FIELD;
 import static org.opensearch.forecast.model.ForecastTaskType.REALTIME_TASK_TYPES;
 import static org.opensearch.forecast.settings.ForecastSettings.DELETE_FORECAST_RESULT_WHEN_DELETE_FORECASTER;
 import static org.opensearch.forecast.settings.ForecastSettings.MAX_OLD_TASK_DOCS_PER_FORECASTER;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_BATCH_TASK_THREAD_POOL_NAME;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME;
 import static org.opensearch.timeseries.model.TimeSeriesTask.TASK_ID_FIELD;
 
 import java.io.IOException;
@@ -27,22 +24,19 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.ExceptionsHelper;
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.action.index.IndexResponse;
-import org.opensearch.action.support.WriteRequest;
-import org.opensearch.action.update.UpdateRequest;
-import org.opensearch.action.update.UpdateResponse;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
@@ -52,17 +46,19 @@ import org.opensearch.core.common.Strings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.model.Forecaster;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.index.query.TermsQueryBuilder;
-import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.DeleteByQueryRequest;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.DuplicateTaskException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.function.BiCheckedFunction;
@@ -80,31 +76,28 @@ import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.util.ExceptionUtil;
 import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
-public class ForecastTaskManager extends
-    TaskManager<TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastIndexManagement> {
+public class ForecastTaskManager extends TaskManager<TaskCacheManager, ForecastTaskType, ForecastTask, ForecastDelegatingDataManagement> {
     private final Logger logger = LogManager.getLogger(ForecastTaskManager.class);
+    private final ForecastDelegatingDataManagement stateIndexStore;
 
     public ForecastTaskManager(
         TaskCacheManager forecastTaskCacheManager,
-        Client client,
         NamedXContentRegistry xContentRegistry,
-        ForecastIndexManagement forecastIndices,
         ClusterService clusterService,
         Settings settings,
         ThreadPool threadPool,
-        NodeStateManager nodeStateManager
+        DataAccess taskSearcher,
+        ForecastDelegatingDataManagement stateIndexStore,
+        StateManager nodeStateManager
     ) {
         super(
             forecastTaskCacheManager,
             clusterService,
-            client,
             ForecastIndex.STATE.getIndexName(),
             ForecastTaskType.REALTIME_TASK_TYPES,
             Collections.emptyList(),
             ForecastTaskType.RUN_ONCE_TASK_TYPES,
-            forecastIndices,
             nodeStateManager,
             AnalysisType.FORECAST,
             xContentRegistry,
@@ -112,11 +105,13 @@ public class ForecastTaskManager extends
             MAX_OLD_TASK_DOCS_PER_FORECASTER,
             settings,
             threadPool,
-            ALL_FORECAST_RESULTS_INDEX_PATTERN,
-            FORECAST_THREAD_POOL_NAME,
+            taskSearcher,
+            ForecastCommonName.ALL_FORECAST_RESULTS_INDEX_PATTERN,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             DELETE_FORECAST_RESULT_WHEN_DELETE_FORECASTER,
             TaskState.INACTIVE
         );
+        this.stateIndexStore = stateIndexStore;
     }
 
     /**
@@ -150,9 +145,9 @@ public class ForecastTaskManager extends
                 return;
             }
 
-            getAndExecuteOnLatestConfigLevelTask(forecasterId, REALTIME_TASK_TYPES, (forecastTaskOptional) -> {
+            getAndExecuteOnLatestConfigLevelTask(forecasterId, forecaster.getTenantId(), REALTIME_TASK_TYPES, (forecastTaskOptional) -> {
                 if (forecastTaskOptional.isEmpty()) {
-                    logger.debug("Can't find realtime task for forecaster {}, init realtime task cache directly", forecasterId);
+                    logger.debug("Can't find realtime task for config {}, init realtime task cache directly", forecasterId);
                     ExecutorFunction function = () -> createNewTask(
                         forecaster,
                         null,
@@ -161,19 +156,19 @@ public class ForecastTaskManager extends
                         clusterService.localNode().getId(),
                         TaskState.CREATED,
                         ActionListener.wrap(r -> {
-                            logger.info("Recreate realtime task successfully for forecaster {}", forecasterId);
+                            logger.debug("Recreate realtime task successfully for config {}", forecasterId);
                             taskCacheManager.initRealtimeTaskCache(forecasterId, forecaster.getIntervalInMilliseconds());
                             listener.onResponse(true);
                         }, e -> {
-                            logger.error("Failed to recreate realtime task for forecaster " + forecasterId, e);
+                            logger.error("Failed to recreate realtime task for config " + forecasterId, e);
                             listener.onFailure(e);
                         })
                     );
-                    recreateRealtimeTaskBeforeExecuting(function, listener);
+                    recreateRealtimeTaskBeforeExecuting(function, listener, forecaster.getTenantId());
                     return;
                 }
 
-                logger.info("Init realtime task cache for forecaster {}", forecasterId);
+                logger.debug("Init realtime task cache for config {}", forecasterId);
                 taskCacheManager.initRealtimeTaskCache(forecasterId, forecaster.getIntervalInMilliseconds());
                 listener.onResponse(true);
             }, transportService, false, listener);
@@ -183,45 +178,12 @@ public class ForecastTaskManager extends
         }
     }
 
-    /**
-     * Update forecast task with specific fields.
-     *
-     * @param taskId forecast task id
-     * @param updatedFields updated fields, key: filed name, value: new value
-     */
-    public void updateForecastTask(String taskId, Map<String, Object> updatedFields) {
-        updateForecastTask(taskId, updatedFields, ActionListener.wrap(response -> {
-            if (response.status() == RestStatus.OK) {
-                logger.debug("Updated forecast task successfully: {}, task id: {}", response.status(), taskId);
-            } else {
-                logger.error("Failed to update forecast task {}, status: {}", taskId, response.status());
-            }
-        }, e -> { logger.error("Failed to update task: " + taskId, e); }));
-    }
-
-    /**
-     * Update forecast task for specific fields.
-     *
-     * @param taskId task id
-     * @param updatedFields updated fields, key: filed name, value: new value
-     * @param listener action listener
-     */
-    public void updateForecastTask(String taskId, Map<String, Object> updatedFields, ActionListener<UpdateResponse> listener) {
-        UpdateRequest updateRequest = new UpdateRequest(ForecastIndex.STATE.getIndexName(), taskId);
-        Map<String, Object> updatedContent = new HashMap<>();
-        updatedContent.putAll(updatedFields);
-        updatedContent.put(TimeSeriesTask.LAST_UPDATE_TIME_FIELD, Instant.now().toEpochMilli());
-        updateRequest.doc(updatedContent);
-        updateRequest.setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
-        client.update(updateRequest, listener);
-    }
-
-    private void recreateRealtimeTaskBeforeExecuting(ExecutorFunction function, ActionListener<Boolean> listener) {
-        if (indexManagement.doesStateIndexExist()) {
+    private void recreateRealtimeTaskBeforeExecuting(ExecutorFunction function, ActionListener<Boolean> listener, String tenantId) {
+        if (stateIndexStore.doesStateIndexExist()) {
             function.execute();
         } else {
             // If forecast state index doesn't exist, create index and execute function.
-            indexManagement.initStateIndex(ActionListener.wrap(r -> {
+            stateIndexStore.initStateIndex(ActionListener.wrap(r -> {
                 if (r.isAcknowledged()) {
                     logger.info("Created {} with mappings.", ForecastIndex.STATE.getIndexName());
                     function.execute();
@@ -235,7 +197,7 @@ public class ForecastTaskManager extends
                 if (ExceptionsHelper.unwrapCause(e) instanceof ResourceAlreadyExistsException) {
                     function.execute();
                 } else {
-                    logger.error("Failed to init anomaly detection state index", e);
+                    logger.error("Failed to init state index", e);
                     listener.onFailure(e);
                 }
             }));
@@ -251,23 +213,31 @@ public class ForecastTaskManager extends
             return;
         }
         threadPool.schedule(() -> {
-            String taskId = taskCacheManager.pollDeletedTask();
+            Pair<String, String> deletedTask = taskCacheManager.pollDeletedTask();
+            if (deletedTask == null) {
+                return;
+            }
+            String taskId = deletedTask.getLeft();
+            String tenantId = deletedTask.getRight();
             if (taskId == null) {
                 return;
             }
-            DeleteByQueryRequest deleteForecastResultsRequest = new DeleteByQueryRequest(ALL_FORECAST_RESULTS_INDEX_PATTERN);
+            DeleteByQueryRequest deleteForecastResultsRequest = new DeleteByQueryRequest(
+                ForecastCommonName.ALL_FORECAST_RESULTS_INDEX_PATTERN
+            );
             deleteForecastResultsRequest.setQuery(new TermsQueryBuilder(TASK_ID_FIELD, taskId));
-            client.execute(DeleteByQueryAction.INSTANCE, deleteForecastResultsRequest, ActionListener.wrap(res -> {
+            dataAccess.deleteByQuery(deleteForecastResultsRequest, TenantContext.user(tenantId), ActionListener.wrap(res -> {
                 logger.debug("Successfully deleted forecast results of task " + taskId);
                 DeleteByQueryRequest deleteChildTasksRequest = new DeleteByQueryRequest(ForecastIndex.STATE.getIndexName());
                 deleteChildTasksRequest.setQuery(new TermsQueryBuilder(TimeSeriesTask.PARENT_TASK_ID_FIELD, taskId));
 
-                client.execute(DeleteByQueryAction.INSTANCE, deleteChildTasksRequest, ActionListener.wrap(r -> {
+                dataAccess.deleteByQuery(deleteChildTasksRequest, TenantContext.user(tenantId), ActionListener.wrap(r -> {
                     logger.debug("Successfully deleted child tasks of task " + taskId);
+                    // drain the deleted‑task queue one entry at a time
                     cleanChildTasksAndResultsOfDeletedTask();
                 }, e -> { logger.error("Failed to delete child tasks of task " + taskId, e); }));
             }, ex -> { logger.error("Failed to delete forecast results for task " + taskId, ex); }));
-        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), AD_BATCH_TASK_THREAD_POOL_NAME);
+        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME);
     }
 
     @Override
@@ -425,21 +395,37 @@ public class ForecastTaskManager extends
 
         try {
 
-            if (indexManagement.doesStateIndexExist()) {
+            if (stateIndexStore.doesStateIndexExist()) {
                 // If state index exist, check if latest task is running
-                getAndExecuteOnLatestConfigLevelTask(config.getId(), Arrays.asList(taskType), (task) -> {
+                getAndExecuteOnLatestConfigLevelTask(config.getId(), config.getTenantId(), Arrays.asList(taskType), (task) -> {
                     if (!task.isPresent() || task.get().isDone()) {
-                        updateLatestFlagOfOldTasksAndCreateNewTask(config, null, true, config.getUser(), TaskState.INIT_TEST, listener);
+                        updateLatestFlagOfOldTasksAndCreateNewTask(
+                            config,
+                            null,
+                            true,
+                            config.getUser(),
+                            config.getTenantId(),
+                            TaskState.INIT_TEST,
+                            listener
+                        );
                     } else {
                         listener.onFailure(new OpenSearchStatusException("run once is on-going", RestStatus.BAD_REQUEST));
                     }
                 }, transportService, true, listener);
             } else {
                 // If state index doesn't exist, create index and execute forecast.
-                indexManagement.initStateIndex(ActionListener.wrap(r -> {
+                stateIndexStore.initStateIndex(ActionListener.wrap(r -> {
                     if (r.isAcknowledged()) {
                         logger.info("Created {} with mappings.", stateIndex);
-                        updateLatestFlagOfOldTasksAndCreateNewTask(config, null, true, config.getUser(), TaskState.INIT_TEST, listener);
+                        updateLatestFlagOfOldTasksAndCreateNewTask(
+                            config,
+                            null,
+                            true,
+                            config.getUser(),
+                            config.getTenantId(),
+                            TaskState.INIT_TEST,
+                            listener
+                        );
                     } else {
                         String error = String.format(Locale.ROOT, CommonMessages.CREATE_INDEX_NOT_ACKNOWLEDGED, stateIndex);
                         logger.warn(error);
@@ -447,15 +433,23 @@ public class ForecastTaskManager extends
                     }
                 }, e -> {
                     if (ExceptionsHelper.unwrapCause(e) instanceof ResourceAlreadyExistsException) {
-                        updateLatestFlagOfOldTasksAndCreateNewTask(config, null, true, config.getUser(), TaskState.INIT_TEST, listener);
+                        updateLatestFlagOfOldTasksAndCreateNewTask(
+                            config,
+                            null,
+                            true,
+                            config.getUser(),
+                            config.getTenantId(),
+                            TaskState.INIT_TEST,
+                            listener
+                        );
                     } else {
-                        logger.error("Failed to init anomaly detection state index", e);
+                        logger.error("Failed to init state index", e);
                         listener.onFailure(e);
                     }
                 }));
             }
         } catch (Exception e) {
-            logger.error("Failed to start detector " + config.getId(), e);
+            logger.error("Failed to start config " + config.getId(), e);
             listener.onFailure(e);
         }
     }

@@ -25,6 +25,7 @@ public abstract class ResultRequest extends ActionRequest implements ToXContentO
     // time range start and end. Unit: epoch milliseconds
     protected long start;
     protected long end;
+    protected String tenantId;
 
     public ResultRequest(StreamInput in) throws IOException {
         super(in);
@@ -32,14 +33,20 @@ public abstract class ResultRequest extends ActionRequest implements ToXContentO
         configIndex = in.readString();
         start = in.readLong();
         end = in.readLong();
+        tenantId = in.readOptionalString();
     }
 
-    public ResultRequest(String configID, String configIndex, long start, long end) {
+    public ResultRequest(String configID, String configIndex, long start, long end, String tenantId) {
         super();
         this.configId = configID;
         this.configIndex = configIndex;
         this.start = start;
         this.end = end;
+        this.tenantId = tenantId;
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 
     public long getStart() {
@@ -65,6 +72,7 @@ public abstract class ResultRequest extends ActionRequest implements ToXContentO
         out.writeString(configIndex);
         out.writeLong(start);
         out.writeLong(end);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

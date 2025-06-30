@@ -21,25 +21,22 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.ml.ADColdStart;
-import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
-import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.ml.ForecastColdStart;
 import org.opensearch.forecast.ml.ForecastRealTimeInferencer;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.transport.TransportService;
 
 public class CronTransportAction extends TransportNodesAction<CronRequest, CronResponse, CronNodeRequest, CronNodeResponse> {
     private final Logger LOG = LogManager.getLogger(CronTransportAction.class);
-    private NodeStateManager transportStateManager;
-    private ADModelManager adModelManager;
+    private StateManager transportStateManager;
     private ADCacheProvider adCacheProvider;
     private ForecastCacheProvider forecastCacheProvider;
     private ADColdStart adEntityColdStarter;
@@ -55,8 +52,7 @@ public class CronTransportAction extends TransportNodesAction<CronRequest, CronR
         ClusterService clusterService,
         TransportService transportService,
         ActionFilters actionFilters,
-        NodeStateManager tarnsportStatemanager,
-        ADModelManager adModelManager,
+        StateManager tarnsportStatemanager,
         ADCacheProvider adCacheProvider,
         ForecastCacheProvider forecastCacheProvider,
         ADColdStart adEntityColdStarter,
@@ -78,7 +74,6 @@ public class CronTransportAction extends TransportNodesAction<CronRequest, CronR
             CronNodeResponse.class
         );
         this.transportStateManager = tarnsportStatemanager;
-        this.adModelManager = adModelManager;
         this.adCacheProvider = adCacheProvider;
         this.forecastCacheProvider = forecastCacheProvider;
         this.adEntityColdStarter = adEntityColdStarter;
@@ -121,9 +116,6 @@ public class CronTransportAction extends TransportNodesAction<CronRequest, CronR
         // makes checkpoints for hosted models and stop hosting models not actively
         // used.
         // for single-entity detector
-        adModelManager
-            .maintenance(ActionListener.wrap(v -> LOG.debug("model maintenance done"), e -> LOG.error("Error maintaining ad model", e)));
-        // for multi-entity detector
         adCacheProvider.get().maintenance();
 
         adEntityColdStarter.maintenance();

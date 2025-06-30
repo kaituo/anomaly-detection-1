@@ -27,6 +27,7 @@ import org.opensearch.action.delete.DeleteResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.DeleteAnomalyDetectorAction;
@@ -39,7 +40,9 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.transport.TransportService;
 
 public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
@@ -58,15 +61,17 @@ public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         adTaskManager = mock(ADTaskManager.class);
+        RunContext runContext = new SdkRunContext();
         action = new DeleteAnomalyDetectorTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client(),
             clusterService,
             Settings.EMPTY,
             xContentRegistry(),
-            mock(NodeStateManager.class),
-            adTaskManager
+            mock(StateManager.class),
+            adTaskManager,
+            mock(ADDelegatingDataManagement.class),
+            runContext
         );
         response = new ActionListener<DeleteResponse>() {
             @Override
@@ -89,7 +94,7 @@ public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
 
     @Test
     public void testDeleteRequest() throws IOException {
-        DeleteConfigRequest request = new DeleteConfigRequest("1234", ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest request = new DeleteConfigRequest("1234", ADIndex.CONFIG.getIndexName(), null);
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
         StreamInput input = out.bytes().streamInput();
@@ -101,7 +106,7 @@ public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
 
     @Test
     public void testEmptyDeleteRequest() {
-        DeleteConfigRequest request = new DeleteConfigRequest("", ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest request = new DeleteConfigRequest("", ADIndex.CONFIG.getIndexName(), null);
         ActionRequestValidationException exception = request.validate();
         Assert.assertNotNull(exception);
     }
@@ -110,14 +115,14 @@ public class DeleteAnomalyDetectorActionTests extends OpenSearchIntegTestCase {
     public void testTransportActionWithAdIndex() {
         // DeleteResponse is not called because detector ID will not exist
         createIndex(".opendistro-anomaly-detector-jobs");
-        DeleteConfigRequest request = new DeleteConfigRequest("1234", ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest request = new DeleteConfigRequest("1234", ADIndex.CONFIG.getIndexName(), null);
         action.doExecute(mock(Task.class), request, response);
     }
 
     @Test
     public void testTransportActionWithoutAdIndex() throws IOException {
         // DeleteResponse is not called because detector ID will not exist
-        DeleteConfigRequest request = new DeleteConfigRequest("1234", ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest request = new DeleteConfigRequest("1234", ADIndex.CONFIG.getIndexName(), null);
         action.doExecute(mock(Task.class), request, response);
     }
 }

@@ -11,6 +11,8 @@
 
 package org.opensearch.timeseries.transport;
 
+import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -26,6 +28,7 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
+import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.timeseries.model.ConfigValidationIssue;
 
 public class ValidateConfigResponse extends ActionResponse implements ToXContentObject {
@@ -85,5 +88,23 @@ public class ValidateConfigResponse extends ActionResponse implements ToXContent
         } catch (IOException e) {
             throw new UncheckedIOException("failed to parse ActionResponse into ValidateConfigResponse", e);
         }
+    }
+
+    public static ValidateConfigResponse parse(XContentParser parser) throws IOException {
+        ConfigValidationIssue issue = null;
+
+        if (parser.currentToken() == null) {
+            parser.nextToken();
+        }
+
+        ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
+
+        while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
+            String aspectName = parser.currentName();
+            parser.nextToken(); // Move to START_OBJECT of the issue
+            issue = ConfigValidationIssue.parse(parser, aspectName);
+        }
+
+        return new ValidateConfigResponse(issue);
     }
 }

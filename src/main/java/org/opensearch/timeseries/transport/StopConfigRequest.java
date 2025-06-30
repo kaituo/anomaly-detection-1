@@ -32,12 +32,14 @@ import org.opensearch.timeseries.constant.CommonName;
 public class StopConfigRequest extends ActionRequest implements ToXContentObject {
 
     private String configID;
+    private String tenantId;
 
     public StopConfigRequest() {}
 
     public StopConfigRequest(StreamInput in) throws IOException {
         super(in);
         this.configID = in.readString();
+        this.tenantId = in.readOptionalString();
     }
 
     public StopConfigRequest(String configID) {
@@ -49,8 +51,17 @@ public class StopConfigRequest extends ActionRequest implements ToXContentObject
         return configID;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     public StopConfigRequest adID(String configID) {
         this.configID = configID;
+        return this;
+    }
+
+    public StopConfigRequest tenantId(String tenantId) {
+        this.tenantId = tenantId;
         return this;
     }
 
@@ -58,6 +69,7 @@ public class StopConfigRequest extends ActionRequest implements ToXContentObject
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeString(configID);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

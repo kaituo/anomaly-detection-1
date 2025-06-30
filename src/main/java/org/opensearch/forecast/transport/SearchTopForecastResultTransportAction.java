@@ -12,7 +12,6 @@
 package org.opensearch.forecast.transport;
 
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
-import static org.opensearch.forecast.indices.ForecastIndexManagement.ALL_FORECAST_RESULTS_INDEX_PATTERN;
 import static org.opensearch.timeseries.util.RestHandlerUtils.createXContentParserFromRegistry;
 
 import java.io.IOException;
@@ -70,6 +69,7 @@ import org.opensearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
 import org.opensearch.search.aggregations.metrics.NumericMetricsAggregation;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.transport.GetConfigRequest;
@@ -81,12 +81,13 @@ import org.opensearch.transport.client.Client;
 /**
  * Transport action to fetch top forecast results for HC forecaster.
  */
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Local host call only. Safe in multitenant.")
 public class SearchTopForecastResultTransportAction extends
     HandledTransportAction<SearchTopForecastResultRequest, SearchTopForecastResultResponse> {
     private static final Logger logger = LogManager.getLogger(SearchTopForecastResultTransportAction.class);
     private ForecastSearchHandler searchHandler;
     // Number of buckets to return per page
-    private static final String defaultIndex = ALL_FORECAST_RESULTS_INDEX_PATTERN;
+    private static final String defaultIndex = ForecastCommonName.ALL_FORECAST_RESULTS_INDEX_PATTERN;
 
     private static final int DEFAULT_SIZE = 5;
     private static final int MAX_SIZE = 50;
@@ -123,7 +124,8 @@ public class SearchTopForecastResultTransportAction extends
             "",
             "",
             false,
-            null
+            null,
+            request.getTenantId()
         );
 
         client.execute(GetForecasterAction.INSTANCE, getForecasterRequest, ActionListener.wrap(getForecasterResponse -> {

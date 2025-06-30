@@ -124,7 +124,10 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
             new double[] { 0 },
             0,
             entity,
-            null
+            null,
+            null,
+            null,
+            System.currentTimeMillis()
         );
 
         doAnswer(invocation -> {
@@ -152,7 +155,10 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
             new double[] { 0 },
             0,
             entity,
-            null
+            null,
+            null,
+            null,
+            System.currentTimeMillis()
         );
 
         doAnswer(invocation -> {
@@ -181,7 +187,10 @@ public class EntityColdStartWorkerTests extends AbstractRateLimitingTest {
             new double[] { 0 },
             0,
             entity,
-            null
+            null,
+            null,
+            null,
+            System.currentTimeMillis()
         );
 
         doAnswer(invocation -> {

@@ -33,6 +33,7 @@ public abstract class AbstractAnomalyDetectorAction extends BaseRestHandler {
     protected volatile Integer maxMultiEntityDetectors;
     protected volatile Integer maxAnomalyFeatures;
     protected volatile Integer maxCategoricalFields;
+    protected volatile Settings settings;
 
     public AbstractAnomalyDetectorAction(Settings settings, ClusterService clusterService) {
         this.requestTimeout = AD_REQUEST_TIMEOUT.get(settings);
@@ -42,6 +43,7 @@ public abstract class AbstractAnomalyDetectorAction extends BaseRestHandler {
         this.maxMultiEntityDetectors = AD_MAX_HC_ANOMALY_DETECTORS.get(settings);
         this.maxAnomalyFeatures = MAX_ANOMALY_FEATURES.get(settings);
         this.maxCategoricalFields = ADNumericSetting.maxCategoricalFields();
+        this.settings = settings;
         // TODO: will add more cluster setting consumer later
         // TODO: inject ClusterSettings only if clusterService is only used to get ClusterSettings
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_REQUEST_TIMEOUT, it -> requestTimeout = it);

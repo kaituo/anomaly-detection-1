@@ -28,6 +28,7 @@ public class ProfileRequest extends BaseNodesRequest<ProfileRequest> {
 
     private Set<ProfileName> profilesToBeRetrieved;
     private String configId;
+    private String tenantId;
 
     public ProfileRequest(StreamInput in) throws IOException {
         super(in);
@@ -39,6 +40,7 @@ public class ProfileRequest extends BaseNodesRequest<ProfileRequest> {
             }
         }
         configId = in.readString();
+        tenantId = in.readOptionalString();
     }
 
     /**
@@ -62,10 +64,19 @@ public class ProfileRequest extends BaseNodesRequest<ProfileRequest> {
             out.writeEnum(profile);
         }
         out.writeString(configId);
+        out.writeOptionalString(tenantId);
     }
 
     public String getConfigId() {
         return configId;
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
     }
 
     /**

@@ -20,6 +20,8 @@ import org.opensearch.transport.TransportRequestOptions;
 public class ADResultBulkAction extends ActionType<ResultBulkResponse> {
 
     // Internal Action which is not used for public facing RestAPIs.
+    // Only used internally in both single-tenant and multi-tenant modes.
+    // In multi-tenant mode, it is used to index results from data nodes to the appropriate indices in customer domain/collection.
     public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "write/bulk";
     public static final ADResultBulkAction INSTANCE = new ADResultBulkAction();
 

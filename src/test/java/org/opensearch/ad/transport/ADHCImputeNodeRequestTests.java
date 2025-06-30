@@ -29,7 +29,7 @@ public class ADHCImputeNodeRequestTests extends OpenSearchTestCase {
         String taskId = randomAlphaOfLength(8);
         long startMillis = 1L;
         long endMillis = 2L;
-        ADHCImputeRequest innerReq = new ADHCImputeRequest(detectorId, taskId, startMillis, endMillis);
+        ADHCImputeRequest innerReq = new ADHCImputeRequest(detectorId, randomAlphaOfLength(6), taskId, startMillis, endMillis);
 
         ADHCImputeNodeRequest nodeReq = new ADHCImputeNodeRequest(innerReq);
 
@@ -55,7 +55,7 @@ public class ADHCImputeNodeRequestTests extends OpenSearchTestCase {
        ------------------------------------------------------------------ */
     public void testWriteToDelegatesToInnerRequest() throws IOException {
         // spy around a minimal request so we can verify writeTo is called
-        ADHCImputeRequest spyInner = spy(new ADHCImputeRequest("det", "task", 0L, 0L));
+        ADHCImputeRequest spyInner = spy(new ADHCImputeRequest("det", "tenant", "task", 0L, 0L));
 
         ADHCImputeNodeRequest nodeReq = new ADHCImputeNodeRequest(spyInner);
 

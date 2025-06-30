@@ -18,6 +18,7 @@ import org.opensearch.ad.transport.ValidateAnomalyDetectorAction;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.transport.GetConfigRequest;
 import org.opensearch.timeseries.transport.SuggestConfigParamRequest;
 import org.opensearch.timeseries.transport.SuggestConfigParamResponse;
@@ -25,6 +26,7 @@ import org.opensearch.timeseries.transport.ValidateConfigRequest;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant; in multitenant, its call is intercepted and replaced with HTTP call.")
 public class AnomalyDetectionNodeClient implements AnomalyDetectionClient {
     private final Client client;
     private final NamedWriteableRegistry namedWriteableRegistry;

@@ -20,8 +20,12 @@ import org.opensearch.timeseries.transport.ResultBulkRequest;
 
 public class ForecastResultBulkRequest extends ResultBulkRequest<ForecastResult, ForecastResultWriteRequest> {
 
-    public ForecastResultBulkRequest() {
-        super();
+    public ForecastResultBulkRequest(String tenantId) {
+        super(tenantId);
+    }
+
+    public ForecastResultBulkRequest(String tenantId, String dataSourceId) {
+        super(tenantId, dataSourceId);
     }
 
     public ForecastResultBulkRequest(StreamInput in) throws IOException {

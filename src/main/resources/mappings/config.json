@@ -1,7 +1,7 @@
 {
     "dynamic": false,
     "_meta": {
-        "schema_version": 9
+        "schema_version": 12
     },
     "properties": {
         "schema_version": {
@@ -242,6 +242,27 @@
         "last_ui_breaking_change_time" : {
             "type": "date",
             "format": "strict_date_time||epoch_millis"
+        },
+        "tenant_id": {
+            "type": "keyword"
+        },
+        "application_id": {
+            "type": "keyword"
+        },
+        "data_source_id": {
+            "type": "keyword"
+        },
+        "workspace_id": {
+            "type": "keyword"
+        },
+        "s3_reference": {
+            "type": "keyword"
+        },
+        "event_bridge_cell_id": {
+            "type": "keyword"
+        },
+        "auto_created": {
+            "type": "boolean"
         }
     }
 }

@@ -42,7 +42,8 @@ public class PreviewAnomalyDetectorActionTests extends OpenSearchSingleNodeTestC
             detector,
             "1234",
             Instant.now().minusSeconds(60),
-            Instant.now()
+            Instant.now(),
+            null
         );
         request.writeTo(out);
         NamedWriteableAwareStreamInput input = new NamedWriteableAwareStreamInput(out.bytes().streamInput(), writableRegistry());

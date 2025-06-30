@@ -13,48 +13,67 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
-import org.opensearch.common.util.concurrent.ThreadContext;
+import org.opensearch.common.settings.Setting;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.index.query.TermsQueryBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.util.RestHandlerUtils;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public abstract class BaseSearchConfigInfoTransportAction extends
     HandledTransportAction<SearchConfigInfoRequest, SearchConfigInfoResponse> {
     private static final Logger LOG = LogManager.getLogger(BaseSearchConfigInfoTransportAction.class);
-    private final Client client;
+    private final DataAccess dataAccess;
     protected String configIndexName;
+    protected final Settings settings;
+    private final RunContext runContext;
 
     public BaseSearchConfigInfoTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
-        Client client,
+        DataAccess dataAccess,
         String searchConfigActionName,
-        String configIndexName
+        String configIndexName,
+        Settings settings,
+        RunContext runContext
     ) {
         super(searchConfigActionName, transportService, actionFilters, SearchConfigInfoRequest::new);
-        this.client = client;
+        this.dataAccess = dataAccess;
         this.configIndexName = configIndexName;
+        this.settings = settings;
+        this.runContext = runContext;
     }
 
     @Override
     protected void doExecute(Task task, SearchConfigInfoRequest request, ActionListener<SearchConfigInfoResponse> actionListener) {
         String name = request.getName();
         String rawPath = request.getRawPath();
+        String tenantId = request.getTenantId();
         ActionListener<SearchConfigInfoResponse> listener = wrapRestActionListener(actionListener, CommonMessages.FAIL_TO_GET_CONFIG_INFO);
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
+
+        try {
+            TenantAwareHelper.validateTenantId(tenantId, settings, getMultiTenancyEnabledSetting());
+        } catch (Exception e) {
+            listener.onFailure(e);
+            return;
+        }
+
+        runContext.runWithSystemAuth(() -> {
             SearchRequest searchRequest = new SearchRequest().indices(configIndexName);
             if (rawPath.endsWith(RestHandlerUtils.COUNT)) {
                 // Count detectors
                 SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
                 searchRequest.source(searchSourceBuilder);
-                client.search(searchRequest, new ActionListener<SearchResponse>() {
+                dataAccess.search(searchRequest, TenantContext.user(tenantId), new ActionListener<SearchResponse>() {
 
                     @Override
                     public void onResponse(SearchResponse searchResponse) {
@@ -82,7 +101,7 @@ public abstract class BaseSearchConfigInfoTransportAction extends
                 TermsQueryBuilder query = QueryBuilders.termsQuery("name.keyword", name);
                 SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(query);
                 searchRequest.source(searchSourceBuilder);
-                client.search(searchRequest, new ActionListener<SearchResponse>() {
+                dataAccess.search(searchRequest, TenantContext.user(tenantId), new ActionListener<SearchResponse>() {
 
                     @Override
                     public void onResponse(SearchResponse searchResponse) {
@@ -105,9 +124,15 @@ public abstract class BaseSearchConfigInfoTransportAction extends
                     }
                 });
             }
-        } catch (Exception e) {
-            LOG.error(e);
-            listener.onFailure(e);
-        }
+        }, exception -> {
+            LOG.error(exception);
+            listener.onFailure(exception);
+        });
     }
+
+    /**
+     * Returns the setting that indicates if multi-tenancy is enabled.
+     * Subclasses must implement this to provide the appropriate setting.
+     */
+    protected abstract Setting<Boolean> getMultiTenancyEnabledSetting();
 }

@@ -76,4 +76,14 @@ public class AnomalyDetectorSerializationTests extends OpenSearchSingleNodeTestC
         assertTrue(String.format(Locale.ROOT, "expected %s, but got %s", detector, parsedDetector), detector.equals(parsedDetector));
     }
 
+    public void testDetectorWithApplicationId() throws IOException {
+        AnomalyDetector detector = TestHelpers.randomAnomalyDetector(ImmutableMap.of("testKey", "testValue"), Instant.now());
+        detector.setApplicationId("app-1");
+        BytesStreamOutput output = new BytesStreamOutput();
+        detector.writeTo(output);
+        NamedWriteableAwareStreamInput input = new NamedWriteableAwareStreamInput(output.bytes().streamInput(), writableRegistry());
+        AnomalyDetector parsedDetector = new AnomalyDetector(input);
+        assertTrue(parsedDetector.equals(detector));
+    }
+
 }

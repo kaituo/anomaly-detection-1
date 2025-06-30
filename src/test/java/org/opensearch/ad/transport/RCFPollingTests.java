@@ -119,7 +119,7 @@ public class RCFPollingTests extends AbstractTimeSeriesTest {
         future = new PlainActionFuture<>();
 
         request = new RCFPollingRequest(detectorId);
-        model0Id = SingleStreamModelIdMapper.getRcfModelId(detectorId, 0);
+        model0Id = SingleStreamModelIdMapper.getRcfModelId(null, detectorId, 0);
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();

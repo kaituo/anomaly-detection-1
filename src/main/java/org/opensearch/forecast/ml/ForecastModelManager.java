@@ -14,9 +14,11 @@ package org.opensearch.forecast.ml;
 import java.time.Clock;
 
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.model.Config;
@@ -28,7 +30,7 @@ import com.amazon.randomcutforest.parkservices.ForecastDescriptor;
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 
 public class ForecastModelManager extends
-    ModelManager<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastColdStart> {
+    ModelManager<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastColdStart> {
 
     public ForecastModelManager(
         ForecastCheckpointDao checkpointDao,
@@ -38,9 +40,21 @@ public class ForecastModelManager extends
         int rcfNumMinSamples,
         ForecastColdStart entityColdStarter,
         MemoryTracker memoryTracker,
-        FeatureManager featureManager
+        FeatureManager featureManager,
+        StateManager nodeStateManager
     ) {
-        super(rcfNumTrees, rcfNumSamplesInTree, rcfNumMinSamples, entityColdStarter, memoryTracker, clock, featureManager, checkpointDao);
+        super(
+            rcfNumTrees,
+            rcfNumSamplesInTree,
+            rcfNumMinSamples,
+            entityColdStarter,
+            memoryTracker,
+            clock,
+            featureManager,
+            checkpointDao,
+            nodeStateManager,
+            AnalysisType.FORECAST
+        );
     }
 
     @Override

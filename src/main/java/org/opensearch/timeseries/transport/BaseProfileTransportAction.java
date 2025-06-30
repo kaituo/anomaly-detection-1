@@ -36,7 +36,11 @@ import org.opensearch.transport.TransportService;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 /**
- *  This class contains the logic to extract the stats from the nodes
+ * This class contains the logic to extract the stats from the nodes.
+ *
+ * @param <RCFModelType> the RCF model type
+ * @param <CacheType> the cache implementation type
+ * @param <CacheProviderType> the cache provider type
  */
 public class BaseProfileTransportAction<RCFModelType extends ThresholdedRandomCutForest, CacheType extends TimeSeriesCache<RCFModelType>, CacheProviderType extends CacheProvider<RCFModelType, CacheType>>
     extends TransportNodesAction<ProfileRequest, ProfileResponse, ProfileNodeRequest, ProfileNodeResponse> {
@@ -108,6 +112,7 @@ public class BaseProfileTransportAction<RCFModelType extends ThresholdedRandomCu
     @Override
     protected ProfileNodeResponse nodeOperation(ProfileNodeRequest request) {
         String configId = request.getConfigId();
+        String tenantId = request.getTenantId();
         Set<ProfileName> profiles = request.getProfilesToBeRetrieved();
         long activeEntity = 0;
         long totalUpdates = 0;
@@ -117,19 +122,19 @@ public class BaseProfileTransportAction<RCFModelType extends ThresholdedRandomCu
         boolean coordinatingNode = false;
 
         if (profiles.contains(ProfileName.ACTIVE_ENTITIES)) {
-            activeEntity = cacheProvider.get().getActiveEntities(configId);
+            activeEntity = cacheProvider.get().getActiveEntities(tenantId, configId);
         }
 
         // state profile requires totalUpdates as well
         if (profiles.contains(ProfileName.INIT_PROGRESS) || profiles.contains(ProfileName.STATE)) {
-            totalUpdates = cacheProvider.get().getTotalUpdates(configId);// get total updates
+            totalUpdates = cacheProvider.get().getTotalUpdates(tenantId, configId);// get total updates
         }
         if (profiles.contains(ProfileName.TOTAL_SIZE_IN_BYTES)) {
-            modelSize = cacheProvider.get().getModelSize(configId);
+            modelSize = cacheProvider.get().getModelSize(tenantId, configId);
         }
         // need to provide entity info for HCAD
         if (profiles.contains(ProfileName.MODELS)) {
-            modelProfiles = cacheProvider.get().getAllModelProfile(configId);
+            modelProfiles = cacheProvider.get().getAllModelProfile(tenantId, configId);
             modelCount = modelProfiles.size();
             int limit = Math.min(numModelsToReturn, modelCount);
             if (limit != modelCount) {

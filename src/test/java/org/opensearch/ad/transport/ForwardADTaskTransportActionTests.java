@@ -15,6 +15,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -33,6 +34,7 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.ADUnitTestCase;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
+import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
@@ -41,6 +43,7 @@ import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.feature.FeatureManager;
+import org.opensearch.timeseries.model.TaskState;
 import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.transport.TransportService;
 
@@ -107,6 +110,29 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
         verify(adTaskManager, times(1)).setHCDetectorTaskDone(any(), any(), any());
     }
 
+    public void testNextEntityTaskRecordsSuccessfulEntity() throws IOException {
+        String detectorId = randomAlphaOfLength(5);
+        String entityValue = randomAlphaOfLength(5);
+        AnomalyDetector detector = TestHelpers
+            .randomAnomalyDetectorUsingCategoryFields(detectorId, ImmutableList.of(randomAlphaOfLength(5)));
+        ADTask adTask = ADTask
+            .builder()
+            .taskId(randomAlphaOfLength(5))
+            .taskType(ADTaskType.HISTORICAL_HC_ENTITY.name())
+            .configId(detectorId)
+            .detector(detector)
+            .state(TaskState.RUNNING.name())
+            .build();
+        when(adTaskManager.convertEntityToString(any())).thenReturn(entityValue);
+        when(adTaskCacheManager.removeRunningEntity(anyString(), eq(entityValue))).thenReturn(true);
+        when(adTaskCacheManager.hasEntity(anyString())).thenReturn(false);
+
+        ForwardADTaskRequest request = new ForwardADTaskRequest(adTask, NEXT_ENTITY);
+        forwardADTaskTransportAction.doExecute(task, request, listener);
+        verify(adTaskCacheManager, times(1)).recordSuccessfulEntityTask(anyString());
+        verify(adTaskManager, times(1)).setHCDetectorTaskDone(any(), any(), any());
+    }
+
     public void testNextEntityTaskWithPendingEntity() throws IOException {
         when(adTaskCacheManager.hasEntity(anyString())).thenReturn(true);
 
@@ -114,7 +140,7 @@ public class ForwardADTaskTransportActionTests extends ADUnitTestCase {
         ForwardADTaskRequest request = new ForwardADTaskRequest(adTask, NEXT_ENTITY);
         forwardADTaskTransportAction.doExecute(task, request, listener);
         verify(adTaskManager, times(1)).runNextEntityForHCADHistorical(any(), any(), any());
-        verify(adTaskManager, times(1)).updateADHCDetectorTask(any(), any(), any());
+        verify(adTaskManager, times(1)).updateADHCDetectorTask(any(), any(), any(), nullable(String.class));
     }
 
     public void testPushBackEntityForSingleEntityDetector() throws IOException {

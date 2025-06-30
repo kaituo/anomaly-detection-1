@@ -15,6 +15,10 @@ import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
 
 public class SingleStreamModelIdMapperTests extends OpenSearchTestCase {
+    public void testGetRcfModelIdDoesNotIncludeTenantId() {
+        assertEquals("detector-1_model_rcf_0", SingleStreamModelIdMapper.getRcfModelId("tenant-a", "detector-1", 0));
+    }
+
     public void testGetThresholdModelIdFromRCFModelId() {
         assertEquals(
             "Y62IGnwBFHAk-4HQQeoo_model_threshold",

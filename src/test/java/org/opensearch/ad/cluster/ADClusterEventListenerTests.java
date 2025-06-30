@@ -16,6 +16,10 @@ import static java.util.Collections.emptySet;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 import static org.opensearch.cluster.node.DiscoveryNodeRole.BUILT_IN_ROLES;
 import static org.opensearch.test.ClusterServiceUtils.createClusterService;
 
@@ -121,6 +125,32 @@ public class ADClusterEventListenerTests extends AbstractTimeSeriesTest {
         assertTrue(!testAppender.containsMessage(ClusterEventListener.NODE_CHANGED_MSG));
     }
 
+    @SuppressWarnings("unchecked")
+    public void testInitWithoutNodeDeltaKeepsInProgressUntilAsyncCallback() throws InterruptedException {
+        final CountDownLatch initStarted = new CountDownLatch(1);
+        final CountDownLatch allowInitFinish = new CountDownLatch(1);
+
+        when(hashRing.isHashRingInited()).thenReturn(false);
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(0);
+            initStarted.countDown();
+            assertTrue("Timed out waiting to release init callback", allowInitFinish.await(10, TimeUnit.SECONDS));
+            listener.onResponse(true);
+            return null;
+        }).when(hashRing).buildCircles(any(ActionListener.class));
+
+        Thread firstEvent = new Thread(() -> listener.clusterChanged(new ClusterChangedEvent("foo", oldClusterState, oldClusterState)));
+        firstEvent.start();
+        assertTrue("Timed out waiting for init build to start", initStarted.await(10, TimeUnit.SECONDS));
+
+        listener.clusterChanged(new ClusterChangedEvent("bar", oldClusterState, oldClusterState));
+        allowInitFinish.countDown();
+        firstEvent.join(10_000);
+
+        verify(hashRing, times(1)).buildCircles(any(ActionListener.class));
+        assertTrue(testAppender.containsMessage(ClusterEventListener.IN_PROGRESS_MSG));
+    }
+
     public void testIsWarmNode() {
         HashMap<String, String> attributesForNode1 = new HashMap<>();
         attributesForNode1.put(CommonName.BOX_TYPE_KEY, CommonName.WARM_BOX_TYPE);
@@ -198,6 +228,22 @@ public class ADClusterEventListenerTests extends AbstractTimeSeriesTest {
         listener.clusterChanged(new ClusterChangedEvent("foo", newClusterState, oldClusterState));
         assertTrue(testAppender.containsMessage(ClusterEventListener.NODE_CHANGED_MSG));
         assertTrue(testAppender.containsMessage("node removed: false, node added: true"));
+    }
+
+    @SuppressWarnings("unchecked")
+    public void testUninitializedNodeDeltaUsesOnlyDeltaBuildPath() {
+        when(hashRing.isHashRingInited()).thenReturn(false);
+        doAnswer(invocation -> {
+            ActionListener<Boolean> listener = invocation.getArgument(1);
+            listener.onResponse(true);
+            return null;
+        }).when(hashRing).buildCircles(any(), any());
+
+        listener.clusterChanged(new ClusterChangedEvent("foo", newClusterState, oldClusterState));
+
+        verify(hashRing).addNodeChangeEvent();
+        verify(hashRing, times(1)).buildCircles(any(DiscoveryNodes.Delta.class), any(ActionListener.class));
+        verify(hashRing, never()).buildCircles(any(ActionListener.class));
     }
 
     public void testNodeRemoved() {

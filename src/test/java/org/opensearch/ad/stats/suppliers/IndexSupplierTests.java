@@ -11,7 +11,10 @@
 
 package org.opensearch.ad.stats.suppliers;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.Before;
@@ -30,7 +33,7 @@ public class IndexSupplierTests extends OpenSearchTestCase {
         indexUtils = mock(IndexUtils.class);
         indexStatus = "yellow";
         indexName = "test-index";
-        when(indexUtils.getIndexHealthStatus(indexName)).thenReturn(indexStatus);
+        when(indexUtils.getIndexHealthStatus(any(), eq(indexName))).thenReturn(indexStatus);
     }
 
     @Test
@@ -39,12 +42,20 @@ public class IndexSupplierTests extends OpenSearchTestCase {
         assertEquals("Get method for IndexSupplier does not work", indexStatus, indexStatusSupplier1.get());
 
         String invalidIndex = "invalid";
-        when(indexUtils.getIndexHealthStatus(invalidIndex)).thenThrow(IllegalArgumentException.class);
+        when(indexUtils.getIndexHealthStatus(any(), eq(invalidIndex))).thenThrow(IllegalArgumentException.class);
         IndexStatusSupplier indexStatusSupplier2 = new IndexStatusSupplier(indexUtils, invalidIndex);
         assertEquals(
             "Get method does not return correct response onf exception",
             IndexStatusSupplier.UNABLE_TO_RETRIEVE_HEALTH_MESSAGE,
             indexStatusSupplier2.get()
         );
+    }
+
+    @Test
+    public void testGetForTenant() {
+        IndexStatusSupplier indexStatusSupplier = new IndexStatusSupplier(indexUtils, indexName);
+
+        assertEquals(indexStatus, indexStatusSupplier.getForTenant("tenant-a"));
+        verify(indexUtils).getIndexHealthStatus("tenant-a", indexName);
     }
 }

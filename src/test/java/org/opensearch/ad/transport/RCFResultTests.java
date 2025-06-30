@@ -369,6 +369,6 @@ public class RCFResultTests extends OpenSearchTestCase {
         expectThrows(IllegalArgumentException.class, () -> future.actionGet());
         Object val = adStats.getStat(StatNames.AD_MODEL_CORRUTPION_COUNT.getName()).getValue();
         assertEquals(1L, ((Long) val).longValue());
-        verify(manager, times(1)).clear(eq(detectorId), any());
+        verify(manager, times(1)).clear(eq(detectorId), eq(null), any());
     }
 }

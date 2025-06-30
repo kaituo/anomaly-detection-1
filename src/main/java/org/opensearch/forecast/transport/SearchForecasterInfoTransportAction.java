@@ -13,15 +13,38 @@ package org.opensearch.forecast.transport;
 
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.common.settings.Setting;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.constant.ForecastCommonName;
+import org.opensearch.forecast.settings.ForecastSettings;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.transport.BaseSearchConfigInfoTransportAction;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class SearchForecasterInfoTransportAction extends BaseSearchConfigInfoTransportAction {
 
     @Inject
-    public SearchForecasterInfoTransportAction(TransportService transportService, ActionFilters actionFilters, Client client) {
-        super(transportService, actionFilters, client, SearchForecasterInfoAction.NAME, ForecastCommonName.CONFIG_INDEX);
+    public SearchForecasterInfoTransportAction(
+        TransportService transportService,
+        ActionFilters actionFilters,
+        DataAccess dataAccess,
+        Settings settings,
+        RunContext runContext
+    ) {
+        super(
+            transportService,
+            actionFilters,
+            dataAccess,
+            SearchForecasterInfoAction.NAME,
+            ForecastCommonName.CONFIG_INDEX,
+            settings,
+            runContext
+        );
+    }
+
+    @Override
+    protected Setting<Boolean> getMultiTenancyEnabledSetting() {
+        return ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED;
     }
 }

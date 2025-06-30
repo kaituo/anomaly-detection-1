@@ -17,10 +17,12 @@ import org.opensearch.ad.transport.ADTaskProfileNodeResponse;
 import org.opensearch.ad.transport.ADTaskProfileRequest;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.timeseries.TaskProfileRunner;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.model.EntityTaskProfile;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Historical.")
 public class ADTaskProfileRunner implements TaskProfileRunner<ADTask, ADTaskProfile> {
     public final Logger logger = LogManager.getLogger(ADTaskProfileRunner.class);
 

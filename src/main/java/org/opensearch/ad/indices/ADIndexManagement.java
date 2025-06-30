@@ -21,8 +21,7 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.ANOMALY_RESULTS
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.CHECKPOINT_INDEX_MAPPING_FILE;
 
 import java.io.IOException;
-import java.util.EnumMap;
-import java.util.Map;
+import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -41,24 +40,24 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.ToXContent;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.common.exception.EndRunException;
+import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.indices.IndexManagement;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.indices.TimeSeriesIndex;
+import org.opensearch.timeseries.util.DataPlaneServiceUtils;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.IndexResourceLoader;
 import org.opensearch.transport.client.Client;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 /**
  * This class provides utility methods for various anomaly detection indices.
  */
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class ADIndexManagement extends IndexManagement<ADIndex> {
     private static final Logger logger = LogManager.getLogger(ADIndexManagement.class);
-
-    // The index name pattern to query all the AD result history indices
-    public static final String AD_RESULT_HISTORY_INDEX_PATTERN = "<.opendistro-anomaly-results-history-{now/d}-1>";
-
-    // The index name pattern to query all AD result, history and current AD result
-    public static final String ALL_AD_RESULTS_INDEX_PATTERN = ".opendistro-anomaly-results*";
+    private final boolean skipResultRollover;
 
     /**
      * Constructor function
@@ -77,9 +76,10 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
         ClusterService clusterService,
         ThreadPool threadPool,
         Settings settings,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         int maxUpdateRunningTimes,
-        NamedXContentRegistry xContentRegistry
+        NamedXContentRegistry xContentRegistry,
+        DataAccess dataAccess
     )
         throws IOException {
         super(
@@ -98,10 +98,12 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
             xContentRegistry,
             AnomalyDetector::parse,
             ADCommonName.CUSTOM_RESULT_INDEX_PREFIX,
-            ADCommonName.CONFIG_INDEX
+            ADCommonName.CONFIG_INDEX,
+            List.of(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS, ADCommonName.CUSTOM_RESULT_INDEX_PREFIX),
+            dataAccess
         );
 
-        this.indexStates = new EnumMap<ADIndex, IndexState>(ADIndex.class);
+        skipResultRollover = DataPlaneServiceUtils.isAossDataPlane(settings);
 
         this.clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_RESULT_HISTORY_MAX_DOCS_PER_SHARD, it -> historyMaxDocs = it);
 
@@ -123,23 +125,7 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
      * @throws IOException IOException if mapping file can't be read correctly
      */
     public static String getResultMappings() throws IOException {
-        return getMappings(ANOMALY_RESULTS_INDEX_MAPPING_FILE);
-    }
-
-    /**
-     * Retrieves the JSON mapping for the flattened result index with the "dynamic" field set to true
-     * @return JSON mapping for the flattened result index.
-     * @throws IOException if the mapping file cannot be read.
-     */
-    public static String getFlattenedResultMappings() throws IOException {
-        ObjectMapper objectMapper = new ObjectMapper();
-
-        Map<String, Object> mapping = objectMapper
-            .readValue(ADIndexManagement.class.getClassLoader().getResourceAsStream(ANOMALY_RESULTS_INDEX_MAPPING_FILE), Map.class);
-
-        mapping.put("dynamic", true);
-
-        return objectMapper.writeValueAsString(mapping);
+        return IndexResourceLoader.getMappings(ANOMALY_RESULTS_INDEX_MAPPING_FILE);
     }
 
     /**
@@ -149,8 +135,8 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
      * @throws IOException IOException if mapping file can't be read correctly
      */
     public static String getStateMappings() throws IOException {
-        String detectionStateMappings = getMappings(ANOMALY_DETECTION_STATE_INDEX_MAPPING_FILE);
-        String detectorIndexMappings = getConfigMappings();
+        String detectionStateMappings = IndexResourceLoader.getMappings(ANOMALY_DETECTION_STATE_INDEX_MAPPING_FILE);
+        String detectorIndexMappings = IndexResourceLoader.getConfigMappings();
         detectorIndexMappings = detectorIndexMappings
             .substring(detectorIndexMappings.indexOf("\"properties\""), detectorIndexMappings.lastIndexOf("}"));
         return detectionStateMappings.replace("DETECTOR_INDEX_MAPPING_PLACE_HOLDER", detectorIndexMappings);
@@ -163,7 +149,7 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
      * @throws IOException IOException if mapping file can't be read correctly
      */
     public static String getCheckpointMappings() throws IOException {
-        return getMappings(CHECKPOINT_INDEX_MAPPING_FILE);
+        return IndexResourceLoader.getMappings(CHECKPOINT_INDEX_MAPPING_FILE);
     }
 
     /**
@@ -183,7 +169,7 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
      */
     @Override
     public boolean doesStateIndexExist() {
-        return doesIndexExist(ADCommonName.DETECTION_STATE_INDEX);
+        return doesResultIndexExists(ADCommonName.DETECTION_STATE_INDEX, null);
     }
 
     /**
@@ -193,7 +179,7 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
      */
     @Override
     public boolean doesCheckpointIndexExist() {
-        return doesIndexExist(ADCommonName.CHECKPOINT_INDEX_NAME);
+        return doesResultIndexExists(ADCommonName.CHECKPOINT_INDEX_NAME, null);
     }
 
     /**
@@ -204,7 +190,7 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
     @Override
     public void initDefaultResultIndexDirectly(ActionListener<CreateIndexResponse> actionListener) {
         initResultIndexDirectly(
-            AD_RESULT_HISTORY_INDEX_PATTERN,
+            ADCommonName.AD_RESULT_HISTORY_INDEX_PATTERN,
             ADCommonName.ANOMALY_RESULT_INDEX_ALIAS,
             true,
             true,
@@ -252,23 +238,15 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
 
     @Override
     protected void rolloverAndDeleteHistoryIndex() {
+        if (skipResultRollover) {
+            return;
+        }
         rolloverAndDeleteHistoryIndex(
             ADCommonName.ANOMALY_RESULT_INDEX_ALIAS,
-            ALL_AD_RESULTS_INDEX_PATTERN,
-            AD_RESULT_HISTORY_INDEX_PATTERN,
+            ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN,
+            ADCommonName.AD_RESULT_HISTORY_INDEX_PATTERN,
             ADIndex.RESULT
         );
-    }
-
-    /**
-     * Create config index directly.
-     *
-     * @param actionListener action called after create index
-     * @throws IOException IOException from {@link IndexManagement#getConfigMappings}
-     */
-    @Override
-    public void initConfigIndex(ActionListener<CreateIndexResponse> actionListener) throws IOException {
-        super.initConfigIndex(markMappingUpToDate(ADIndex.CONFIG, actionListener));
     }
 
     /**
@@ -282,20 +260,45 @@ public class ADIndexManagement extends IndexManagement<ADIndex> {
     }
 
     @Override
-    protected IndexRequest createDummyIndexRequest(String resultIndex) throws IOException {
+    protected IndexRequest createDummyIndexRequest(String resultIndex, String dummyId) throws IOException {
         AnomalyResult dummyResult = AnomalyResult.getDummyResult();
+        String requestDummyId = dummyId == null ? DUMMY_AD_RESULT_ID : DUMMY_AD_RESULT_ID + "-" + dummyId;
         return new IndexRequest(resultIndex)
-            .id(DUMMY_AD_RESULT_ID)
+            .id(requestDummyId)
             .source(dummyResult.toXContent(XContentBuilder.builder(XContentType.JSON.xContent()), ToXContent.EMPTY_PARAMS));
     }
 
     @Override
-    protected DeleteRequest createDummyDeleteRequest(String resultIndex) throws IOException {
-        return new DeleteRequest(resultIndex).id(DUMMY_AD_RESULT_ID);
+    protected DeleteRequest createDummyDeleteRequest(String resultIndex, String dummyId) throws IOException {
+        String requestDummyId = dummyId == null ? DUMMY_AD_RESULT_ID : DUMMY_AD_RESULT_ID + "-" + dummyId;
+        return new DeleteRequest(resultIndex).id(requestDummyId);
     }
 
     @Override
-    public void initCustomResultIndexDirectly(String resultIndex, ActionListener<CreateIndexResponse> actionListener) {
-        initResultIndexDirectly(getCustomResultIndexPattern(resultIndex), resultIndex, false, false, ADIndex.RESULT, actionListener);
+    public void initCustomResultIndexDirectly(
+        String resultIndex,
+        ActionListener<CreateIndexResponse> actionListener,
+        String tenantId,
+        String dataSourceId
+    ) {
+        initResultIndexDirectly(
+            TimeSeriesIndex.getCustomResultIndexPattern(resultIndex),
+            resultIndex,
+            false,
+            false,
+            ADIndex.RESULT,
+            actionListener
+        );
+    }
+
+    @Override
+    public <T> void validateDefaultResultIndexForBackendJob(
+        String configId,
+        String user,
+        List<String> roles,
+        ExecutorFunction function,
+        ActionListener<T> listener
+    ) {
+        throw new UnsupportedOperationException("validateDefaultResultIndexForBackendJob is not supported in ADIndexManagement");
     }
 }

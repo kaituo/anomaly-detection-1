@@ -10,6 +10,7 @@ import java.util.List;
 import org.apache.commons.lang3.tuple.Pair;
 import org.opensearch.action.ActionType;
 import org.opensearch.action.search.SearchResponse;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.forecast.constant.ForecastCommonMessages;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
@@ -32,7 +33,8 @@ public abstract class AbstractForecastSearchAction<T extends ToXContentObject> e
         List<Pair<String, String>> deprecatedPaths,
         String index,
         Class<T> clazz,
-        ActionType<SearchResponse> actionType
+        ActionType<SearchResponse> actionType,
+        Settings settings
     ) {
         super(
             urlPaths,
@@ -41,7 +43,8 @@ public abstract class AbstractForecastSearchAction<T extends ToXContentObject> e
             clazz,
             actionType,
             ForecastEnabledSetting::isForecastEnabled,
-            ForecastCommonMessages.DISABLED_ERR_MSG
+            ForecastCommonMessages.DISABLED_ERR_MSG,
+            () -> ForecastEnabledSetting.isForecastMultiTenancyEnabled(settings)
         );
     }
 }

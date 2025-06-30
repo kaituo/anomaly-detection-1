@@ -13,20 +13,19 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
+import org.opensearch.forecast.client.ForecastNodeCommunicator;
 import org.opensearch.forecast.constant.ForecastCommonMessages;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastModelManager;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
 import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.stats.ForecastStats;
@@ -34,8 +33,10 @@ import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
@@ -45,15 +46,14 @@ import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.ResultProcessor;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ForecastResultTransportAction extends HandledTransportAction<ForecastResultRequest, ForecastResultResponse> {
 
     private static final Logger LOG = LogManager.getLogger(ForecastResultTransportAction.class);
-    private ResultProcessor<ForecastResultRequest, ForecastResult, ForecastResultResponse, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastIndexManagement, ForecastTaskManager> resultProcessor;
-    private final Client client;
+    private ResultProcessor<ForecastResultRequest, ForecastResult, ForecastResultResponse, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastDelegatingDataManagement, ForecastTaskManager> resultProcessor;
     private CircuitBreakerService circuitBreakerService;
     // Cache HC forecaster id. This is used to count HC failure stats. We can tell a forecaster
     // is HC or not by checking if forecaster id exists in this field or not. Will add
@@ -61,7 +61,7 @@ public class ForecastResultTransportAction extends HandledTransportAction<Foreca
     // id once realtime detection done.
     private final Set<String> hcForecasters;
     private final ForecastStats forecastStats;
-    private final NodeStateManager nodeStateManager;
+    private final StateManager nodeStateManager;
     private final Settings settings;
     private final ClusterService clusterService;
     private final ThreadPool threadPool;
@@ -69,28 +69,31 @@ public class ForecastResultTransportAction extends HandledTransportAction<Foreca
     private final TransportService transportService;
     private final ForecastTaskManager realTimeTaskManager;
     private final NamedXContentRegistry xContentRegistry;
-    private final SecurityClientUtil clientUtil;
-    private final IndexNameExpressionResolver indexNameExpressionResolver;
+    private final DataAccess dataAccess;
     private final FeatureManager featureManager;
+    private final DiscoveryNodeSelector discoveryNodeSelector;
+    private final RunContext runContext;
+    private final ForecastNodeCommunicator nodeCommunicator;
 
     @Inject
     public ForecastResultTransportAction(
         ActionFilters actionFilters,
         TransportService transportService,
         Settings settings,
-        Client client,
-        SecurityClientUtil clientUtil,
-        NodeStateManager nodeStateManager,
+        DataAccess dataAccess,
+        StateManager nodeStateManager,
         FeatureManager featureManager,
         ForecastModelManager modelManager,
         HashRing hashRing,
         ClusterService clusterService,
-        IndexNameExpressionResolver indexNameExpressionResolver,
         CircuitBreakerService circuitBreakerService,
         ForecastStats forecastStats,
         ThreadPool threadPool,
         NamedXContentRegistry xContentRegistry,
-        ForecastTaskManager realTimeTaskManager
+        ForecastTaskManager realTimeTaskManager,
+        DiscoveryNodeSelector discoveryNodeSelector,
+        RunContext runContext,
+        ForecastNodeCommunicator nodeCommunicator
     ) {
         super(ForecastResultAction.NAME, transportService, actionFilters, ForecastResultRequest::new);
 
@@ -101,11 +104,12 @@ public class ForecastResultTransportAction extends HandledTransportAction<Foreca
         this.transportService = transportService;
         this.realTimeTaskManager = realTimeTaskManager;
         this.xContentRegistry = xContentRegistry;
-        this.clientUtil = clientUtil;
-        this.indexNameExpressionResolver = indexNameExpressionResolver;
+        this.dataAccess = dataAccess;
         this.featureManager = featureManager;
+        this.discoveryNodeSelector = discoveryNodeSelector;
+        this.runContext = runContext;
+        this.nodeCommunicator = nodeCommunicator;
 
-        this.client = client;
         this.circuitBreakerService = circuitBreakerService;
         this.hcForecasters = new HashSet<>();
         this.forecastStats = forecastStats;
@@ -116,10 +120,17 @@ public class ForecastResultTransportAction extends HandledTransportAction<Foreca
 
     @Override
     protected void doExecute(Task task, ForecastResultRequest request, ActionListener<ForecastResultResponse> listener) {
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
+        try {
+            TenantAwareHelper.validateTenantId(request.getTenantId(), settings, ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED);
+        } catch (Exception e) {
+            listener.onFailure(e);
+            return;
+        }
+
+        runContext.runWithSystemAuth(() -> {
             String forecastID = request.getConfigId();
             ActionListener<ForecastResultResponse> original = listener;
-            listener = ActionListener.wrap(r -> {
+            ActionListener<ForecastResultResponse> wrappedListener = ActionListener.wrap(r -> {
                 hcForecasters.remove(forecastID);
                 original.onResponse(r);
             }, e -> {
@@ -142,13 +153,12 @@ public class ForecastResultTransportAction extends HandledTransportAction<Foreca
             forecastStats.getStat(StatNames.FORECAST_EXECUTE_REQUEST_COUNT.getName()).increment();
 
             if (circuitBreakerService.isOpen()) {
-                listener.onFailure(new LimitExceededException(forecastID, CommonMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
+                wrappedListener.onFailure(new LimitExceededException(forecastID, CommonMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
                 return;
             }
 
             this.resultProcessor = new ForecastResultProcessor(
                 ForecastSettings.FORECAST_REQUEST_TIMEOUT,
-                EntityForecastResultAction.NAME,
                 StatNames.FORECAST_HC_EXECUTE_REQUEST_COUNT,
                 settings,
                 clusterService,
@@ -159,30 +169,31 @@ public class ForecastResultTransportAction extends HandledTransportAction<Foreca
                 forecastStats,
                 realTimeTaskManager,
                 xContentRegistry,
-                client,
-                clientUtil,
-                indexNameExpressionResolver,
+                dataAccess,
                 ForecastResultResponse.class,
                 featureManager,
                 AnalysisType.FORECAST,
-                false
+                false,
+                discoveryNodeSelector,
+                nodeCommunicator
             );
 
             try {
                 nodeStateManager
                     .getConfig(
                         forecastID,
+                        request.getTenantId(),
                         AnalysisType.FORECAST,
                         // only used for real time
                         true,
-                        resultProcessor.onGetConfig(listener, forecastID, request, Optional.of(hcForecasters))
+                        resultProcessor.onGetConfig(wrappedListener, forecastID, request, Optional.of(hcForecasters))
                     );
             } catch (Exception ex) {
-                ResultProcessor.handleExecuteException(ex, listener, forecastID);
+                ResultProcessor.handleExecuteException(ex, wrappedListener, forecastID);
             }
-        } catch (Exception e) {
-            LOG.error(e);
-            listener.onFailure(e);
-        }
+        }, exception -> {
+            LOG.error(exception);
+            listener.onFailure(exception);
+        });
     }
 }

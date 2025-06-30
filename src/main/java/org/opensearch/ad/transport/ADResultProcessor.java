@@ -12,15 +12,16 @@ import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ad.client.ADNodeCommunicator;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.stats.ADStats;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
@@ -30,65 +31,63 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.transport.ResultProcessor;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ADResultProcessor extends
-    ResultProcessor<AnomalyResultRequest, AnomalyResult, AnomalyResultResponse, ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement, ADTaskManager> {
+    ResultProcessor<AnomalyResultRequest, AnomalyResult, AnomalyResultResponse, ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADDelegatingDataManagement, ADTaskManager> {
     private static final Logger LOG = LogManager.getLogger(ADResultProcessor.class);
+    private final ADNodeCommunicator adNodeCommunicator;
 
     public ADResultProcessor(
         Setting<TimeValue> requestTimeoutSetting,
-        String entityResultAction,
         StatNames hcRequestCountStat,
         Settings settings,
         ClusterService clusterService,
         ThreadPool threadPool,
         HashRing hashRing,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         TransportService transportService,
         ADStats timeSeriesStats,
         ADTaskManager realTimeTaskManager,
         NamedXContentRegistry xContentRegistry,
-        Client client,
-        SecurityClientUtil clientUtil,
-        IndexNameExpressionResolver indexNameExpressionResolver,
+        DataAccess dataAccess,
         Class<AnomalyResultResponse> transportResultResponseClazz,
-        FeatureManager featureManager
+        FeatureManager featureManager,
+        DiscoveryNodeSelector discoveryNodeSelector,
+        ADNodeCommunicator adNodeCommunicator
     ) {
         super(
             requestTimeoutSetting,
-            entityResultAction,
             hcRequestCountStat,
             settings,
             clusterService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             hashRing,
             nodeStateManager,
             transportService,
             timeSeriesStats,
             realTimeTaskManager,
             xContentRegistry,
-            client,
-            clientUtil,
-            indexNameExpressionResolver,
+            dataAccess,
             transportResultResponseClazz,
             featureManager,
             AD_MAX_ENTITIES_PER_QUERY,
             AD_PAGE_SIZE,
             AnalysisType.AD,
             false,
-            ADSingleStreamResultAction.NAME
+            discoveryNodeSelector,
+            adNodeCommunicator
         );
+        this.adNodeCommunicator = adNodeCommunicator;
     }
 
     @Override
@@ -104,7 +103,7 @@ public class ADResultProcessor extends
     }
 
     @Override
-    protected void imputeHC(long dataStartTime, long dataEndTime, String configID, String taskId) {
+    protected void imputeHC(long dataStartTime, long dataEndTime, String configID, String tenantId, String taskId) {
         LOG
             .info(
                 "Sending an HC impute request to process data from timestamp {} to {} for config {}",
@@ -115,10 +114,9 @@ public class ADResultProcessor extends
 
         DiscoveryNode[] dataNodes = hashRing.getNodesWithSameLocalVersion();
 
-        client
-            .execute(
-                ADHCImputeAction.INSTANCE,
-                new ADHCImputeRequest(configID, taskId, dataStartTime, dataEndTime, dataNodes),
+        adNodeCommunicator
+            .imputeHC(
+                new ADHCImputeRequest(configID, tenantId, taskId, dataStartTime, dataEndTime, dataNodes),
                 ActionListener.wrap(hcImputeResponse -> {
                     for (final ADHCImputeNodeResponse nodeResponse : hcImputeResponse.getNodes()) {
                         if (nodeResponse.getPreviousException() != null) {

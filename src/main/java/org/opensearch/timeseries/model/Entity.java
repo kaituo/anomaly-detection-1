@@ -57,7 +57,6 @@ public class Entity implements ToXContentObject, Writeable {
 
     private static final long RANDOM_SEED = 42;
     private static final String MODEL_ID_INFIX = "_entity_";
-
     public static final String ATTRIBUTE_NAME_FIELD = "name";
     public static final String ATTRIBUTE_VALUE_FIELD = "value";
 
@@ -295,7 +294,6 @@ public class Entity implements ToXContentObject, Writeable {
             byte[] bytes = new byte[16];
             System.arraycopy(Numbers.longToBytes(hashFunc.h1), 0, bytes, 0, 8);
             System.arraycopy(Numbers.longToBytes(hashFunc.h2), 0, bytes, 8, 8);
-            // Some bytes like 10 in ascii is corrupted in some systems. Base64 ensures we use safe bytes: https://tinyurl.com/mxmrhmhf
             return Optional.of(configId + MODEL_ID_INFIX + Base64.getUrlEncoder().withoutPadding().encodeToString(bytes));
         }
     }
@@ -303,10 +301,11 @@ public class Entity implements ToXContentObject, Writeable {
     /**
      * Get the cached model Id if present. Or recompute one if missing.
      *
-     * @param configId Id. Used as part of model Id.
-     * @return Model Id.  Can be missing (e.g., the field value is too long for single-category detector)
+     * @param tenantId tenant Id, not included in the model id
+     * @param configId config Id
+     * @return the model Id, if present
      */
-    public Optional<String> getModelId(String configId) {
+    public Optional<String> getModelId(String tenantId, String configId) {
         if (modelId.get() == null) {
             // computing model id is not cheap and the result is deterministic. We only do it once.
             Optional<String> computedModelId = Entity.getModelId(configId, attributes);

@@ -16,11 +16,11 @@ import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.timeseries.stats.Stats;
 import org.opensearch.timeseries.transport.StatsRequest;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 
 public abstract class RestStatsAction extends BaseRestHandler {
     private Stats timeSeriesStats;
-    private DiscoveryNodeFilterer nodeFilter;
+    private DiscoveryNodeSelector nodeFilter;
 
     /**
      * Constructor
@@ -28,7 +28,7 @@ public abstract class RestStatsAction extends BaseRestHandler {
      * @param timeSeriesStats TimeSeriesStats object
      * @param nodeFilter util class to get eligible data nodes
      */
-    public RestStatsAction(Stats timeSeriesStats, DiscoveryNodeFilterer nodeFilter) {
+    public RestStatsAction(Stats timeSeriesStats, DiscoveryNodeSelector nodeFilter) {
         this.timeSeriesStats = timeSeriesStats;
         this.nodeFilter = nodeFilter;
     }
@@ -39,7 +39,7 @@ public abstract class RestStatsAction extends BaseRestHandler {
      * @param request RestRequest
      * @return StatsRequest Request containing stats to be retrieved
      */
-    protected StatsRequest getRequest(RestRequest request) {
+    protected StatsRequest getRequest(RestRequest request, String tenantId) {
         // parse the nodes the user wants to query the stats for
         String nodesIdsStr = request.param("nodeId");
         Set<String> validStats = timeSeriesStats.getStats().keySet();
@@ -47,10 +47,10 @@ public abstract class RestStatsAction extends BaseRestHandler {
         StatsRequest statsRequest = null;
         if (!Strings.isEmpty(nodesIdsStr)) {
             String[] nodeIdsArr = nodesIdsStr.split(",");
-            statsRequest = new StatsRequest(nodeIdsArr);
+            statsRequest = new StatsRequest(tenantId, nodeIdsArr);
         } else {
             DiscoveryNode[] dataNodes = nodeFilter.getEligibleDataNodes();
-            statsRequest = new StatsRequest(dataNodes);
+            statsRequest = new StatsRequest(tenantId, dataNodes);
         }
 
         statsRequest.timeout(request.param("timeout"));

@@ -26,13 +26,14 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
 import org.opensearch.tasks.Task;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.Name;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.function.ExecutorFunction;
@@ -41,30 +42,25 @@ import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.rest.handler.HistorySuggest;
 import org.opensearch.timeseries.rest.handler.IntervalCalculation;
 import org.opensearch.timeseries.rest.handler.LatestTimeRetriever;
-import org.opensearch.timeseries.util.ParseUtils;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public abstract class BaseSuggestConfigParamTransportAction<ConfigType extends Config> extends
     HandledTransportAction<ActionRequest, SuggestConfigParamResponse> {
     public static final Logger logger = LogManager.getLogger(BaseSuggestConfigParamTransportAction.class);
 
-    protected final Client client;
-    protected final SecurityClientUtil clientUtil;
+    protected final DataAccess dataAccess;
     protected final SearchFeatureDao searchFeatureDao;
     protected final NamedWriteableRegistry namedWriteableRegistry;
     protected volatile Boolean filterByEnabled;
     protected Clock clock;
     protected AnalysisType context;
     protected Set<String> allSuggestParamStrs;
-    private final Settings settings;
     private final Class<ConfigType> configTypeClass;
+    private final RunContext runContext;
 
     public BaseSuggestConfigParamTransportAction(
         String actionName,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         ClusterService clusterService,
         Settings settings,
         ActionFilters actionFilters,
@@ -74,11 +70,11 @@ public abstract class BaseSuggestConfigParamTransportAction<ConfigType extends C
         SearchFeatureDao searchFeatureDao,
         Set<String> allSuggestParamStrs,
         Class<ConfigType> configTypeClass,
-        NamedWriteableRegistry namedWriteableRegistry
+        NamedWriteableRegistry namedWriteableRegistry,
+        RunContext runContext
     ) {
         super(actionName, transportService, actionFilters, SuggestConfigParamRequest::new);
-        this.client = client;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
         this.namedWriteableRegistry = namedWriteableRegistry;
         this.filterByEnabled = filterByBackendRoleSetting.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(filterByBackendRoleSetting, it -> filterByEnabled = it);
@@ -86,24 +82,32 @@ public abstract class BaseSuggestConfigParamTransportAction<ConfigType extends C
         this.context = context;
         this.searchFeatureDao = searchFeatureDao;
         this.allSuggestParamStrs = allSuggestParamStrs;
-        this.settings = settings;
         this.configTypeClass = configTypeClass;
+        this.runContext = runContext;
     }
 
     @Override
     protected void doExecute(Task task, ActionRequest actionRequest, ActionListener<SuggestConfigParamResponse> listener) {
         SuggestConfigParamRequest request = SuggestConfigParamRequest.fromActionRequest(actionRequest, namedWriteableRegistry);
-        User user = ParseUtils.getUserContext(client);
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
+        User user = runContext.getUser();
+        stampRequestTenantId(request);
+        runContext.runWithSystemAuth(context -> {
             String resourceType = getResourceTypeFromClassName(configTypeClass.getSimpleName());
             verifyResourceAccessAndProcessRequest(
                 resourceType,
                 () -> suggestExecute(request, user, context, listener),
                 () -> resolveUserAndExecute(user, listener, () -> suggestExecute(request, user, context, listener))
             );
-        } catch (Exception e) {
-            logger.error(e);
-            listener.onFailure(e);
+        }, exception -> {
+            logger.error(exception);
+            listener.onFailure(exception);
+        });
+    }
+
+    private void stampRequestTenantId(SuggestConfigParamRequest request) {
+        String tenantId = request.getTenantId();
+        if (tenantId != null) {
+            request.getConfig().setTenantId(tenantId);
         }
     }
 
@@ -134,8 +138,7 @@ public abstract class BaseSuggestConfigParamTransportAction<ConfigType extends C
         LatestTimeRetriever latestTimeRetriever = new LatestTimeRetriever(
             config,
             timeout,
-            clientUtil,
-            client,
+            dataAccess,
             user,
             context,
             searchFeatureDao,
@@ -149,8 +152,7 @@ public abstract class BaseSuggestConfigParamTransportAction<ConfigType extends C
                 IntervalCalculation intervalCalculation = new IntervalCalculation(
                     config,
                     timeout,
-                    client,
-                    clientUtil,
+                    dataAccess,
                     user,
                     context,
                     clock,
@@ -248,8 +250,7 @@ public abstract class BaseSuggestConfigParamTransportAction<ConfigType extends C
         LatestTimeRetriever latestTimeRetriever = new LatestTimeRetriever(
             config,
             timeout,
-            clientUtil,
-            client,
+            dataAccess,
             user,
             context,
             searchFeatureDao,
@@ -323,7 +324,7 @@ public abstract class BaseSuggestConfigParamTransportAction<ConfigType extends C
     public abstract void suggestExecute(
         SuggestConfigParamRequest request,
         User user,
-        ThreadContext.StoredContext storedContext,
+        RunContext.RestorableContext storedContext,
         ActionListener<SuggestConfigParamResponse> listener
     );
 

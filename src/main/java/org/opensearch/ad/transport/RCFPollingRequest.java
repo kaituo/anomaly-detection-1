@@ -25,8 +25,10 @@ import org.opensearch.core.common.io.stream.StreamOutput;
 import org.opensearch.core.xcontent.ToXContentObject;
 import org.opensearch.core.xcontent.XContentBuilder;
 
+@Deprecated
 public class RCFPollingRequest extends ActionRequest implements ToXContentObject {
     private String adID;
+    private String tenantId;
 
     public RCFPollingRequest(StreamInput in) throws IOException {
         super(in);
@@ -40,6 +42,10 @@ public class RCFPollingRequest extends ActionRequest implements ToXContentObject
 
     public String getAdID() {
         return adID;
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 
     @Override

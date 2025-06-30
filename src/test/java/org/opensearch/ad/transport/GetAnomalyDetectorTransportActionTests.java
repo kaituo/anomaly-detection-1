@@ -26,9 +26,11 @@ import org.junit.*;
 import org.mockito.Mockito;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.ADTaskProfileRunner;
+import org.opensearch.ad.client.ADNodeCommunicator;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
@@ -48,6 +50,10 @@ import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.EntityProfile;
@@ -94,17 +100,27 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
         adTaskManager = mock(ADTaskManager.class);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         SecurityClientUtil clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        DataAccess dataAccess = new DefaultDataAccess(
+            client(),
+            clusterService,
+            clientUtil,
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
+        RunContext runContext = new SdkRunContext();
         action = new GetAnomalyDetectorTransportAction(
             Mockito.mock(TransportService.class),
             Mockito.mock(DiscoveryNodeFilterer.class),
             Mockito.mock(ActionFilters.class),
             clusterService,
-            client(),
-            clientUtil,
+            dataAccess,
+            nodeStateManager,
+            mock(ADNodeCommunicator.class),
             Settings.EMPTY,
             xContentRegistry(),
             adTaskManager,
-            mock(ADTaskProfileRunner.class)
+            mock(ADTaskProfileRunner.class),
+            mock(ADDelegatingDataManagement.class),
+            runContext
         );
         task = Mockito.mock(Task.class);
         response = new ActionListener<GetAnomalyDetectorResponse>() {
@@ -138,6 +154,7 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
             "nonempty",
             "",
             false,
+            null,
             null
         );
         action.doExecute(task, getAnomalyDetectorRequest, response);
@@ -154,6 +171,7 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
             "",
             "abcd",
             false,
+            null,
             null
         );
         action.doExecute(task, getAnomalyDetectorRequest, response);
@@ -176,7 +194,8 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
             "",
             "abcd",
             false,
-            entity
+            entity,
+            null
         );
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
@@ -189,7 +208,18 @@ public class GetAnomalyDetectorTransportActionTests extends OpenSearchSingleNode
 
     @Test
     public void testGetAnomalyDetectorRequestNoEntityValue() throws IOException {
-        GetConfigRequest request = new GetConfigRequest("1234", ADIndex.CONFIG.getIndexName(), 4321, true, false, "", "abcd", false, null);
+        GetConfigRequest request = new GetConfigRequest(
+            "1234",
+            ADIndex.CONFIG.getIndexName(),
+            4321,
+            true,
+            false,
+            "",
+            "abcd",
+            false,
+            null,
+            null
+        );
         BytesStreamOutput out = new BytesStreamOutput();
         request.writeTo(out);
         StreamInput input = out.bytes().streamInput();

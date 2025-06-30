@@ -13,6 +13,7 @@ package org.opensearch.ad.ratelimit;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -57,10 +58,12 @@ public class AbstractRateLimitingTest extends AbstractTimeSeriesTest {
 
         nodeStateManager = mock(NodeStateManager.class);
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        })
+            .when(nodeStateManager)
+            .getConfig(any(String.class), nullable(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         entity = Entity.createSingleAttributeEntity(categoryField, "value");
         entity2 = Entity.createSingleAttributeEntity(categoryField, "value2");

@@ -33,23 +33,19 @@ import org.opensearch.ad.AbstractProfileRunnerTests;
 import org.opensearch.ad.OldAnomalyDetectorProfileRunner;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.transport.ADProfileAction;
 import org.opensearch.cluster.ClusterName;
-import org.opensearch.common.settings.Settings;
+import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.common.util.BigArrays;
 import org.opensearch.common.util.BitMixer;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.search.aggregations.InternalAggregation;
 import org.opensearch.search.aggregations.InternalAggregations;
-import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.transport.ProfileNodeResponse;
 import org.opensearch.timeseries.transport.ProfileResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 
 /**
  * Run tests in ES package since InternalCardinality has only package private constructors
@@ -72,23 +68,44 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
         throws IOException {
         detector = TestHelpers
             .randomAnomalyDetectorWithInterval(new IntervalTimeConfiguration(detectorIntervalMin, ChronoUnit.MINUTES), true);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
-            listener.onResponse(Optional.of(detector));
-            return null;
-        }).when(nodeStateManager).getConfig(anyString(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
-        clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        when(nodeFilter.getEligibleDataNodes()).thenReturn(new DiscoveryNode[0]);
         oldRunner = new OldAnomalyDetectorProfileRunner(
             client,
-            clientUtil,
+            nodeCommunicator,
             xContentRegistry(),
             nodeFilter,
             requiredSamples,
             transportService,
             adTaskManager,
-            mock(ADTaskProfileRunner.class)
+            mock(ADTaskProfileRunner.class),
+            dataAccess
         );
+
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends AnomalyDetector>> listener = invocation.getArgument(4);
+            switch (detectorStatus) {
+                case EXIST:
+                    listener.onResponse(Optional.of(detector));
+                    break;
+                default:
+                    assertTrue("should not reach here", false);
+                    break;
+            }
+            return null;
+        }).when(stateManager).getConfig(anyString(), any(), any(), anyBoolean(), any());
+
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            switch (jobStatus) {
+                case ENABLED:
+                    listener.onResponse(Optional.of(TestHelpers.randomJob(true)));
+                    break;
+                default:
+                    assertTrue("should not reach here", false);
+                    break;
+            }
+            return null;
+        }).when(stateManager).getJob(anyString(), any(), anyBoolean(), any());
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
@@ -139,7 +156,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
     private void setUpMultiEntityClientSearch(ADResultStatus resultStatus, CardinalityStatus cardinalityStatus) {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[4];
             SearchRequest request = (SearchRequest) args[0];
             if (request.indices()[0].equals(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS)) {
                 switch (resultStatus) {
@@ -183,7 +200,55 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
             }
 
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), anyString(), any(), any(), any(ActionListener.class));
+
+        doAnswer(invocation -> {
+            Object[] args = invocation.getArguments();
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[2];
+            SearchRequest request = (SearchRequest) args[0];
+            if (request.indices()[0].equals(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS)) {
+                switch (resultStatus) {
+                    case NO_RESULT:
+                        SearchResponse mockResponse = mock(SearchResponse.class);
+                        when(mockResponse.getHits()).thenReturn(TestHelpers.createSearchHits(0));
+                        listener.onResponse(mockResponse);
+                        break;
+                    case EXCEPTION:
+                        listener.onFailure(new RuntimeException());
+                        break;
+                    default:
+                        assertTrue("should not reach here", false);
+                        break;
+                }
+            } else {
+                switch (cardinalityStatus) {
+                    case EXCEPTION:
+                        listener.onFailure(new RuntimeException());
+                        break;
+                    case NORMAL:
+                        SearchResponse response = mock(SearchResponse.class);
+                        List<InternalAggregation> aggs = new ArrayList<>(1);
+                        HyperLogLogPlusPlus hyperLogLog = new HyperLogLogPlusPlus(
+                            AbstractHyperLogLog.MIN_PRECISION,
+                            BigArrays.NON_RECYCLING_INSTANCE,
+                            0
+                        );
+                        for (int i = 0; i < 100; i++) {
+                            hyperLogLog.collect(0, BitMixer.mix64(randomIntBetween(1, 100)));
+                        }
+                        aggs.add(new InternalCardinality(CommonName.TOTAL_ENTITIES, hyperLogLog, new HashMap<>()));
+                        when(response.getAggregations()).thenReturn(InternalAggregations.from(aggs));
+                        listener.onResponse(response);
+                        break;
+                    default:
+                        assertTrue("should not reach here", false);
+                        break;
+                }
+
+            }
+
+            return null;
+        }).when(dataAccess).search(any(SearchRequest.class), any(), any(ActionListener.class));
     }
 
     @SuppressWarnings("unchecked")
@@ -191,7 +256,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
 
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             ProfileNodeResponse profileNodeResponse1 = new ProfileNodeResponse(
                 discoveryNode1,
@@ -206,7 +271,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
             listener.onResponse(new ProfileResponse(new ClusterName(clusterName), profileNodeResponses, Collections.emptyList()));
 
             return null;
-        }).when(client).execute(eq(ADProfileAction.INSTANCE), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
     }
 
     public void testFailGetEntityStats() throws IOException, InterruptedException {
@@ -216,7 +281,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        oldRunner.profile(detector.getId(), detector.getTenantId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {
@@ -228,7 +293,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
 
         }), totalInitProgress);
 
-        assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
+        assertTrue(inProgressLatch.await(10, TimeUnit.SECONDS));
     }
 
     public void testNoResultsNoError() throws IOException, InterruptedException {
@@ -237,19 +302,20 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
         setUpProfileAction();
 
         final AtomicInteger called = new AtomicInteger(0);
+        final CountDownLatch responseLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        oldRunner.profile(detector.getId(), detector.getTenantId(), ActionListener.wrap(response -> {
             assertTrue(response.getInitProgress() != null);
             called.getAndIncrement();
+            responseLatch.countDown();
         }, exception -> {
             LOG.error(exception);
             assertTrue("Should not reach here", false);
             called.getAndIncrement();
+            responseLatch.countDown();
         }), totalInitProgress);
 
-        while (called.get() == 0) {
-            Thread.sleep(100);
-        }
+        assertTrue(responseLatch.await(10, TimeUnit.SECONDS));
         // should only call onResponse once
         assertEquals(1, called.get());
     }
@@ -261,7 +327,7 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        oldRunner.profile(detector.getId(), ActionListener.wrap(response -> {
+        oldRunner.profile(detector.getId(), detector.getTenantId(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             inProgressLatch.countDown();
         }, exception -> {
@@ -273,6 +339,6 @@ public class CardinalityProfileTests extends AbstractProfileRunnerTests {
 
         }), totalInitProgress);
 
-        assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
+        assertTrue(inProgressLatch.await(10, TimeUnit.SECONDS));
     }
 }

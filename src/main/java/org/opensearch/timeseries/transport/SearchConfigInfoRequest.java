@@ -22,17 +22,24 @@ public class SearchConfigInfoRequest extends ActionRequest {
 
     private String name;
     private String rawPath;
+    private String tenantId;
 
     public SearchConfigInfoRequest(StreamInput in) throws IOException {
         super(in);
         name = in.readOptionalString();
         rawPath = in.readString();
+        tenantId = in.readOptionalString();
     }
 
-    public SearchConfigInfoRequest(String name, String rawPath) throws IOException {
+    public SearchConfigInfoRequest(String name, String rawPath, String tenantId) throws IOException {
         super();
         this.name = name;
         this.rawPath = rawPath;
+        this.tenantId = tenantId;
+    }
+
+    public SearchConfigInfoRequest(String name, String rawPath) throws IOException {
+        this(name, rawPath, null);
     }
 
     public String getName() {
@@ -43,11 +50,16 @@ public class SearchConfigInfoRequest extends ActionRequest {
         return rawPath;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeOptionalString(name);
         out.writeString(rawPath);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

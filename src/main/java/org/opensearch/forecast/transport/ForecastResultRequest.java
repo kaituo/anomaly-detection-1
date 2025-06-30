@@ -35,8 +35,8 @@ public class ForecastResultRequest extends ResultRequest {
         in.readEnum(AnalysisType.class);
     }
 
-    public ForecastResultRequest(String forecastID, long start, long end) {
-        super(forecastID, ForecastIndex.CONFIG.getIndexName(), start, end);
+    public ForecastResultRequest(String forecastID, long start, long end, String tenantId) {
+        super(forecastID, ForecastIndex.CONFIG.getIndexName(), start, end, tenantId);
     }
 
     @Override

@@ -22,6 +22,7 @@ import java.util.Map;
 import org.junit.Before;
 import org.mockito.ArgumentCaptor;
 import org.mockito.stubbing.Answer;
+import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
@@ -94,6 +95,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
 
     public void testSearchOnNonExistingResultIndex() throws IOException {
         deleteIndexIfExists(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS);
+        createDetectorIndex();
         String testIndexName = randomAlphaOfLength(10).toLowerCase(Locale.ROOT);
         ImmutableList<String> categoryFields = ImmutableList.of("test-field-1", "test-field-2");
         String detectorId = createDetector(
@@ -116,7 +118,8 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
             Arrays.asList(categoryFields.get(0)),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
-            Instant.now()
+            Instant.now(),
+            null
         );
         SearchTopAnomalyResultResponse searchResponse = client()
             .execute(SearchTopAnomalyResultAction.INSTANCE, searchRequest)
@@ -124,12 +127,31 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         assertEquals(searchResponse.getAnomalyResultBuckets().size(), 0);
     }
 
+    public void testCreateResultSearchRequestUsesDefaultIndexForSingleTenant() {
+        SearchRequest searchRequest = SearchTopAnomalyResultTransportAction.createResultSearchRequest(null, null);
+
+        assertArrayEquals(new String[] { ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN }, searchRequest.indices());
+    }
+
+    public void testCreateResultSearchRequestUsesDefaultAndCustomIndicesForSingleTenant() {
+        SearchRequest searchRequest = SearchTopAnomalyResultTransportAction.createResultSearchRequest("custom-result-index-name", null);
+
+        assertArrayEquals(new String[] { ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN, "custom-result-index-name" }, searchRequest.indices());
+    }
+
+    public void testCreateResultSearchRequestUsesOnlyCustomIndexForMultiTenant() {
+        SearchRequest searchRequest = SearchTopAnomalyResultTransportAction
+            .createResultSearchRequest("custom-result-index-name", "tenant-id");
+
+        assertArrayEquals(new String[] { "custom-result-index-name" }, searchRequest.indices());
+    }
+
     @SuppressWarnings("unchecked")
     public void testListenerWithNullResult() {
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, 10, SearchTopAnomalyResultTransportAction.OrderType.SEVERITY,
-            "custom-result-index-name"
+            "custom-result-index-name", null
         );
         ArgumentCaptor<Exception> failureCaptor = ArgumentCaptor.forClass(Exception.class);
 
@@ -144,7 +166,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, 10, SearchTopAnomalyResultTransportAction.OrderType.SEVERITY,
-            "custom-result-index-name"
+            "custom-result-index-name", null
         );
 
         SearchResponse response = generateMockSearchResponse(null);
@@ -164,7 +186,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, 10, SearchTopAnomalyResultTransportAction.OrderType.SEVERITY,
-            "custom-result-index-name"
+            "custom-result-index-name", null
         );
 
         // an empty list won't have an entry for 'MULTI_BUCKETS_FIELD' as needed to parse out
@@ -184,7 +206,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, 10, SearchTopAnomalyResultTransportAction.OrderType.SEVERITY,
-            "custom-result-index-name"
+            "custom-result-index-name", null
         );
 
         CompositeAggregation composite = mock(CompositeAggregation.class);
@@ -211,7 +233,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, // this is guaranteed to be an expired timestamp
-            10, SearchTopAnomalyResultTransportAction.OrderType.OCCURRENCE, "custom-result-index-name"
+            10, SearchTopAnomalyResultTransportAction.OrderType.OCCURRENCE, "custom-result-index-name", null
         );
 
         Aggregations aggs = generateAggregationsFromBuckets(new ArrayList<>(), new HashMap<String, Object>() {
@@ -233,7 +255,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, // this is guaranteed to be an expired timestamp
-            10, SearchTopAnomalyResultTransportAction.OrderType.OCCURRENCE, "custom-result-index-name"
+            10, SearchTopAnomalyResultTransportAction.OrderType.OCCURRENCE, "custom-result-index-name", null
         );
 
         AnomalyResultBucket expectedResponseBucket1 = new AnomalyResultBucket(new HashMap<String, Object>() {
@@ -270,7 +292,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, 10, SearchTopAnomalyResultTransportAction.OrderType.SEVERITY,
-            "custom-result-index-name"
+            "custom-result-index-name", null
         );
 
         AnomalyResultBucket expectedResponseBucket1 = new AnomalyResultBucket(new HashMap<String, Object>() {
@@ -317,7 +339,7 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
         ActionListener<SearchTopAnomalyResultResponse> mockListener = mock(ActionListener.class);
         SearchTopAnomalyResultTransportAction.TopAnomalyResultListener listener = action.new TopAnomalyResultListener(
             mockListener, new SearchSourceBuilder(), 1000, 10, SearchTopAnomalyResultTransportAction.OrderType.OCCURRENCE,
-            "custom-result-index-name"
+            "custom-result-index-name", null
         );
 
         AnomalyResultBucket expectedResponseBucket1 = new AnomalyResultBucket(new HashMap<String, Object>() {

@@ -17,18 +17,18 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.ratelimit.ADCheckpointWriteWorker;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.transport.BaseDeleteModelTransportAction;
 import org.opensearch.timeseries.transport.DeleteModelNodeRequest;
 import org.opensearch.timeseries.transport.DeleteModelNodeResponse;
@@ -37,7 +37,7 @@ import org.opensearch.transport.TransportService;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class DeleteADModelTransportAction extends
-    BaseDeleteModelTransportAction<ThresholdedRandomCutForest, ADPriorityCache, ADCacheProvider, ADTaskCacheManager, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, AnomalyResult, ADColdStart> {
+    BaseDeleteModelTransportAction<ThresholdedRandomCutForest, ADPriorityCache, ADCacheProvider, ADTaskCacheManager, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADCheckpointWriteWorker, AnomalyResult, ADColdStart> {
     private static final Logger LOG = LogManager.getLogger(DeleteADModelTransportAction.class);
     private ADModelManager modelManager;
 
@@ -47,7 +47,7 @@ public class DeleteADModelTransportAction extends
         ClusterService clusterService,
         TransportService transportService,
         ActionFilters actionFilters,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         ADModelManager modelManager,
         ADCacheProvider cache,
         ADTaskCacheManager adTaskCacheManager,
@@ -79,11 +79,13 @@ public class DeleteADModelTransportAction extends
     protected DeleteModelNodeResponse nodeOperation(DeleteModelNodeRequest request) {
         super.nodeOperation(request);
         String adID = request.getConfigID();
+        String tenantId = request.getTenantId();
 
         // delete in-memory models and model checkpoint
         modelManager
             .clear(
                 adID,
+                tenantId,
                 ActionListener
                     .wrap(
                         r -> LOG.info("Deleted model for [{}] with response [{}] ", adID, r),

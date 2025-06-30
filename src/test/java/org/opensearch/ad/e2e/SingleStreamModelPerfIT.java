@@ -15,6 +15,7 @@ import static org.opensearch.timeseries.TestHelpers.toHttpEntity;
 
 import java.io.File;
 import java.io.FileReader;
+import java.io.IOException;
 import java.nio.charset.Charset;
 import java.time.Duration;
 import java.time.Instant;
@@ -33,6 +34,7 @@ import org.apache.hc.core5.http.message.BasicHeader;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Logger;
 import org.opensearch.ad.AbstractADSyntheticDataTest;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.client.RestClient;
 import org.opensearch.timeseries.TestHelpers;
 
@@ -63,15 +65,15 @@ public class SingleStreamModelPerfIT extends AbstractADSyntheticDataTest {
     ) throws Exception {
         RestClient client = client();
 
-        String dataFileName = String.format(Locale.ROOT, "data/%s.data", datasetName);
-        String labelFileName = String.format(Locale.ROOT, "data/%s.label", datasetName);
+        String dataFileName = String.format(Locale.ROOT, "data/%s.data", datasetFileName());
+        String labelFileName = String.format(Locale.ROOT, "data/%s.label", datasetFileName());
 
         List<JsonObject> data = getData(dataFileName);
         List<Entry<Instant, Instant>> anomalies = getAnomalyWindows(labelFileName);
 
         String mapping = "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\": \"date\"},"
             + " \"Feature1\": { \"type\": \"double\" }, \"Feature2\": { \"type\": \"double\" } } } }";
-        bulkIndexTrainData(datasetName, data, trainTestSplit, client, mapping);
+        bulkIndexTrainData(datasetName(), data, trainTestSplit, ingestClient(), mapping);
 
         long windowDelayMinutes = getWindowDelayMinutes(data, trainTestSplit - 1, "timestamp");
         Duration windowDelay = Duration.ofMinutes(windowDelayMinutes);
@@ -86,10 +88,12 @@ public class SingleStreamModelPerfIT extends AbstractADSyntheticDataTest {
                     + ": \"feature 2\", \"feature_enabled\": \"true\", \"aggregation_query\": { \"Feature2\": { \"sum\": { \"field\": "
                     + "\"Feature2\" } } } }], \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"Minutes\" } }, "
                     + "\"window_delay\": { \"period\": {\"interval\": %d, \"unit\": \"MINUTES\"}},"
+                    + " %s"
                     + "\"schema_version\": 0 }",
-                datasetName,
+                datasetName(),
                 intervalMinutes,
-                windowDelayMinutes
+                windowDelayMinutes,
+                customResultIndexField()
             );
         String detectorId = createDetector(client, detector);
 
@@ -102,7 +106,7 @@ public class SingleStreamModelPerfIT extends AbstractADSyntheticDataTest {
 
         simulateStartDetector(detectorId, executionStartTime, executionEndTime, client, 1);
         simulateWaitForInitDetector(detectorId, client, dataEndTime, 1);
-        bulkIndexTestData(data, datasetName, trainTestSplit, client);
+        bulkIndexTestData(data, datasetName(), trainTestSplit, ingestClient());
         double[] testResults = getTestResults(detectorId, data, trainTestSplit, intervalMinutes, anomalies, client, 1, windowDelay);
         verifyTestResults(testResults, anomalies, minPrecision, minRecall, maxError);
     }
@@ -220,5 +224,26 @@ public class SingleStreamModelPerfIT extends AbstractADSyntheticDataTest {
             );
         Thread.sleep(1_000);
         waitAllSyncheticDataIngestedOrdered(data.size(), datasetName, client);
+    }
+
+    protected RestClient ingestClient() throws IOException {
+        return client();
+    }
+
+    protected String datasetName() {
+        return "synthetic";
+    }
+
+    protected String datasetFileName() {
+        return "synthetic";
+    }
+
+    protected String customResultIndexField() {
+        String tenantId = tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            return "";
+        }
+        String resultIndex = ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + randomAlphaOfLength(10).toLowerCase(Locale.ROOT);
+        return String.format(Locale.ROOT, "\"result_index\": \"%s\",", resultIndex);
     }
 }

@@ -35,32 +35,32 @@ public class EntityModelTests extends OpenSearchTestCase {
     }
 
     public void testNullInternalSampleQueue() {
-        ModelState<ThresholdedRandomCutForest> model = new ModelState<>(null, null, null, null, clock, 0, null, null);
+        ModelState<ThresholdedRandomCutForest> model = new ModelState<>(null, null, null, null, null, clock, 0, null, null);
         model.addSample(new Sample(new double[] { 0.8 }, Instant.now(), Instant.now()));
         assertEquals(1, model.getSamples().size());
     }
 
     public void testNullInputSample() {
-        ModelState<ThresholdedRandomCutForest> model = new ModelState<>(null, null, null, null, clock, 0, null, null);
+        ModelState<ThresholdedRandomCutForest> model = new ModelState<>(null, null, null, null, null, clock, 0, null, null);
         model.addSample(null);
         assertEquals(0, model.getSamples().size());
     }
 
     public void testEmptyInputSample() {
-        ModelState<ThresholdedRandomCutForest> model = new ModelState<>(null, null, null, null, clock, 0, null, null);
+        ModelState<ThresholdedRandomCutForest> model = new ModelState<>(null, null, null, null, null, clock, 0, null, null);
         model.addSample(new Sample(new double[] {}, Instant.now(), Instant.now()));
         assertEquals(0, model.getSamples().size());
     }
 
     @Test
     public void trcf_constructor() {
-        ModelState<ThresholdedRandomCutForest> em = new ModelState<>(trcf, null, null, null, clock, 0, null, new ArrayDeque<>());
+        ModelState<ThresholdedRandomCutForest> em = new ModelState<>(trcf, null, null, null, null, clock, 0, null, new ArrayDeque<>());
         assertEquals(trcf, em.getModel().get());
     }
 
     @Test
     public void clear() {
-        ModelState<ThresholdedRandomCutForest> em = new ModelState<>(trcf, null, null, null, clock, 0, null, new ArrayDeque<>());
+        ModelState<ThresholdedRandomCutForest> em = new ModelState<>(trcf, null, null, null, null, clock, 0, null, new ArrayDeque<>());
 
         em.clear();
 
@@ -70,7 +70,7 @@ public class EntityModelTests extends OpenSearchTestCase {
 
     @Test
     public void setTrcf() {
-        ModelState<ThresholdedRandomCutForest> em = new ModelState<>(null, null, null, null, clock, 0, null, null);
+        ModelState<ThresholdedRandomCutForest> em = new ModelState<>(null, null, null, null, null, clock, 0, null, null);
         assertFalse(em.getModel().isPresent());
 
         em.setModel(this.trcf);

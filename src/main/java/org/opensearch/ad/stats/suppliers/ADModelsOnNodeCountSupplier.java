@@ -5,32 +5,33 @@
 
 package org.opensearch.ad.stats.suppliers;
 
-import java.util.function.Supplier;
-import java.util.stream.Stream;
+import java.util.Objects;
 
 import org.opensearch.ad.caching.ADCacheProvider;
-import org.opensearch.ad.ml.ADModelManager;
+import org.opensearch.timeseries.stats.suppliers.TenantAwareStatSupplier;
 
 /**
  * ModelsOnNodeCountSupplier provides the number of models a node contains
  */
-public class ADModelsOnNodeCountSupplier implements Supplier<Long> {
-    private ADModelManager modelManager;
+public class ADModelsOnNodeCountSupplier implements TenantAwareStatSupplier<Long> {
     private ADCacheProvider adCache;
 
     /**
      * Constructor
      *
-     * @param modelManager object that manages the model partitions hosted on the node
-     * @param adCache object that manages multi-entity detectors' models
+     * @param adCache object that manages hosted realtime detector models
      */
-    public ADModelsOnNodeCountSupplier(ADModelManager modelManager, ADCacheProvider adCache) {
-        this.modelManager = modelManager;
+    public ADModelsOnNodeCountSupplier(ADCacheProvider adCache) {
         this.adCache = adCache;
     }
 
     @Override
-    public Long get() {
-        return Stream.concat(modelManager.getAllModels().stream(), adCache.get().getAllModels().stream()).count();
+    public Long getForTenant(String tenantId) {
+        return adCache
+            .get()
+            .getAllModels()
+            .stream()
+            .filter(modelState -> tenantId == null || Objects.equals(tenantId, modelState.getTenantId()))
+            .count();
     }
 }

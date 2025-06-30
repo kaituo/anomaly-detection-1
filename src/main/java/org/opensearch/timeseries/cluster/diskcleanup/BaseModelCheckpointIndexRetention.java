@@ -20,6 +20,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.util.ExceptionUtil;
 
 /**
  * Model checkpoints cleanup of multi-entity detectors.
@@ -112,7 +113,7 @@ public class BaseModelCheckpointIndexRetention implements Runnable {
                 },
                     // The docs will be deleted in next scheduled windows. No need for retrying.
                     exception -> {
-                        if (exception instanceof IndexNotFoundException) {
+                        if (exception instanceof IndexNotFoundException || ExceptionUtil.isIndexNotFoundInMessage(exception)) {
                             // the method will be called hourly
                             // don't log stack trace as most of OpenSearch domains have no AD installed
                             LOG.debug(CHECKPOINT_NOT_EXIST_MSG);

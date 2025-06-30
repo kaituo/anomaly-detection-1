@@ -26,6 +26,7 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.AnomalyResultAction;
 import org.opensearch.ad.transport.AnomalyResultRequest;
 import org.opensearch.cluster.service.ClusterService;
@@ -38,6 +39,7 @@ import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -50,10 +52,12 @@ public class RestExecuteAnomalyDetectorAction extends BaseRestHandler {
     public static final String DETECT_DATA_ACTION = "execute_anomaly_detector";
     // TODO: apply timeout config
     private volatile TimeValue requestTimeout;
+    private final Settings settings;
 
     private final Logger logger = LogManager.getLogger(RestExecuteAnomalyDetectorAction.class);
 
     public RestExecuteAnomalyDetectorAction(Settings settings, ClusterService clusterService) {
+        this.settings = settings;
         this.requestTimeout = AD_REQUEST_TIMEOUT.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_REQUEST_TIMEOUT, it -> requestTimeout = it);
     }
@@ -64,6 +68,7 @@ public class RestExecuteAnomalyDetectorAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
@@ -76,10 +81,12 @@ public class RestExecuteAnomalyDetectorAction extends BaseRestHandler {
                 return;
             }
 
+            String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
             AnomalyResultRequest getRequest = new AnomalyResultRequest(
                 input.getDetectorId(),
                 input.getPeriodStart().toEpochMilli(),
-                input.getPeriodEnd().toEpochMilli()
+                input.getPeriodEnd().toEpochMilli(),
+                tenantId
             );
             client.execute(AnomalyResultAction.INSTANCE, getRequest, new RestToXContentListener<>(channel));
         };

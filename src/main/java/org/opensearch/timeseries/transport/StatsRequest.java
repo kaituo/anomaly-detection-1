@@ -31,30 +31,36 @@ public class StatsRequest extends BaseNodesRequest<StatsRequest> {
     public static final String ALL_STATS_KEY = "_all";
 
     private Set<String> statsToBeRetrieved;
+    private String tenantId;
 
     public StatsRequest(StreamInput in) throws IOException {
         super(in);
         statsToBeRetrieved = in.readSet(StreamInput::readString);
+        tenantId = in.readOptionalString();
     }
 
     /**
      * Constructor
      *
      * @param nodeIds nodeIds of nodes' stats to be retrieved
+     * @param tenantId tenant id for multi-tenancy
      */
-    public StatsRequest(String... nodeIds) {
+    public StatsRequest(String tenantId, String... nodeIds) {
         super(nodeIds);
         statsToBeRetrieved = new HashSet<>();
+        this.tenantId = tenantId;
     }
 
     /**
      * Constructor
      *
      * @param nodes nodes of nodes' stats to be retrieved
+     * @param tenantId tenant id for multi-tenancy
      */
-    public StatsRequest(DiscoveryNode... nodes) {
+    public StatsRequest(String tenantId, DiscoveryNode... nodes) {
         super(nodes);
         statsToBeRetrieved = new HashSet<>();
+        this.tenantId = tenantId;
     }
 
     /**
@@ -91,13 +97,19 @@ public class StatsRequest extends BaseNodesRequest<StatsRequest> {
         return statsToBeRetrieved;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     public void readFrom(StreamInput in) throws IOException {
         statsToBeRetrieved = in.readSet(StreamInput::readString);
+        tenantId = in.readOptionalString();
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeStringCollection(statsToBeRetrieved);
+        out.writeOptionalString(tenantId);
     }
 }

@@ -18,8 +18,10 @@ import org.opensearch.action.ActionType;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class ClientUtil {
     private Client client;
 

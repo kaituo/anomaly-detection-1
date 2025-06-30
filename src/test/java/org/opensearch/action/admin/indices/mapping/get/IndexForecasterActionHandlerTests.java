@@ -73,13 +73,12 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             ActionListener<CreateIndexResponse> listner = (ActionListener<CreateIndexResponse>) args[0];
             listner.onFailure(new IllegalArgumentException());
             return null;
-        }).when(forecastISM).initConfigIndex(any());
-        when(forecastISM.doesConfigIndexExist()).thenReturn(false);
+        }).when(forecastIndexManagement).initConfigIndex(any());
+        when(forecastIndexManagement.doesConfigIndexExist()).thenReturn(false);
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -97,7 +96,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             null,
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -135,13 +135,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.PUT;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -159,7 +159,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             null,
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -200,13 +201,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.PUT;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -224,7 +225,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             null,
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -274,6 +276,7 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
         clusterName = mock(ClusterName.class);
         when(clusterService.getClusterName()).thenReturn(clusterName);
         when(clusterName.value()).thenReturn("test");
@@ -282,8 +285,7 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -301,7 +303,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -343,13 +346,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -367,7 +370,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -417,13 +421,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -441,7 +445,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -512,6 +517,7 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
         clusterName = mock(ClusterName.class);
         when(clusterService.getClusterName()).thenReturn(clusterName);
         when(clusterName.value()).thenReturn("test");
@@ -520,8 +526,7 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -539,7 +544,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -626,13 +632,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -650,7 +656,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -760,13 +767,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -784,7 +791,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -904,13 +912,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -928,7 +936,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -1034,13 +1043,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -1058,7 +1067,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -1166,13 +1176,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -1190,7 +1200,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -1315,13 +1326,13 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             }
         };
         NodeClient clientSpy = spy(client);
+        useDataAccess(clientSpy);
 
         method = RestRequest.Method.POST;
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -1339,7 +1350,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             mock(ForecastTaskManager.class),
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -1366,15 +1378,14 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             ActionListener<CreateIndexResponse> listner = (ActionListener<CreateIndexResponse>) args[0];
             listner.onResponse(new CreateIndexResponse(false, false, "blah"));
             return null;
-        }).when(forecastISM).initConfigIndex(any());
-        when(forecastISM.doesIndexExist(anyString())).thenReturn(false);
-        when(forecastISM.doesAliasExist(anyString())).thenReturn(false);
-        when(forecastISM.doesConfigIndexExist()).thenReturn(false);
+        }).when(forecastIndexManagement).initConfigIndex(any());
+        when(forecastIndexManagement.doesResultIndexExists(anyString(), any())).thenReturn(false);
+        when(forecastIndexManagement.doesResultAliasExists(anyString(), any())).thenReturn(false);
+        when(forecastIndexManagement.doesConfigIndexExist()).thenReturn(false);
 
         handler = new IndexForecasterActionHandler(
             clusterService,
-            clientMock,
-            clientUtil,
+            dataAccess,
             mock(TransportService.class),
             forecastISM,
             forecaster.getId(),
@@ -1392,7 +1403,8 @@ public class IndexForecasterActionHandlerTests extends AbstractForecasterActionH
             null,
             null,
             searchFeatureDao,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {

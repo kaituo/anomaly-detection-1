@@ -48,6 +48,7 @@ import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
 import org.opensearch.timeseries.feature.FeatureManager;
@@ -57,7 +58,6 @@ import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ClientUtil;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.client.Client;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
@@ -95,7 +95,6 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
     int detectorInterval = 1;
     int shingleSize;
     Client client;
-    SecurityClientUtil securityCientUtil;
 
     @SuppressWarnings("unchecked")
     @Override
@@ -124,12 +123,12 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
             .build();
         when(clock.millis()).thenReturn(1602401500000L);
         doAnswer(invocation -> {
-            ActionListener<GetResponse> listener = invocation.getArgument(2);
+            ActionListener<GetResponse> listener = invocation.getArgument(1);
 
             listener.onResponse(TestHelpers.createGetResponse(detector, detectorId, ADCommonName.CONFIG_INDEX));
 
             return null;
-        }).when(clientUtil).asyncRequest(any(GetRequest.class), any(), any(ActionListener.class));
+        }).when(client).get(any(GetRequest.class), any(ActionListener.class));
 
         Set<Setting<?>> nodestateSetting = new HashSet<>(ClusterSettings.BUILT_IN_CLUSTER_SETTINGS);
         nodestateSetting.add(TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE);
@@ -161,12 +160,10 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
         clusterService = mock(ClusterService.class);
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
 
-        securityCientUtil = new SecurityClientUtil(stateManager, settings);
         searchFeatureDao = spy(
             new SearchFeatureDao(
-                client,
                 xContentRegistry(), // Important. Without this, ParseUtils cannot parse anything
-                securityCientUtil,
+                mock(DataAccess.class),
                 clusterService,
                 TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
                 clock,
@@ -235,7 +232,8 @@ public class AbstractCosineDataTest extends AbstractTimeSeriesTest {
             mock(FeatureManager.class),
             mock(MemoryTracker.class),
             settings,
-            clusterService
+            clusterService,
+            stateManager
         );
     }
 

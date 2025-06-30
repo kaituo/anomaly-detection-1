@@ -31,7 +31,8 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             Arrays.asList("test-field"),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
-            Instant.now().minus(2, ChronoUnit.DAYS)
+            Instant.now().minus(2, ChronoUnit.DAYS),
+            "test-tenant-id"
         );
 
         BytesStreamOutput output = new BytesStreamOutput();
@@ -46,6 +47,7 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
         assertEquals(originalRequest.getOrder(), parsedRequest.getOrder());
         assertEquals(originalRequest.getStartTime(), parsedRequest.getStartTime());
         assertEquals(originalRequest.getEndTime(), parsedRequest.getEndTime());
+        assertEquals(originalRequest.getTenantId(), parsedRequest.getTenantId());
     }
 
     public void testParse() throws IOException {
@@ -57,6 +59,7 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
         String order = "severity";
         Instant startTime = Instant.ofEpochMilli(1234);
         Instant endTime = Instant.ofEpochMilli(5678);
+        String tenantId = "test-tenant-id";
 
         XContentBuilder xContentBuilder = TestHelpers
             .builder()
@@ -71,7 +74,7 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
 
         String requestAsXContentString = TestHelpers.xContentBuilderToString(xContentBuilder);
         SearchTopAnomalyResultRequest parsedRequest = SearchTopAnomalyResultRequest
-            .parse(TestHelpers.parser(requestAsXContentString), "test-detector-id", false);
+            .parse(TestHelpers.parser(requestAsXContentString), "test-detector-id", false, tenantId);
         assertEquals(taskId, parsedRequest.getTaskId());
         assertEquals((Integer) size, parsedRequest.getSize());
         assertEquals(categoryFields, parsedRequest.getCategoryFields());
@@ -80,6 +83,7 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
         assertEquals(endTime.toEpochMilli(), parsedRequest.getEndTime().toEpochMilli());
         assertEquals(detectorId, parsedRequest.getId());
         assertEquals(historical, parsedRequest.getHistorical());
+        assertEquals(tenantId, parsedRequest.getTenantId());
     }
 
     public void testNullTaskIdIsValid() {
@@ -91,7 +95,8 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             Arrays.asList("test-field"),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
-            Instant.now().minus(2, ChronoUnit.DAYS)
+            Instant.now().minus(2, ChronoUnit.DAYS),
+            null
         );
         ActionRequestValidationException exception = request.validate();
         Assert.assertNull(exception);
@@ -106,7 +111,8 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             Arrays.asList("test-field"),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
-            Instant.now().minus(2, ChronoUnit.DAYS)
+            Instant.now().minus(2, ChronoUnit.DAYS),
+            null
         );
         ActionRequestValidationException exception = request.validate();
         Assert.assertNull(exception);
@@ -121,7 +127,8 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             null,
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
-            Instant.now().minus(2, ChronoUnit.DAYS)
+            Instant.now().minus(2, ChronoUnit.DAYS),
+            null
         );
         ActionRequestValidationException exception = request.validate();
         Assert.assertNull(exception);
@@ -136,7 +143,8 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             new ArrayList<>(),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
-            Instant.now().minus(2, ChronoUnit.DAYS)
+            Instant.now().minus(2, ChronoUnit.DAYS),
+            null
         );
         ActionRequestValidationException exception = request.validate();
         Assert.assertNull(exception);
@@ -151,7 +159,8 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             new ArrayList<>(),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             null,
-            Instant.now().minus(2, ChronoUnit.DAYS)
+            Instant.now().minus(2, ChronoUnit.DAYS),
+            null
         );
         ActionRequestValidationException exception = request.validate();
         Assert.assertNotNull(exception);
@@ -166,6 +175,7 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             new ArrayList<>(),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
+            null,
             null
         );
         ActionRequestValidationException exception = request.validate();
@@ -181,7 +191,8 @@ public class SearchTopAnomalyResultRequestTests extends OpenSearchTestCase {
             new ArrayList<>(),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(2, ChronoUnit.DAYS),
-            Instant.now().minus(10, ChronoUnit.DAYS)
+            Instant.now().minus(10, ChronoUnit.DAYS),
+            null
         );
         ActionRequestValidationException exception = request.validate();
         Assert.assertNotNull(exception);

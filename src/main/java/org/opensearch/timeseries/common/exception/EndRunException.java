@@ -28,6 +28,10 @@ public class EndRunException extends ClientException {
         this.endNow = endNow;
     }
 
+    public EndRunException(String configId, String message, Throwable throwable) {
+        this(configId, message, throwable, false);
+    }
+
     public EndRunException(String configId, String message, Throwable throwable, boolean endNow) {
         super(configId, message, throwable);
         this.endNow = endNow;
@@ -40,5 +44,16 @@ public class EndRunException extends ClientException {
      */
     public boolean isEndNow() {
         return endNow;
+    }
+
+    @Override
+    public TimeSeriesException cloneWithMsgPrefix(String msgPrefix) {
+        EndRunException cloned = new EndRunException(getConfigId(), msgPrefix + getMessage(), getCause(), endNow);
+        cloned.countedInStats(isCountedInStats());
+        cloned.setStackTrace(getStackTrace());
+        for (Throwable suppressed : getSuppressed()) {
+            cloned.addSuppressed(suppressed);
+        }
+        return cloned;
     }
 }

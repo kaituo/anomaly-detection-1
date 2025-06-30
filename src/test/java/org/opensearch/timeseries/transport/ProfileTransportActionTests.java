@@ -12,6 +12,7 @@
 package org.opensearch.timeseries.transport;
 
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -69,14 +70,14 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         ADPriorityCache cache = mock(ADPriorityCache.class);
         cacheProvider = mock(ADCacheProvider.class);
         when(cacheProvider.get()).thenReturn(cache);
-        when(cache.getActiveEntities(anyString())).thenReturn(activeEntities);
-        when(cache.getTotalUpdates(anyString())).thenReturn(totalUpdates);
+        when(cache.getActiveEntities(nullable(String.class), anyString())).thenReturn(activeEntities);
+        when(cache.getTotalUpdates(nullable(String.class), anyString())).thenReturn(totalUpdates);
         Map<String, Long> multiEntityModelSizeMap = new HashMap<>();
         String modelId1 = "T4c3dXUBj-2IZN7itix__entity_app_3";
         String modelId2 = "T4c3dXUBj-2IZN7itix__entity_app_2";
         multiEntityModelSizeMap.put(modelId1, multiEntityModelSize);
         multiEntityModelSizeMap.put(modelId2, multiEntityModelSize);
-        when(cache.getModelSize(anyString())).thenReturn(multiEntityModelSizeMap);
+        when(cache.getModelSize(nullable(String.class), anyString())).thenReturn(multiEntityModelSizeMap);
 
         List<ModelProfile> modelProfiles = new ArrayList<>();
         String field = "field";
@@ -86,7 +87,7 @@ public class ProfileTransportActionTests extends OpenSearchIntegTestCase {
         Entity entity2 = Entity.createSingleAttributeEntity(field, fieldVal2);
         modelProfiles.add(new ModelProfile(modelId1, entity1, multiEntityModelSize));
         modelProfiles.add(new ModelProfile(modelId1, entity2, multiEntityModelSize));
-        when(cache.getAllModelProfile(anyString())).thenReturn(modelProfiles);
+        when(cache.getAllModelProfile(nullable(String.class), anyString())).thenReturn(modelProfiles);
 
         // Map<String, Long> modelSizes = new HashMap<>();
         // modelSizes.put(modelId, modelSize);

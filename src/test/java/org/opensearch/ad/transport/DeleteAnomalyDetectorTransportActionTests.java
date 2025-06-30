@@ -78,7 +78,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
 
         client().admin().indices().delete(new DeleteIndexRequest(testIndex, ADIndex.CONFIG.getIndexName())).actionGet(10_000);
 
-        DeleteConfigRequest request = new DeleteConfigRequest(bogusId, ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest request = new DeleteConfigRequest(bogusId, ADIndex.CONFIG.getIndexName(), null);
         IndexNotFoundException response = expectThrows(
             IndexNotFoundException.class,
             () -> client().execute(DeleteAnomalyDetectorAction.INSTANCE, request).actionGet(10_000L)
@@ -101,6 +101,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             60L,
             randomUser(),
+            detector.getTenantId(),
             null,
             AnalysisType.AD
         );
@@ -110,7 +111,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
             .source(job.toXContent(XContentFactory.jsonBuilder(), ToXContent.EMPTY_PARAMS));
         client().index(jobReq).actionGet();
 
-        DeleteConfigRequest deleteReq = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest deleteReq = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), null);
         OpenSearchStatusException ex = expectThrows(
             OpenSearchStatusException.class,
             () -> client().execute(DeleteAnomalyDetectorAction.INSTANCE, deleteReq).actionGet(10_000L)
@@ -137,6 +138,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             60L,
             randomUser(),
+            detector.getTenantId(),
             null,
             AnalysisType.AD
         );
@@ -146,7 +148,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
             .source(job.toXContent(XContentFactory.jsonBuilder(), ToXContent.EMPTY_PARAMS));
         client().index(jobReq).actionGet();
 
-        DeleteConfigRequest deleteReq = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest deleteReq = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), null);
         DeleteResponse res = client().execute(DeleteAnomalyDetectorAction.INSTANCE, deleteReq).actionGet(10_000L);
 
         assertEquals(RestStatus.OK, res.status());
@@ -154,7 +156,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
 
     private void testDeleteDetector(AnomalyDetector detector) throws IOException {
         String detectorId = createDetector(detector);
-        DeleteConfigRequest request = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName());
+        DeleteConfigRequest request = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), null);
         DeleteResponse deleteResponse = client().execute(DeleteAnomalyDetectorAction.INSTANCE, request).actionGet(10000);
         assertEquals("deleted", deleteResponse.getResult().getLowercase());
     }

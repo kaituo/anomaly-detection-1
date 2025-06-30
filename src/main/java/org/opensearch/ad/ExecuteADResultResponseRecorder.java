@@ -18,55 +18,55 @@ import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.transport.ADProfileAction;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ExecuteResultResponseRecorder;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.transport.ResultResponse;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 
 public class ExecuteADResultResponseRecorder extends
-    ExecuteResultResponseRecorder<ADIndex, ADIndexManagement, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, AnomalyResult, ADProfileAction> {
+    ExecuteResultResponseRecorder<ADIndex, ADDelegatingDataManagement, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, AnomalyResult> {
 
     private static final Logger log = LogManager.getLogger(ExecuteADResultResponseRecorder.class);
 
     public ExecuteADResultResponseRecorder(
-        ADIndexManagement indexManagement,
-        ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> resultHandler,
+        ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADDelegatingDataManagement> resultHandler,
         ADTaskManager taskManager,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         ThreadPool threadPool,
-        Client client,
-        NodeStateManager nodeStateManager,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager nodeStateManager,
         Clock clock,
-        int rcfMinSamples
+        int adResultMappingVersion
     ) {
         super(
-            indexManagement,
             resultHandler,
             taskManager,
             nodeFilter,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
-            client,
+            ADCommonName.AD_THREAD_POOL_NAME,
+            nodeCommunicator,
+            dataAccess,
             nodeStateManager,
             clock,
             ADIndex.RESULT,
             AnalysisType.AD,
-            ADProfileAction.INSTANCE
+            adResultMappingVersion
         );
     }
 
@@ -75,9 +75,11 @@ public class ExecuteADResultResponseRecorder extends
         String configId,
         Instant dataStartTime,
         Instant dataEndTime,
+        Instant executeStartTime,
         Instant executeEndTime,
         String errorMessage,
-        User user
+        User user,
+        String tenantId
     ) {
         return new AnomalyResult(
             configId,
@@ -85,13 +87,14 @@ public class ExecuteADResultResponseRecorder extends
             new ArrayList<FeatureData>(),
             dataStartTime,
             dataEndTime,
+            executeStartTime,
             executeEndTime,
-            Instant.now(),
             errorMessage,
             Optional.empty(), // single-stream detectors have no entity
             user,
-            indexManagement.getSchemaVersion(resultIndex),
-            null // no model id
+            resultMappingVersion,
+            null, // no model id
+            tenantId
         );
     }
 
@@ -107,12 +110,12 @@ public class ExecuteADResultResponseRecorder extends
      * @param clock Clock to get current time
      */
     @Override
-    protected void updateRealtimeTask(ResultResponse<AnomalyResult> response, String configId, Clock clock) {
+    protected void updateRealtimeTask(ResultResponse<AnomalyResult> response, String configId, String tenantId, Clock clock) {
         if (response.isHC() != null && response.isHC()) {
             if (taskManager.skipUpdateRealtimeTask(configId, response.getError())) {
                 return;
             }
-            delayedUpdate(response, configId, clock);
+            delayedUpdate(response, configId, tenantId, clock);
         } else {
             log
                 .debug(
@@ -122,6 +125,7 @@ public class ExecuteADResultResponseRecorder extends
                 );
             updateLatestRealtimeTask(
                 configId,
+                tenantId,
                 null,
                 response.getRcfTotalUpdates(),
                 response.getConfigIntervalInMinutes(),

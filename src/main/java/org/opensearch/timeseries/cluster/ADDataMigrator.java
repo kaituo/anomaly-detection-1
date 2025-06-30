@@ -39,6 +39,7 @@ import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.DetectorInternalState;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.xcontent.XContentFactory;
 import org.opensearch.core.action.ActionListener;
@@ -51,6 +52,9 @@ import org.opensearch.index.query.TermQueryBuilder;
 import org.opensearch.index.query.TermsQueryBuilder;
 import org.opensearch.search.SearchHit;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.function.ExecutorFunction;
@@ -65,24 +69,31 @@ import org.opensearch.transport.client.Client;
  * Currently we need to migrate:
  *   1. Detector internal state (used to track realtime job error) to realtime data.
  */
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class ADDataMigrator {
     private final Logger logger = LogManager.getLogger(this.getClass());
     private final Client client;
     private final ClusterService clusterService;
     private final NamedXContentRegistry xContentRegistry;
     private final ADIndexManagement detectionIndices;
+    private final ADDelegatingDataManagement stateIndexStore;
+    private final StateManager stateManager;
     private final AtomicBoolean dataMigrated;
 
     public ADDataMigrator(
         Client client,
         ClusterService clusterService,
         NamedXContentRegistry xContentRegistry,
-        ADIndexManagement detectionIndices
+        ADIndexManagement detectionIndices,
+        ADDelegatingDataManagement stateIndexStore,
+        StateManager stateManager
     ) {
         this.client = client;
         this.clusterService = clusterService;
         this.xContentRegistry = xContentRegistry;
         this.detectionIndices = detectionIndices;
+        this.stateIndexStore = stateIndexStore;
+        this.stateManager = stateManager;
         this.dataMigrated = new AtomicBoolean(false);
     }
 
@@ -98,11 +109,11 @@ public class ADDataMigrator {
                 return;
             }
 
-            if (detectionIndices.doesStateIndexExist()) {
+            if (stateIndexStore.doesStateIndexExist()) {
                 migrateDetectorInternalStateToRealtimeTask();
             } else {
                 // If detection index doesn't exist, create index and backfill realtime task.
-                detectionIndices.initStateIndex(ActionListener.wrap(r -> {
+                stateIndexStore.initStateIndex(ActionListener.wrap(r -> {
                     if (r.isAcknowledged()) {
                         logger.info("Created {} with mappings.", ADCommonName.DETECTION_STATE_INDEX);
                         migrateDetectorInternalStateToRealtimeTask();
@@ -233,11 +244,10 @@ public class ADDataMigrator {
     }
 
     private void createRealtimeADTask(Job job, String error, ConcurrentLinkedQueue<Job> detectorJobs, boolean migrateAll) {
-        client.get(new GetRequest(ADCommonName.CONFIG_INDEX, job.getName()), ActionListener.wrap(r -> {
-            if (r != null && r.isExists()) {
-                try (XContentParser parser = createXContentParserFromRegistry(xContentRegistry, r.getSourceAsBytesRef())) {
-                    ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                    AnomalyDetector detector = AnomalyDetector.parse(parser, r.getId());
+        stateManager.getConfig(job.getName(), job.getTenantId(), AnalysisType.AD, false, ActionListener.wrap(detectorOptional -> {
+            if (detectorOptional.isPresent()) {
+                try {
+                    AnomalyDetector detector = (AnomalyDetector) detectorOptional.get();
                     ADTaskType taskType = detector.isHighCardinality()
                         ? ADTaskType.REALTIME_HC_DETECTOR
                         : ADTaskType.REALTIME_SINGLE_ENTITY;

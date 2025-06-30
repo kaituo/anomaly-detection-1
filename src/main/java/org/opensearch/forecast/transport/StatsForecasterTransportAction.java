@@ -18,6 +18,7 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.forecast.client.ForecastNodeCommunicator;
 import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.stats.ForecastStats;
 import org.opensearch.index.query.BoolQueryBuilder;
@@ -27,6 +28,10 @@ import org.opensearch.search.aggregations.AggregationBuilders;
 import org.opensearch.search.aggregations.bucket.SingleBucketAggregation;
 import org.opensearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.transport.BaseStatsTransportAction;
@@ -34,35 +39,37 @@ import org.opensearch.timeseries.transport.StatsRequest;
 import org.opensearch.timeseries.transport.StatsResponse;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.cluster.service.ClusterService#state usage: Only meant to be used in single-tenant.")
 public class StatsForecasterTransportAction extends BaseStatsTransportAction {
     public final Logger logger = LogManager.getLogger(StatsForecasterTransportAction.class);
     private final String WITH_CATEGORY_FIELD = "with_category_field";
     private final String WITHOUT_CATEGORY_FIELD = "without_category_field";
+    private final ForecastNodeCommunicator nodeCommunicator;
 
     @Inject
     public StatsForecasterTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
-        Client client,
         ForecastStats stats,
-        ClusterService clusterService
-
+        ClusterService clusterService,
+        DataAccess dataAccess,
+        RunContext runContext,
+        ForecastNodeCommunicator nodeCommunicator
     ) {
-        super(transportService, actionFilters, client, stats, clusterService, StatsForecasterAction.NAME);
+        super(transportService, actionFilters, stats, clusterService, StatsForecasterAction.NAME, dataAccess, runContext);
+        this.nodeCommunicator = nodeCommunicator;
     }
 
     /**
      * Make async request to get the number of detectors in AnomalyDetector.ANOMALY_DETECTORS_INDEX if necessary
      * and, onResponse, gather the cluster statistics
      *
-     * @param client Client
      * @param listener MultiResponsesDelegateActionListener to be used once both requests complete
      * @param statsRequest Request containing stats to be retrieved
      */
     @Override
-    public void getClusterStats(Client client, MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest statsRequest) {
+    public void getClusterStats(MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest statsRequest) {
         StatsResponse adStatsResponse = new StatsResponse();
         if ((statsRequest.getStatsToBeRetrieved().contains(StatNames.FORECASTER_COUNT.getName())
             || statsRequest.getStatsToBeRetrieved().contains(StatNames.SINGLE_STREAM_FORECASTER_COUNT.getName())
@@ -86,7 +93,7 @@ public class StatsForecasterTransportAction extends BaseStatsTransportAction {
             searchRequest.source(searchSourceBuilder);
 
             // Execute the query
-            client.search(searchRequest, ActionListener.wrap(searchResponse -> {
+            dataAccess.search(searchRequest, TenantContext.systemWide(), ActionListener.wrap(searchResponse -> {
                 // Parse the response
                 SingleBucketAggregation withField = (SingleBucketAggregation) searchResponse.getAggregations().get(WITH_CATEGORY_FIELD);
                 SingleBucketAggregation withoutField = (SingleBucketAggregation) searchResponse
@@ -114,13 +121,12 @@ public class StatsForecasterTransportAction extends BaseStatsTransportAction {
      * Make async request to get the forecasting statistics from each node and, onResponse, set the
      * StatsNodesResponse field of StatsResponse
      *
-     * @param client Client
      * @param listener MultiResponsesDelegateActionListener to be used once both requests complete
      * @param statsRequest Request containing stats to be retrieved
      */
     @Override
-    public void getNodeStats(Client client, MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest statsRequest) {
-        client.execute(ForecastStatsNodesAction.INSTANCE, statsRequest, ActionListener.wrap(adStatsResponse -> {
+    public void getNodeStats(MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest statsRequest) {
+        nodeCommunicator.stat(statsRequest, ActionListener.wrap(adStatsResponse -> {
             StatsResponse restStatsResponse = new StatsResponse();
             restStatsResponse.setStatsNodesResponse(adStatsResponse);
             listener.onResponse(restStatsResponse);

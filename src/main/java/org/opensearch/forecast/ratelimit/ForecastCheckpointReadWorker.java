@@ -19,7 +19,6 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
 import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
 import org.opensearch.forecast.ml.ForecastColdStart;
 import org.opensearch.forecast.ml.ForecastModelManager;
@@ -28,11 +27,11 @@ import org.opensearch.forecast.ml.RCFCasterResult;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.CheckpointReadWorker;
 import org.opensearch.timeseries.task.TaskCacheManager;
@@ -40,7 +39,7 @@ import org.opensearch.timeseries.task.TaskCacheManager;
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 
 public class ForecastCheckpointReadWorker extends
-    CheckpointReadWorker<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastColdStart, ForecastModelManager, ForecastPriorityCache, ForecastSaveResultStrategy, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastColdStartWorker, ForecastRealTimeInferencer> {
+    CheckpointReadWorker<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastColdStart, ForecastModelManager, ForecastPriorityCache, ForecastSaveResultStrategy, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastColdStartWorker, ForecastRealTimeInferencer> {
     public static final String WORKER_NAME = "forecast-checkpoint-read";
 
     public ForecastCheckpointReadWorker(
@@ -61,7 +60,7 @@ public class ForecastCheckpointReadWorker extends
         ForecastModelManager modelManager,
         ForecastCheckpointDao checkpointDao,
         ForecastColdStartWorker entityColdStartQueue,
-        NodeStateManager stateManager,
+        StateManager stateManager,
         Provider<ForecastPriorityCache> cacheProvider,
         Duration stateTtl,
         ForecastCheckpointWriteWorker checkpointWriteQueue,
@@ -76,7 +75,7 @@ public class ForecastCheckpointReadWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,

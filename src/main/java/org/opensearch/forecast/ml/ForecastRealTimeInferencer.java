@@ -5,20 +5,19 @@
 
 package org.opensearch.forecast.ml;
 
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME;
-
 import java.time.Clock;
 
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.ratelimit.ForecastCheckpointWriteWorker;
 import org.opensearch.forecast.ratelimit.ForecastColdStartWorker;
 import org.opensearch.forecast.ratelimit.ForecastSaveResultStrategy;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
@@ -31,7 +30,7 @@ import org.opensearch.timeseries.task.TaskCacheManager;
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 
 public class ForecastRealTimeInferencer extends
-    RealTimeInferencer<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastColdStart, ForecastModelManager, ForecastSaveResultStrategy, ForecastPriorityCache, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastColdStartWorker> {
+    RealTimeInferencer<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastColdStart, ForecastModelManager, ForecastSaveResultStrategy, ForecastPriorityCache, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastColdStartWorker> {
 
     public ForecastRealTimeInferencer(
         ForecastModelManager modelManager,
@@ -53,7 +52,7 @@ public class ForecastRealTimeInferencer extends
             resultWriteWorker,
             cache,
             threadPool,
-            FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             clock,
             searchFeatureDao,
             AnalysisType.FORECAST

@@ -85,6 +85,7 @@ import org.opensearch.test.OpenSearchTestCase;
 import org.opensearch.threadpool.FixedExecutorBuilder;
 import org.opensearch.threadpool.TestThreadPool;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.client.TransportConfigDocumentStore;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ClientUtil;
@@ -312,10 +313,10 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
             name,
             new FixedExecutorBuilder(
                 Settings.EMPTY,
-                TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+                ADCommonName.AD_THREAD_POOL_NAME,
                 1,
                 1000,
-                "opensearch.ad." + TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
+                "opensearch.ad." + ADCommonName.AD_THREAD_POOL_NAME
             )
         );
     }
@@ -497,7 +498,7 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
     protected void setUpADThreadPool(ThreadPool mockThreadPool) {
         ExecutorService executorService = mock(ExecutorService.class);
 
-        when(mockThreadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(mockThreadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();
@@ -594,11 +595,13 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
             xContentRegistry(),
             Settings.EMPTY,
             clientUtil,
+            new TransportConfigDocumentStore(client),
             mock(Clock.class),
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             clusterService,
             TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            TimeSeriesSettings.BACKOFF_MINUTES
+            TimeSeriesSettings.BACKOFF_MINUTES,
+            null
         );
     }
 }

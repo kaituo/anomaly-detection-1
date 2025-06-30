@@ -11,6 +11,7 @@
 
 package org.opensearch.ad.rest;
 
+import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_REQUEST_TIMEOUT;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
 import static org.opensearch.timeseries.util.RestHandlerUtils.SUGGEST;
@@ -36,6 +37,7 @@ import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.transport.SuggestConfigParamRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -48,8 +50,10 @@ public class RestAnomalyDetectorSuggestAction extends BaseRestHandler {
     private static final String ANOMALY_DETECTOR_SUGGEST_ACTION = "anomaly_detector_suggest_action";
 
     private volatile TimeValue requestTimeout;
+    private final Settings settings;
 
     public RestAnomalyDetectorSuggestAction(Settings settings, ClusterService clusterService) {
+        this.settings = settings;
         this.requestTimeout = AD_REQUEST_TIMEOUT.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_REQUEST_TIMEOUT, it -> requestTimeout = it);
     }
@@ -71,6 +75,7 @@ public class RestAnomalyDetectorSuggestAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
@@ -84,12 +89,14 @@ public class RestAnomalyDetectorSuggestAction extends BaseRestHandler {
             AnomalyDetector config = parseConfig(parser);
 
             if (config != null) {
+                String tenantId = TenantAwareHelper.getTenantID(AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
                 return channel -> {
                     SuggestConfigParamRequest suggestAnomalyDetectorParamRequest = new SuggestConfigParamRequest(
                         AnalysisType.AD,
                         config,
                         typesStr,
-                        requestTimeout
+                        requestTimeout,
+                        tenantId
                     );
                     client
                         .execute(

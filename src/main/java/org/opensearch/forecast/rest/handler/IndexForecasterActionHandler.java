@@ -17,15 +17,15 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.Forecaster;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.forecast.transport.IndexForecasterResponse;
 import org.opensearch.rest.RestRequest;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 /**
  * process create/update forecaster request
@@ -36,7 +36,6 @@ public class IndexForecasterActionHandler extends AbstractForecasterActionHandle
      * Constructor function.
      *
      * @param clusterService             ClusterService
-     * @param client                     OS node client that executes actions on the local node
      * @param transportService           OS transport service
      * @param forecastIndices            forecast index manager
      * @param forecasterId               forecaster identifier
@@ -52,13 +51,16 @@ public class IndexForecasterActionHandler extends AbstractForecasterActionHandle
      * @param method                     Rest Method type
      * @param xContentRegistry           Registry which is used for XContentParser
      * @param user                       User context
+     * @param taskManager                Forecast task manager
+     * @param searchFeatureDao           Search utility
+     * @param settings                   Node settings
+     * @param runContext                 Run context
      */
     public IndexForecasterActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         TransportService transportService,
-        ForecastIndexManagement forecastIndices,
+        ForecastDelegatingDataManagement forecastIndices,
         String forecasterId,
         Long seqNo,
         Long primaryTerm,
@@ -74,12 +76,12 @@ public class IndexForecasterActionHandler extends AbstractForecasterActionHandle
         User user,
         ForecastTaskManager taskManager,
         SearchFeatureDao searchFeatureDao,
-        Settings settings
+        Settings settings,
+        RunContext runContext
     ) {
         super(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             transportService,
             forecastIndices,
             forecasterId,
@@ -100,7 +102,8 @@ public class IndexForecasterActionHandler extends AbstractForecasterActionHandle
             null,
             false,
             null,
-            settings
+            settings,
+            runContext
         );
     }
 }

@@ -82,7 +82,8 @@ public class ForecastResult extends IndexableResult {
         String error,
         Optional<Entity> entity,
         User user,
-        Integer schemaVersion
+        Integer schemaVersion,
+        String tenantId
     ) {
         this(
             forecasterId,
@@ -103,7 +104,8 @@ public class ForecastResult extends IndexableResult {
             null,
             null,
             null,
-            null
+            null,
+            tenantId
         );
     }
 
@@ -126,7 +128,8 @@ public class ForecastResult extends IndexableResult {
         Float upperBound,
         Instant forecastDataStartTime,
         Instant forecastDataEndTime,
-        Integer horizonIndex
+        Integer horizonIndex,
+        String tenantId
     ) {
         super(
             forecasterId,
@@ -139,7 +142,8 @@ public class ForecastResult extends IndexableResult {
             entity,
             user,
             schemaVersion,
-            taskId
+            taskId,
+            tenantId
         );
         this.featureId = featureId;
         this.dataQuality = dataQuality;
@@ -150,7 +154,7 @@ public class ForecastResult extends IndexableResult {
         this.forecastDataStartTime = forecastDataStartTime;
         this.forecastDataEndTime = forecastDataEndTime;
         this.horizonIndex = horizonIndex;
-        this.entityId = getEntityId(entity, configId);
+        this.entityId = getEntityId(entity, tenantId, configId);
     }
 
     public static List<ForecastResult> fromRawRCFCasterResult(
@@ -170,7 +174,8 @@ public class ForecastResult extends IndexableResult {
         float[] forecastsValues,
         float[] forecastsUppers,
         float[] forecastsLowers,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
         int inputLength = featureData.size();
         int numberOfForecasts = 0;
@@ -208,7 +213,8 @@ public class ForecastResult extends IndexableResult {
                     null,
                     null,
                     null,
-                    null
+                    null,
+                    tenantId
                 )
             );
         Instant forecastDataStartTime = dataEndTime;
@@ -239,7 +245,8 @@ public class ForecastResult extends IndexableResult {
                             forecastDataStartTime,
                             forecastDataEndTime,
                             // horizon starts from 1
-                            i + 1
+                            i + 1,
+                            tenantId
                         )
                     );
             }
@@ -303,6 +310,9 @@ public class ForecastResult extends IndexableResult {
         if (taskId != null) {
             xContentBuilder.field(CommonName.TASK_ID_FIELD, taskId);
         }
+        if (tenantId != null) {
+            xContentBuilder.field(CommonName.TENANT_ID_FIELD, tenantId);
+        }
         if (entityId != null) {
             xContentBuilder.field(CommonName.ENTITY_ID_FIELD, entityId);
         }
@@ -357,6 +367,7 @@ public class ForecastResult extends IndexableResult {
         Instant forecastDataStartTime = null;
         Instant forecastDataEndTime = null;
         Integer horizonIndex = null;
+        String tenantId = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -425,6 +436,9 @@ public class ForecastResult extends IndexableResult {
                 case HORIZON_INDEX_FIELD:
                     horizonIndex = parser.intValue();
                     break;
+                case CommonName.TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -450,7 +464,8 @@ public class ForecastResult extends IndexableResult {
             upperBound,
             forecastDataStartTime,
             forecastDataEndTime,
-            horizonIndex
+            horizonIndex,
+            tenantId
         );
     }
 
@@ -547,7 +562,8 @@ public class ForecastResult extends IndexableResult {
             null,
             Optional.empty(),
             null,
-            CommonValue.NO_SCHEMA_VERSION
+            CommonValue.NO_SCHEMA_VERSION,
+            null
         );
     }
 

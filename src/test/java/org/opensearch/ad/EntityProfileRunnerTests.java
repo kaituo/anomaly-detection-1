@@ -13,11 +13,17 @@ package org.opensearch.ad;
 
 import static java.util.Collections.emptyMap;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
 
 import java.io.IOException;
 import java.time.temporal.ChronoUnit;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -25,17 +31,11 @@ import org.apache.lucene.search.TotalHits;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
-import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.SearchResponseSections;
 import org.opensearch.action.search.ShardSearchFailure;
-import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.transport.ADEntityProfileAction;
 import org.opensearch.common.io.stream.BytesStreamOutput;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.index.IndexNotFoundException;
@@ -47,10 +47,13 @@ import org.opensearch.search.aggregations.metrics.InternalMax;
 import org.opensearch.search.internal.InternalSearchResponse;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.EntityProfile;
 import org.opensearch.timeseries.model.EntityProfileName;
@@ -61,14 +64,13 @@ import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.model.ModelProfile;
 import org.opensearch.timeseries.model.ModelProfileOnNode;
 import org.opensearch.timeseries.transport.EntityProfileResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
 
 public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
     private AnomalyDetector detector;
     private int detectorIntervalMin;
-    private Client client;
-    private SecurityClientUtil clientUtil;
+    private DataAccess dataAccess;
+    private NodeCommunicator nodeCommunicator;
+    private StateManager stateManager;
     private ADEntityProfileRunner runner;
     private Set<EntityProfileName> state;
     private Set<EntityProfileName> initNInfo;
@@ -129,67 +131,66 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
         job = TestHelpers.randomJob(true);
 
         requiredSamples = 128;
-        client = mock(Client.class);
-        when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        stateManager = mock(StateManager.class);
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<? extends Config>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
-        clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
-
-        runner = new ADEntityProfileRunner(client, clientUtil, xContentRegistry(), requiredSamples);
-
+        }).when(stateManager).getConfig(any(String.class), any(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            GetRequest request = (GetRequest) args[0];
-            ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
-
-            String indexName = request.index();
-            if (indexName.equals(ADCommonName.CONFIG_INDEX)) {
-                listener.onResponse(TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX));
-            } else if (indexName.equals(CommonName.JOB_INDEX)) {
-                listener.onResponse(TestHelpers.createGetResponse(job, detector.getId(), CommonName.JOB_INDEX));
-            }
-
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onResponse(Optional.of(job));
             return null;
-        }).when(client).get(any(), any());
+        }).when(stateManager).getJob(any(String.class), any(), any(boolean.class), any(ActionListener.class));
+
+        dataAccess = mock(DataAccess.class);
+        nodeCommunicator = mock(NodeCommunicator.class);
+        runner = new ADEntityProfileRunner(nodeCommunicator, dataAccess, stateManager, requiredSamples);
 
         entity = Entity.createSingleAttributeEntity(categoryField, entityValue);
-        modelId = entity.getModelId(detectorId).get();
+        modelId = entity.getModelId(null, detectorId).get();
+    }
+
+    private void profile(
+        String detectorId,
+        Entity entity,
+        Set<EntityProfileName> profilesToCollect,
+        ActionListener<EntityProfile> listener
+    ) {
+        runner.profile(detectorId, null, entity, profilesToCollect, listener);
+    }
+
+    private SearchResponse createLastSampleTimeSearchResponse() {
+        InternalMax maxAgg = new InternalMax(CommonName.AGG_NAME_MAX_TIME, latestSampleTimestamp, DocValueFormat.RAW, emptyMap());
+        InternalAggregations internalAggregations = InternalAggregations.from(Collections.singletonList(maxAgg));
+
+        SearchHits hits = new SearchHits(new SearchHit[] {}, null, Float.NaN);
+        SearchResponseSections searchSections = new SearchResponseSections(hits, internalAggregations, null, false, false, null, 1);
+
+        return new SearchResponse(searchSections, null, 1, 1, 0, 30, ShardSearchFailure.EMPTY_ARRAY, SearchResponse.Clusters.EMPTY);
+    }
+
+    private SearchResponse createEntityExistsSearchResponse() {
+        SearchHits collapsedHits = new SearchHits(
+            new SearchHit[] {
+                new SearchHit(2, "ID", Collections.emptyMap(), Collections.emptyMap()),
+                new SearchHit(3, "ID", Collections.emptyMap(), Collections.emptyMap()) },
+            new TotalHits(1, TotalHits.Relation.EQUAL_TO),
+            1.0F
+        );
+
+        InternalSearchResponse internalSearchResponse = new InternalSearchResponse(collapsedHits, null, null, null, false, null, 1);
+        return new SearchResponse(internalSearchResponse, null, 1, 1, 0, 0, ShardSearchFailure.EMPTY_ARRAY, SearchResponse.Clusters.EMPTY);
     }
 
     @SuppressWarnings("unchecked")
     private void setUpSearch() {
         latestSampleTimestamp = 1_603_989_830_158L;
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            SearchRequest request = (SearchRequest) args[0];
-            String indexName = request.indices()[0];
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
-            if (indexName.equals(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS)) {
-                InternalMax maxAgg = new InternalMax(CommonName.AGG_NAME_MAX_TIME, latestSampleTimestamp, DocValueFormat.RAW, emptyMap());
-                InternalAggregations internalAggregations = InternalAggregations.from(Collections.singletonList(maxAgg));
-
-                SearchHits hits = new SearchHits(new SearchHit[] {}, null, Float.NaN);
-                SearchResponseSections searchSections = new SearchResponseSections(hits, internalAggregations, null, false, false, null, 1);
-
-                SearchResponse searchResponse = new SearchResponse(
-                    searchSections,
-                    null,
-                    1,
-                    1,
-                    0,
-                    30,
-                    ShardSearchFailure.EMPTY_ARRAY,
-                    SearchResponse.Clusters.EMPTY
-                );
-
-                listener.onResponse(searchResponse);
-            }
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
+            listener.onResponse(createLastSampleTimeSearchResponse());
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).search(any(), any(), any());
     }
 
     @SuppressWarnings("unchecked")
@@ -201,8 +202,7 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
         modelSize = 712480L;
         nodeId = "g6pmr547QR-CfpEvO67M4g";
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            ActionListener<EntityProfileResponse> listener = (ActionListener<EntityProfileResponse>) args[2];
+            ActionListener<EntityProfileResponse> listener = invocation.getArgument(1);
 
             EntityProfileResponse.Builder profileResponseBuilder = new EntityProfileResponse.Builder();
             if (InittedEverResultStatus.UNKNOWN == initted) {
@@ -218,60 +218,20 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
             }
 
             listener.onResponse(profileResponseBuilder.build());
-
             return null;
-        }).when(client).execute(any(ADEntityProfileAction.class), any(), any());
+        }).when(nodeCommunicator).entityProfile(any(), any());
 
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            SearchRequest request = (SearchRequest) args[0];
-            String indexName = request.indices()[0];
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
-            SearchResponse searchResponse = null;
-            if (indexName.equals(ADCommonName.ANOMALY_RESULT_INDEX_ALIAS)) {
-                InternalMax maxAgg = new InternalMax(CommonName.AGG_NAME_MAX_TIME, latestSampleTimestamp, DocValueFormat.RAW, emptyMap());
-                InternalAggregations internalAggregations = InternalAggregations.from(Collections.singletonList(maxAgg));
-
-                SearchHits hits = new SearchHits(new SearchHit[] {}, null, Float.NaN);
-                SearchResponseSections searchSections = new SearchResponseSections(hits, internalAggregations, null, false, false, null, 1);
-
-                searchResponse = new SearchResponse(
-                    searchSections,
-                    null,
-                    1,
-                    1,
-                    0,
-                    30,
-                    ShardSearchFailure.EMPTY_ARRAY,
-                    SearchResponse.Clusters.EMPTY
-                );
-            } else {
-                SearchHits collapsedHits = new SearchHits(
-                    new SearchHit[] {
-                        new SearchHit(2, "ID", Collections.emptyMap(), Collections.emptyMap()),
-                        new SearchHit(3, "ID", Collections.emptyMap(), Collections.emptyMap()) },
-                    new TotalHits(1, TotalHits.Relation.EQUAL_TO),
-                    1.0F
-                );
-
-                InternalSearchResponse internalSearchResponse = new InternalSearchResponse(collapsedHits, null, null, null, false, null, 1);
-                searchResponse = new SearchResponse(
-                    internalSearchResponse,
-                    null,
-                    1,
-                    1,
-                    0,
-                    0,
-                    ShardSearchFailure.EMPTY_ARRAY,
-                    SearchResponse.Clusters.EMPTY
-                );
-            }
-
-            listener.onResponse(searchResponse);
-
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
+            listener.onResponse(createEntityExistsSearchResponse());
             return null;
+        }).when(dataAccess).searchWithInjectedSecurity(any(), any(String.class), any(), eq(AnalysisType.AD), any(ActionListener.class));
 
-        }).when(client).search(any(), any());
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
+            listener.onResponse(createLastSampleTimeSearchResponse());
+            return null;
+        }).when(dataAccess).search(any(), any(), any());
     }
 
     public void stateTestTemplate(InittedEverResultStatus returnedState, EntityState expectedState) throws InterruptedException {
@@ -279,7 +239,7 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detectorId, entity, state, ActionListener.wrap(response -> {
+        profile(detectorId, entity, state, ActionListener.wrap(response -> {
             assertEquals(expectedState, response.getState());
             inProgressLatch.countDown();
         }, exception -> {
@@ -304,7 +264,7 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
     public void testEmptyProfile() throws InterruptedException {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detectorId, entity, new HashSet<>(), ActionListener.wrap(response -> {
+        profile(detectorId, entity, new HashSet<>(), ActionListener.wrap(response -> {
             assertTrue("Should not reach here", false);
             inProgressLatch.countDown();
         }, exception -> {
@@ -321,7 +281,7 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
         ModelProfileOnNode modelProfile = new ModelProfileOnNode(nodeId, new ModelProfile(modelId, entity, modelSize));
         expectedProfile.modelProfile(modelProfile);
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
-        runner.profile(detectorId, entity, model, ActionListener.wrap(response -> {
+        profile(detectorId, entity, model, ActionListener.wrap(response -> {
             assertEquals(expectedProfile.build(), response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -350,23 +310,14 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            GetRequest request = (GetRequest) args[0];
-            ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
-
-            String indexName = request.index();
-            if (indexName.equals(ADCommonName.CONFIG_INDEX)) {
-                listener.onResponse(TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX));
-            } else if (indexName.equals(CommonName.JOB_INDEX)) {
-                listener.onFailure(new IndexNotFoundException(CommonName.JOB_INDEX));
-            }
-
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onFailure(new IndexNotFoundException(CommonName.JOB_INDEX));
             return null;
-        }).when(client).get(any(), any());
+        }).when(stateManager).getJob(any(String.class), any(), any(boolean.class), any(ActionListener.class));
 
         EntityProfile expectedProfile = new EntityProfile.Builder().build();
 
-        runner.profile(detectorId, entity, initNInfo, ActionListener.wrap(response -> {
+        profile(detectorId, entity, initNInfo, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -381,22 +332,9 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
     public void testNotMultiEntityDetector() throws IOException, InterruptedException {
         detector = TestHelpers.randomAnomalyDetectorWithInterval(new IntervalTimeConfiguration(detectorIntervalMin, ChronoUnit.MINUTES));
 
-        doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            GetRequest request = (GetRequest) args[0];
-            ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
-
-            String indexName = request.index();
-            if (indexName.equals(ADCommonName.CONFIG_INDEX)) {
-                listener.onResponse(TestHelpers.createGetResponse(detector, detector.getId(), ADCommonName.CONFIG_INDEX));
-            }
-
-            return null;
-        }).when(client).get(any(), any());
-
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detectorId, entity, state, ActionListener.wrap(response -> {
+        profile(detectorId, entity, state, ActionListener.wrap(response -> {
             assertTrue("Should not reach here", false);
             inProgressLatch.countDown();
         }, exception -> {
@@ -422,7 +360,7 @@ public class EntityProfileRunnerTests extends AbstractTimeSeriesTest {
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
-        runner.profile(detectorId, entity, initNInfo, ActionListener.wrap(response -> {
+        profile(detectorId, entity, initNInfo, ActionListener.wrap(response -> {
             assertEquals(expectedProfile.build(), response);
             inProgressLatch.countDown();
         }, exception -> {

@@ -24,7 +24,9 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.GetAnomalyDetectorAction;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestActions;
@@ -32,6 +34,7 @@ import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.transport.GetConfigRequest;
 import org.opensearch.timeseries.util.RestHandlerUtils;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -43,8 +46,11 @@ public class RestGetAnomalyDetectorAction extends BaseRestHandler {
 
     private static final String GET_ANOMALY_DETECTOR_ACTION = "get_anomaly_detector";
     private static final Logger logger = LogManager.getLogger(RestGetAnomalyDetectorAction.class);
+    private final Settings settings;
 
-    public RestGetAnomalyDetectorAction() {}
+    public RestGetAnomalyDetectorAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -52,6 +58,7 @@ public class RestGetAnomalyDetectorAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
@@ -63,6 +70,7 @@ public class RestGetAnomalyDetectorAction extends BaseRestHandler {
         boolean returnJob = request.paramAsBoolean("job", false);
         boolean returnTask = request.paramAsBoolean("task", false);
         boolean all = request.paramAsBoolean("_all", false);
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings), request);
         GetConfigRequest getConfigRequest = new GetConfigRequest(
             detectorId,
             ADIndex.CONFIG.getIndexName(),
@@ -72,7 +80,8 @@ public class RestGetAnomalyDetectorAction extends BaseRestHandler {
             typesStr,
             rawPath,
             all,
-            RestHandlerUtils.buildEntity(request, detectorId)
+            RestHandlerUtils.buildEntity(request, detectorId),
+            tenantId
         );
 
         return channel -> client.execute(GetAnomalyDetectorAction.INSTANCE, getConfigRequest, new RestToXContentListener<>(channel));

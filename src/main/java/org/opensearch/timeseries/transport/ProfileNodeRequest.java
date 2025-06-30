@@ -43,6 +43,10 @@ public class ProfileNodeRequest extends TransportRequest {
         return request.getConfigId();
     }
 
+    public String getTenantId() {
+        return request.getTenantId();
+    }
+
     /**
      * Get the set that tracks which profiles should be retrieved
      *
