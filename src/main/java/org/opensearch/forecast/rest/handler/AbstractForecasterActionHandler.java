@@ -33,14 +33,16 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.model.Forecaster;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.forecast.transport.IndexForecasterResponse;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
@@ -50,9 +52,7 @@ import org.opensearch.timeseries.model.ValidationIssueType;
 import org.opensearch.timeseries.rest.handler.AbstractTimeSeriesActionHandler;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import com.google.common.collect.Sets;
 
@@ -86,7 +86,7 @@ import com.google.common.collect.Sets;
  * creation of new forecaster configurations, including validation against predefined limits and index management.
  */
 public abstract class AbstractForecasterActionHandler<T extends ActionResponse> extends
-    AbstractTimeSeriesActionHandler<T, ForecastIndex, ForecastIndexManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager> {
+    AbstractTimeSeriesActionHandler<T, ForecastIndex, ForecastDelegatingDataManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager> {
     protected final Logger logger = LogManager.getLogger(AbstractForecasterActionHandler.class);
 
     /**
@@ -119,8 +119,6 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
      * Constructor function.
      *
      * @param clusterService          ClusterService
-     * @param client                  ES node client that executes actions on the local node
-     * @param clientUtil              Forecast security client
      * @param transportService        ES transport service
      * @param forecastIndices         forecast index manager
      * @param forecasterId            forecaster identifier
@@ -142,13 +140,13 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
      * @param isDryRun                Whether handler is dryrun or not
      * @param clock                   clock object to know when to timeout
      * @param settings                Node settings
+     * @param configStore             Config store
      */
     public AbstractForecasterActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         TransportService transportService,
-        ForecastIndexManagement forecastIndices,
+        ForecastDelegatingDataManagement forecastIndices,
         String forecasterId,
         Long seqNo,
         Long primaryTerm,
@@ -167,15 +165,14 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
         String validationType,
         boolean isDryRun,
         Clock clock,
-        Settings settings
+        Settings settings,
+        RunContext runContext
     ) {
         super(
             forecaster,
             forecastIndices,
             isDryRun,
-            client,
             forecasterId,
-            clientUtil,
             user,
             method,
             clusterService,
@@ -198,7 +195,9 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
             clock,
             settings,
             ValidationAspect.FORECASTER,
-            ForecastCommonName.CONFIG_INDEX
+            ForecastCommonName.CONFIG_INDEX,
+            dataAccess,
+            runContext
         );
     }
 
@@ -263,7 +262,8 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
             config.getFlattenResultIndexMapping(),
             breakingUIChange ? Instant.now() : config.getLastBreakingUIChangeTime(),
             config.getFrequency(),
-            config.getAutoCreated()
+            config.getAutoCreated(),
+            config.getTenantId()
         );
     }
 
@@ -294,8 +294,7 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
     protected void validateModel(ActionListener<T> listener) {
         ForecastModelValidationActionHandler modelValidationActionHandler = new ForecastModelValidationActionHandler(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             (ActionListener<ValidateConfigResponse>) listener,
             (Forecaster) config,
             requestTimeout,
@@ -307,5 +306,40 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
             user
         );
         modelValidationActionHandler.start();
+    }
+
+    protected Forecaster createForecaster(Forecaster forecaster, User user) {
+        return new Forecaster(
+            forecaster.getId(),
+            forecaster.getVersion(),
+            forecaster.getName(),
+            forecaster.getDescription(),
+            forecaster.getTimeField(),
+            forecaster.getIndices(),
+            forecaster.getFeatureAttributes(),
+            forecaster.getFilterQuery(),
+            forecaster.getInterval(),
+            forecaster.getWindowDelay(),
+            forecaster.getShingleSize(),
+            forecaster.getUiMetadata(),
+            forecaster.getSchemaVersion(),
+            Instant.now(),
+            forecaster.getCategoryFields(),
+            user,
+            forecaster.getCustomResultIndexOrAlias(),
+            forecaster.getHorizon(),
+            forecaster.getImputationOption(),
+            forecaster.getRecencyEmphasis(),
+            forecaster.getSeasonIntervals(),
+            forecaster.getHistoryIntervals(),
+            forecaster.getCustomResultIndexMinSize(),
+            forecaster.getCustomResultIndexMinAge(),
+            forecaster.getCustomResultIndexTTL(),
+            forecaster.getFlattenResultIndexMapping(),
+            forecaster.getLastBreakingUIChangeTime(),
+            forecaster.getFrequency(),
+            forecaster.getAutoCreated(),
+            forecaster.getTenantId()
+        );
     }
 }

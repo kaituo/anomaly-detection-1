@@ -14,31 +14,33 @@ package org.opensearch.ad.transport.handler;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.ratelimit.ADResultWriteRequest;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.transport.ADResultBulkAction;
 import org.opensearch.ad.transport.ADResultBulkRequest;
-import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.transport.ResultBulkResponse;
 import org.opensearch.timeseries.transport.handler.IndexMemoryPressureAwareResultHandler;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Local host call only. Safe in multitenant.")
 public class ADIndexMemoryPressureAwareResultHandler extends
-    IndexMemoryPressureAwareResultHandler<AnomalyResult, ADResultWriteRequest, ADResultBulkRequest, ResultBulkResponse, ADIndex, ADIndexManagement> {
+    IndexMemoryPressureAwareResultHandler<AnomalyResult, ADResultWriteRequest, ADResultBulkRequest, ResultBulkResponse, ADIndex, ADDelegatingDataManagement> {
     private static final Logger LOG = LogManager.getLogger(ADIndexMemoryPressureAwareResultHandler.class);
 
     @Inject
     public ADIndexMemoryPressureAwareResultHandler(
         Client client,
-        ADIndexManagement anomalyDetectionIndices,
-        ClusterService clusterService
+        ADDelegatingDataManagement anomalyDetectionIndices,
+        DiscoveryNodeSelector discoveryNodeSelector
     ) {
-        super(client, anomalyDetectionIndices, clusterService);
+        super(client, anomalyDetectionIndices, discoveryNodeSelector);
     }
 
     @Override

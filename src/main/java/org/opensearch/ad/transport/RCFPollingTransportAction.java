@@ -32,6 +32,7 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.transport.TransportException;
 import org.opensearch.transport.TransportRequestOptions;
 import org.opensearch.transport.TransportResponseHandler;
@@ -41,6 +42,7 @@ import org.opensearch.transport.TransportService;
  * Transport action to get total rcf updates from hosted models or checkpoint
  *
  */
+@Deprecated
 public class RCFPollingTransportAction extends HandledTransportAction<RCFPollingRequest, RCFPollingResponse> {
 
     private static final Logger LOG = LogManager.getLogger(RCFPollingTransportAction.class);
@@ -75,11 +77,12 @@ public class RCFPollingTransportAction extends HandledTransportAction<RCFPolling
     }
 
     @Override
+    @SuppressForbidden(reason = "TransportService#sendRequest usage: only in single-tenant.")
     protected void doExecute(Task task, RCFPollingRequest request, ActionListener<RCFPollingResponse> listener) {
 
         String adID = request.getAdID();
 
-        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(adID, 0);
+        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(request.getTenantId(), adID, 0);
 
         Optional<DiscoveryNode> rcfNode = hashRing.getOwningNodeWithSameLocalVersionForRealtime(rcfModelID);
         if (!rcfNode.isPresent()) {

@@ -17,7 +17,7 @@ import org.opensearch.action.ActionType;
 import org.opensearch.ad.constant.ADCommonValue;
 
 public class ADTaskProfileAction extends ActionType<ADTaskProfileResponse> {
-
+    // historical only
     public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "detectors/profile/" + AD_TASK;
     public static final ADTaskProfileAction INSTANCE = new ADTaskProfileAction();
 

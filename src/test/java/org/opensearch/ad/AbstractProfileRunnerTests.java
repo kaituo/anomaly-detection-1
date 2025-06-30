@@ -15,10 +15,12 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.emptySet;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Optional;
@@ -40,10 +42,12 @@ import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
@@ -70,12 +74,14 @@ public class AbstractProfileRunnerTests extends AbstractTimeSeriesTest {
 
     protected OldAnomalyDetectorProfileRunner oldRunner;
     protected Client client;
-    protected SecurityClientUtil clientUtil;
+    protected NodeCommunicator nodeCommunicator;
+    protected DataAccess dataAccess;
     protected DiscoveryNodeFilterer nodeFilter;
     protected AnomalyDetector detector;
     protected ClusterService clusterService;
     protected TransportService transportService;
     protected ADTaskManager adTaskManager;
+    protected StateManager stateManager;
 
     protected static Set<ProfileName> stateOnly;
     protected static Set<ProfileName> stateNError;
@@ -152,21 +158,28 @@ public class AbstractProfileRunnerTests extends AbstractTimeSeriesTest {
         client = mock(Client.class);
         when(client.threadPool()).thenReturn(threadPool);
         taskProfileRunner = mock(ADTaskProfileRunner.class);
+        nodeCommunicator = mock(NodeCommunicator.class);
+        dataAccess = mock(DataAccess.class);
 
         nodeFilter = mock(DiscoveryNodeFilterer.class);
         clusterService = mock(ClusterService.class);
         adTaskManager = mock(ADTaskManager.class);
+        stateManager = mock(StateManager.class);
         when(clusterService.state()).thenReturn(ClusterState.builder(new ClusterName("test cluster")).build());
+        when(adTaskManager.getStateManager()).thenReturn(stateManager);
 
         requiredSamples = 128;
         neededSamples = 5;
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            Consumer<Optional<ADTask>> function = (Consumer<Optional<ADTask>>) args[2];
-            function.accept(Optional.of(TestHelpers.randomAdTask()));
+            Consumer<Optional<ADTask>> function = (Consumer<Optional<ADTask>>) args[3];
+            ADTask task = mock(ADTask.class);
+            when(task.getLastUpdateTime()).thenReturn(Instant.now());
+            when(task.getError()).thenReturn(null);
+            function.accept(Optional.of(task));
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), any(), any(), any(), anyBoolean(), any());
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(anyString(), any(), any(), any(), any(), anyBoolean(), any());
 
         detectorIntervalMin = 3;
         detectorGetReponse = mock(GetResponse.class);

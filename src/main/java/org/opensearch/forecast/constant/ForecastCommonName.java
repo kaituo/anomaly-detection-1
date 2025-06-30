@@ -36,6 +36,12 @@ public class ForecastCommonName {
     // Allow users to create dashboard or query freely on top of it.
     public static final String FORECAST_RESULT_INDEX_ALIAS = "opensearch-forecast-results";
     public static final String CONFIG_INDEX = ".opensearch-forecasters";
+    public static final String FORECAST_RESULT_INDEX_PREFIX = "opensearch-forecast-result";
+    // The index name pattern to query all the forecast result history indices
+    public static final String FORECAST_RESULT_HISTORY_INDEX_PATTERN = "<opensearch-forecast-results-history-{now/d}-1>";
+
+    // The index name pattern to query all forecast results, history and current forecast results
+    public static final String ALL_FORECAST_RESULTS_INDEX_PATTERN = "opensearch-forecast-results*";
 
     // ======================================
     // Resource name used in resource-access-control
@@ -56,4 +62,8 @@ public class ForecastCommonName {
     // Historical forecasters
     // ======================================
     public static final String FORECAST_TASK = "forecast_task";
+
+    public static final String FORECAST_THREAD_POOL_NAME = "forecast-threadpool";
+
+    public static final String FORECAST_THREAD_POOL_PREFIX = "opensearch.forecast.";
 }

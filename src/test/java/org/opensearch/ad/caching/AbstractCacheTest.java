@@ -79,10 +79,10 @@ public class AbstractCacheTest extends AbstractTimeSeriesTest {
         entity2 = Entity.createSingleAttributeEntity("attributeName1", "attributeVal2");
         entity3 = Entity.createSingleAttributeEntity("attributeName1", "attributeVal3");
         entity4 = Entity.createSingleAttributeEntity("attributeName1", "attributeVal4");
-        modelId1 = entity1.getModelId(detectorId).get();
-        modelId2 = entity2.getModelId(detectorId).get();
-        modelId3 = entity3.getModelId(detectorId).get();
-        modelId4 = entity4.getModelId(detectorId).get();
+        modelId1 = entity1.getModelId(null, detectorId).get();
+        modelId2 = entity2.getModelId(null, detectorId).get();
+        modelId3 = entity3.getModelId(null, detectorId).get();
+        modelId4 = entity4.getModelId(null, detectorId).get();
 
         clock = mock(Clock.class);
         when(clock.instant()).thenReturn(Instant.now());
@@ -109,7 +109,8 @@ public class AbstractCacheTest extends AbstractTimeSeriesTest {
             checkpointWriteQueue,
             checkpointMaintainQueue,
             detectorId,
-            tracker
+            tracker,
+            null
         );
 
         initialPriority = cacheBuffer.getPriorityTracker().getUpdatedPriority(0);
@@ -118,6 +119,7 @@ public class AbstractCacheTest extends AbstractTimeSeriesTest {
             MLUtil.createNonEmptyModel(detectorId, 0, entity1).getLeft(),
             modelId1,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -129,6 +131,7 @@ public class AbstractCacheTest extends AbstractTimeSeriesTest {
             MLUtil.createNonEmptyModel(detectorId, 0, entity2).getLeft(),
             modelId2,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -140,6 +143,7 @@ public class AbstractCacheTest extends AbstractTimeSeriesTest {
             MLUtil.createNonEmptyModel(detectorId, 0, entity3).getLeft(),
             modelId3,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,
@@ -151,6 +155,7 @@ public class AbstractCacheTest extends AbstractTimeSeriesTest {
             MLUtil.createNonEmptyModel(detectorId, 0, entity4).getLeft(),
             modelId4,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,

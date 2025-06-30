@@ -24,6 +24,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -68,7 +69,6 @@ import org.opensearch.threadpool.ThreadPoolStats;
 import org.opensearch.threadpool.ThreadPoolStats.Stats;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.TestHelpers;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
@@ -81,6 +81,7 @@ import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.stats.TimeSeriesStat;
 import org.opensearch.timeseries.stats.suppliers.CounterSupplier;
 import org.opensearch.timeseries.util.ModelUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 import com.fasterxml.jackson.core.JsonParseException;
@@ -132,7 +133,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
 
         checkpoint = mock(ADCheckpointDao.class);
 
-        when(checkpoint.processHCGetResponse(any(), anyString(), anyString())).thenReturn(state);
+        when(checkpoint.processHCGetResponse(any(), anyString(), anyString(), any())).thenReturn(state);
 
         checkpointWriteQueue = mock(ADCheckpointWriteWorker.class);
 
@@ -190,7 +191,8 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             cacheProvider,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             checkpointWriteQueue,
-            inferencer
+            inferencer,
+            new IndexUtils(clusterService)
         );
 
         request = new FeatureRequest(
@@ -203,6 +205,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             // gap is not too large and won't trigger cold start.
             ModelUtil.getLastInputTimestampSeconds(state.getModel().get()) * 1000,
             entity,
+            null,
             null
         );
         request2 = new FeatureRequest(
@@ -215,6 +218,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             // gap is not too large and won't trigger cold start.
             ModelUtil.getLastInputTimestampSeconds(state.getModel().get()) * 1000,
             entity2,
+            null,
             null
         );
         request3 = new FeatureRequest(
@@ -227,6 +231,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             // gap is not too large and won't trigger cold start.
             ModelUtil.getLastInputTimestampSeconds(state.getModel().get()) * 1000,
             entity3,
+            null,
             null
         );
     }
@@ -234,15 +239,18 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
     static class RegularSetUpConfig {
         private final boolean canHostModel;
         private final boolean fullModel;
+        private final boolean alignRequestWithRestoredSamples;
 
         RegularSetUpConfig(Builder builder) {
             this.canHostModel = builder.canHostModel;
             this.fullModel = builder.fullModel;
+            this.alignRequestWithRestoredSamples = builder.alignRequestWithRestoredSamples;
         }
 
         public static class Builder {
             boolean canHostModel = true;
             boolean fullModel = true;
+            boolean alignRequestWithRestoredSamples = true;
 
             Builder canHostModel(boolean canHostModel) {
                 this.canHostModel = canHostModel;
@@ -251,6 +259,11 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
 
             Builder fullModel(boolean fullModel) {
                 this.fullModel = fullModel;
+                return this;
+            }
+
+            Builder alignRequestWithRestoredSamples(boolean alignRequestWithRestoredSamples) {
+                this.alignRequestWithRestoredSamples = alignRequestWithRestoredSamples;
                 return this;
             }
 
@@ -265,7 +278,17 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             MultiGetItemResponse[] items = new MultiGetItemResponse[1];
             items[0] = new MultiGetItemResponse(
                 new GetResponse(
-                    new GetResult(ADCommonName.CHECKPOINT_INDEX_NAME, entity.getModelId(detectorId).get(), 1, 1, 0, true, null, null, null)
+                    new GetResult(
+                        ADCommonName.CHECKPOINT_INDEX_NAME,
+                        entity.getModelId(null, detectorId).get(),
+                        1,
+                        1,
+                        0,
+                        true,
+                        null,
+                        null,
+                        null
+                    )
                 ),
                 null
             );
@@ -277,7 +300,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
         when(entityCache.hostIfPossible(any(), any())).thenReturn(config.canHostModel);
 
         state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(config.fullModel).build());
-        when(checkpoint.processHCGetResponse(any(), anyString(), anyString())).thenReturn(state);
+        when(checkpoint.processHCGetResponse(any(), anyString(), anyString(), any())).thenReturn(state);
 
         // anyString won't match null. That's why we use any() at position 4 instead of anyString.
         if (config.fullModel) {
@@ -298,16 +321,21 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 // the queued sample instead of triggering cold start due to a large time gap.
                 state.getSamples().peekLast().getDataStartTime().toEpochMilli(),
                 entity,
+                null,
                 null
             );
         } else {
+            long requestDataStartTimeMillis = config.alignRequestWithRestoredSamples && !state.getSamples().isEmpty()
+                ? state.getSamples().peekLast().getDataEndTime().toEpochMilli()
+                : ModelUtil.getLastInputTimestampSeconds(state.getModel().get()) * 1000;
             request = new FeatureRequest(
                 clock.millis() + TimeUnit.MINUTES.toMillis(10),
                 detectorId,
                 RequestPriority.MEDIUM,
                 new double[] { 0 },
-                ModelUtil.getLastInputTimestampSeconds(state.getModel().get()) * 1000,
+                requestDataStartTimeMillis,
                 entity,
+                null,
                 null
             );
         }
@@ -320,7 +348,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
         regularTestSetUp(new RegularSetUpConfig.Builder().build());
 
         verify(resultWriteStrategy, times(1)).saveAllResults(any(), any(), any(), any(), anyString(), any(), any(), any());
-        verify(checkpointWriteQueue, never()).write(any(), anyBoolean(), any());
+        verify(checkpointWriteQueue, never()).write(any(), eq((String) null), anyBoolean(), any());
     }
 
     public void testCannotLoadModel() {
@@ -328,14 +356,14 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
 
         verify(checkpoint, times(1)).batchRead(any(), any());
         verify(resultWriteStrategy, times(1)).saveAllResults(any(), any(), any(), any(), anyString(), any(), any(), any());
-        verify(checkpointWriteQueue, times(1)).write(any(), anyBoolean(), any());
+        verify(checkpointWriteQueue, times(1)).write(any(), eq((String) null), anyBoolean(), any());
     }
 
     public void testNoFullModel() {
         regularTestSetUp(new RegularSetUpConfig.Builder().fullModel(false).build());
         // No model present means we don't process or save.
         verify(resultWriteStrategy, never()).saveAllResults(any(), any(), any(), any(), anyString(), any(), any(), any());
-        verify(checkpointWriteQueue, never()).write(any(), anyBoolean(), any());
+        verify(checkpointWriteQueue, never()).write(any(), eq((String) null), anyBoolean(), any());
     }
 
     public void testIndexNotFound() {
@@ -345,7 +373,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 null,
                 new MultiGetResponse.Failure(
                     ADCommonName.CHECKPOINT_INDEX_NAME,
-                    entity.getModelId(detectorId).get(),
+                    entity.getModelId(null, detectorId).get(),
                     new IndexNotFoundException(ADCommonName.CHECKPOINT_INDEX_NAME)
                 )
             );
@@ -366,7 +394,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 new GetResponse(
                     new GetResult(
                         ADCommonName.CHECKPOINT_INDEX_NAME,
-                        entity.getModelId(detectorId).get(),
+                        entity.getModelId(null, detectorId).get(),
                         SequenceNumbers.UNASSIGNED_SEQ_NO,
                         SequenceNumbers.UNASSIGNED_PRIMARY_TERM,
                         0,
@@ -382,7 +410,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 new GetResponse(
                     new GetResult(
                         ADCommonName.CHECKPOINT_INDEX_NAME,
-                        entity2.getModelId(detectorId).get(),
+                        entity2.getModelId(null, detectorId).get(),
                         SequenceNumbers.UNASSIGNED_SEQ_NO,
                         SequenceNumbers.UNASSIGNED_PRIMARY_TERM,
                         0,
@@ -413,7 +441,17 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             MultiGetItemResponse[] items = new MultiGetItemResponse[2];
             items[0] = new MultiGetItemResponse(
                 new GetResponse(
-                    new GetResult(ADCommonName.CHECKPOINT_INDEX_NAME, entity.getModelId(detectorId).get(), 1, 1, 0, true, null, null, null)
+                    new GetResult(
+                        ADCommonName.CHECKPOINT_INDEX_NAME,
+                        entity.getModelId(null, detectorId).get(),
+                        1,
+                        1,
+                        0,
+                        true,
+                        null,
+                        null,
+                        null
+                    )
                 ),
                 null
             );
@@ -421,7 +459,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 new GetResponse(
                     new GetResult(
                         ADCommonName.CHECKPOINT_INDEX_NAME,
-                        entity2.getModelId(detectorId).get(),
+                        entity2.getModelId(null, detectorId).get(),
                         SequenceNumbers.UNASSIGNED_SEQ_NO,
                         SequenceNumbers.UNASSIGNED_PRIMARY_TERM,
                         0,
@@ -455,7 +493,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                     null,
                     new MultiGetResponse.Failure(
                         ADCommonName.CHECKPOINT_INDEX_NAME,
-                        entity.getModelId(detectorId).get(),
+                        entity.getModelId(null, detectorId).get(),
                         new OpenSearchStatusException("blah", RestStatus.REQUEST_TIMEOUT)
                     )
                 );
@@ -463,7 +501,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                     null,
                     new MultiGetResponse.Failure(
                         ADCommonName.CHECKPOINT_INDEX_NAME,
-                        entity2.getModelId(detectorId).get(),
+                        entity2.getModelId(null, detectorId).get(),
                         new OpenSearchStatusException("blah", RestStatus.CONFLICT)
                     )
                 );
@@ -473,7 +511,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                     new GetResponse(
                         new GetResult(
                             ADCommonName.CHECKPOINT_INDEX_NAME,
-                            entity.getModelId(detectorId).get(),
+                            entity.getModelId(null, detectorId).get(),
                             1,
                             1,
                             0,
@@ -489,7 +527,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                     new GetResponse(
                         new GetResult(
                             ADCommonName.CHECKPOINT_INDEX_NAME,
-                            entity2.getModelId(detectorId).get(),
+                            entity2.getModelId(null, detectorId).get(),
                             1,
                             1,
                             0,
@@ -525,7 +563,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 null,
                 new MultiGetResponse.Failure(
                     ADCommonName.CHECKPOINT_INDEX_NAME,
-                    entity.getModelId(detectorId).get(),
+                    entity.getModelId(null, detectorId).get(),
                     new OpenSearchRejectedExecutionException("blah")
                 )
             );
@@ -564,7 +602,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 null,
                 new MultiGetResponse.Failure(
                     ADCommonName.CHECKPOINT_INDEX_NAME,
-                    entity.getModelId(detectorId).get(),
+                    entity.getModelId(null, detectorId).get(),
                     new IllegalArgumentException("blah")
                 )
             );
@@ -603,7 +641,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
     public void testRemoveUnusedQueues() {
         // do nothing when putting a request to keep queues not empty
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
 
         worker = new ADCheckpointReadWorker(
             Integer.MAX_VALUE,
@@ -627,7 +665,8 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             cacheProvider,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             checkpointWriteQueue,
-            inferencer
+            inferencer,
+            new IndexUtils(clusterService)
         );
 
         regularTestSetUp(new RegularSetUpConfig.Builder().build());
@@ -647,7 +686,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
     private void maintenanceSetup() {
         // do nothing when putting a request to keep queues not empty
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         when(threadPool.stats()).thenReturn(new ThreadPoolStats(new ArrayList<Stats>()));
     }
 
@@ -677,7 +716,8 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             cacheProvider,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             checkpointWriteQueue,
-            inferencer
+            inferencer,
+            new IndexUtils(clusterService)
         );
 
         List<FeatureRequest> requests = new ArrayList<>();
@@ -728,7 +768,8 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             cacheProvider,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             checkpointWriteQueue,
-            inferencer
+            inferencer,
+            new IndexUtils(clusterService)
         );
 
         List<FeatureRequest> requests = new ArrayList<>();
@@ -754,7 +795,17 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             MultiGetItemResponse[] items = new MultiGetItemResponse[1];
             items[0] = new MultiGetItemResponse(
                 new GetResponse(
-                    new GetResult(ADCommonName.CHECKPOINT_INDEX_NAME, entity.getModelId(detectorId).get(), 1, 1, 0, true, null, null, null)
+                    new GetResult(
+                        ADCommonName.CHECKPOINT_INDEX_NAME,
+                        entity.getModelId(null, detectorId).get(),
+                        1,
+                        1,
+                        0,
+                        true,
+                        null,
+                        null,
+                        null
+                    )
                 ),
                 null
             );
@@ -798,28 +849,39 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             // gap is not too large and won't trigger cold start.
             ModelUtil.getLastInputTimestampSeconds(state.getModel().get()) * 1000,
             entity4,
+            null,
             null
         );
 
         AnomalyDetector detector2 = TestHelpers.randomAnomalyDetectorUsingCategoryFields(detectorId2, Arrays.asList(categoryField));
 
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(detector2));
             return null;
-        }).when(nodeStateManager).getConfig(eq(detectorId2), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(eq(detectorId2), any(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(detector));
             return null;
-        }).when(nodeStateManager).getConfig(eq(detectorId), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(eq(detectorId), any(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         doAnswer(invocation -> {
             MultiGetItemResponse[] items = new MultiGetItemResponse[2];
             items[0] = new MultiGetItemResponse(
                 new GetResponse(
-                    new GetResult(ADCommonName.CHECKPOINT_INDEX_NAME, entity.getModelId(detectorId).get(), 1, 1, 0, true, null, null, null)
+                    new GetResult(
+                        ADCommonName.CHECKPOINT_INDEX_NAME,
+                        entity.getModelId(null, detectorId).get(),
+                        1,
+                        1,
+                        0,
+                        true,
+                        null,
+                        null,
+                        null
+                    )
                 ),
                 null
             );
@@ -827,7 +889,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
                 new GetResponse(
                     new GetResult(
                         ADCommonName.CHECKPOINT_INDEX_NAME,
-                        entity4.getModelId(detectorId2).get(),
+                        entity4.getModelId(null, detectorId2).get(),
                         1,
                         1,
                         0,
@@ -863,7 +925,17 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             MultiGetItemResponse[] items = new MultiGetItemResponse[1];
             items[0] = new MultiGetItemResponse(
                 new GetResponse(
-                    new GetResult(ADCommonName.CHECKPOINT_INDEX_NAME, entity.getModelId(detectorId).get(), 1, 1, 0, true, null, null, null)
+                    new GetResult(
+                        ADCommonName.CHECKPOINT_INDEX_NAME,
+                        entity.getModelId(null, detectorId).get(),
+                        1,
+                        1,
+                        0,
+                        true,
+                        null,
+                        null,
+                        null
+                    )
                 ),
                 null
             );
@@ -876,8 +948,8 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
         state = mock(ModelState.class);
         ThresholdedRandomCutForest model = mock(ThresholdedRandomCutForest.class);
         when(state.getModel()).thenReturn(Optional.of(model));
-        when(state.getModelId()).thenReturn(entity.getModelId(detectorId).get());
-        when(checkpoint.processHCGetResponse(any(), anyString(), anyString())).thenReturn(state);
+        when(state.getModelId()).thenReturn(entity.getModelId(null, detectorId).get());
+        when(checkpoint.processHCGetResponse(any(), anyString(), anyString(), any())).thenReturn(state);
         // anyString won't match null. That's why we use any() at position 2 instead of anyString.
         doThrow(new IllegalArgumentException()).when(model).processSequentially(any(), any(), any());
 
@@ -889,6 +961,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
             new double[] { 0 },
             ModelUtil.getLastInputTimestampSeconds(state.getModel().get()) * 1000,
             entity,
+            null,
             null
         );
         requests.add(request);
@@ -896,45 +969,50 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
 
         verify(model, times(1)).processSequentially(any(), any(), any());
         verify(resultWriteStrategy, never()).saveResult(any(), any(), any(), any(), anyString(), any(), any(), any());
-        verify(checkpointWriteQueue, never()).write(any(), anyBoolean(), any());
+        verify(checkpointWriteQueue, never()).write(any(), eq((String) null), anyBoolean(), any());
         verify(coldstartQueue, times(1)).put(any());
         Object val = adStats.getStat(StatNames.AD_MODEL_CORRUTPION_COUNT.getName()).getValue();
         assertEquals(1L, ((Long) val).longValue());
     }
 
     public void testLongIntervalMediumPriority() {
+        long longIntervalSeconds = TimeSeriesSettings.HOURLY_MAINTENANCE.getSeconds() * 2;
         AnomalyDetector longIntervalDetector = mock(AnomalyDetector.class);
         when(longIntervalDetector.isLongFrequency()).thenReturn(true);
-        when(longIntervalDetector.getIntervalInSeconds()).thenReturn(TimeSeriesSettings.HOURLY_MAINTENANCE.getSeconds() * 2);
+        when(longIntervalDetector.getIntervalInSeconds()).thenReturn(longIntervalSeconds);
+        when(longIntervalDetector.getIntervalInMilliseconds()).thenReturn(Duration.ofSeconds(longIntervalSeconds).toMillis());
+        when(longIntervalDetector.getIntervalDuration()).thenReturn(Duration.ofSeconds(longIntervalSeconds));
 
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(longIntervalDetector));
             return null;
-        }).when(nodeStateManager).getConfig(eq(detectorId), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(eq(detectorId), any(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         when(entityCache.hostIfPossible(any(), any())).thenReturn(false);
 
         regularTestSetUp(new RegularSetUpConfig.Builder().canHostModel(false).build());
 
-        verify(checkpointWriteQueue, times(1)).write(any(), anyBoolean(), eq(RequestPriority.MEDIUM));
+        verify(checkpointWriteQueue, times(1)).write(any(), eq((String) null), anyBoolean(), eq(RequestPriority.MEDIUM));
     }
 
     public void testShortIntervalLowPriority() {
         AnomalyDetector shortIntervalDetector = mock(AnomalyDetector.class);
         when(shortIntervalDetector.isLongFrequency()).thenReturn(false);
         when(shortIntervalDetector.getIntervalInSeconds()).thenReturn(60L);
+        when(shortIntervalDetector.getIntervalInMilliseconds()).thenReturn(Duration.ofMinutes(1).toMillis());
+        when(shortIntervalDetector.getIntervalDuration()).thenReturn(Duration.ofMinutes(1));
 
         doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
             listener.onResponse(Optional.of(shortIntervalDetector));
             return null;
-        }).when(nodeStateManager).getConfig(eq(detectorId), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
+        }).when(nodeStateManager).getConfig(eq(detectorId), any(), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
 
         when(entityCache.hostIfPossible(any(), any())).thenReturn(false);
 
-        regularTestSetUp(new RegularSetUpConfig.Builder().canHostModel(false).build());
+        regularTestSetUp(new RegularSetUpConfig.Builder().canHostModel(false).alignRequestWithRestoredSamples(true).build());
 
-        verify(checkpointWriteQueue, times(1)).write(any(), anyBoolean(), eq(RequestPriority.LOW));
+        verify(checkpointWriteQueue, times(1)).write(any(), eq((String) null), anyBoolean(), eq(RequestPriority.LOW));
     }
 }

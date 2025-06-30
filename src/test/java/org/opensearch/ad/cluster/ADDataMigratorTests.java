@@ -13,6 +13,8 @@ package org.opensearch.ad.cluster;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -22,6 +24,8 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.opensearch.ad.constant.ADCommonName.DETECTION_STATE_INDEX;
+
+import java.util.Optional;
 
 import org.apache.lucene.search.TotalHits;
 import org.junit.Before;
@@ -33,7 +37,10 @@ import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.search.ShardSearchFailure;
 import org.opensearch.ad.ADUnitTestCase;
+import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.core.action.ActionListener;
@@ -45,6 +52,8 @@ import org.opensearch.search.SearchHit;
 import org.opensearch.search.SearchHits;
 import org.opensearch.search.aggregations.InternalAggregations;
 import org.opensearch.search.internal.InternalSearchResponse;
+import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.cluster.ADDataMigrator;
 import org.opensearch.timeseries.constant.CommonName;
@@ -55,6 +64,8 @@ public class ADDataMigratorTests extends ADUnitTestCase {
     private ClusterService clusterService;
     private NamedXContentRegistry namedXContentRegistry;
     private ADIndexManagement detectionIndices;
+    private ADDelegatingDataManagement stateIndexStore;
+    private StateManager stateManager;
     private ADDataMigrator adDataMigrator;
     private String detectorId;
     private String taskId;
@@ -71,6 +82,20 @@ public class ADDataMigratorTests extends ADUnitTestCase {
         clusterService = mock(ClusterService.class);
         namedXContentRegistry = TestHelpers.xContentRegistry();
         detectionIndices = mock(ADIndexManagement.class);
+        stateIndexStore = mock(ADDelegatingDataManagement.class);
+        stateManager = mock(StateManager.class);
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends AnomalyDetector>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.empty());
+            return null;
+        }).when(stateManager).getConfig(anyString(), any(), any(), anyBoolean(), any());
+        when(detectionIndices.doesStateIndexExist()).thenReturn(true);
+        when(stateIndexStore.doesStateIndexExist()).thenAnswer(invocation -> detectionIndices.doesStateIndexExist());
+        doAnswer(invocation -> {
+            ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
+            listener.onResponse(new CreateIndexResponse(true, true, DETECTION_STATE_INDEX));
+            return null;
+        }).when(stateIndexStore).initStateIndex(any());
         detectorId = randomAlphaOfLength(10);
         taskId = randomAlphaOfLength(10);
         detectorContent = "{\"_index\":\".opendistro-anomaly-detectors\",\"_type\":\"_doc\",\"_id\":\""
@@ -101,7 +126,9 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             + "\",\"_version\":1,\"_seq_no\":10,\"_primary_term\":2,\"found\":true,"
             + "\"_source\":{\"last_update_time\":1629860362885,\"error\":\"test error\"}}";
 
-        adDataMigrator = spy(new ADDataMigrator(client, clusterService, namedXContentRegistry, detectionIndices));
+        adDataMigrator = spy(
+            new ADDataMigrator(client, clusterService, namedXContentRegistry, detectionIndices, stateIndexStore, stateManager)
+        );
     }
 
     public void testMigrateDataWithNullJobResponse() {
@@ -126,7 +153,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
             listener.onFailure(new RuntimeException("test"));
             return null;
-        }).when(detectionIndices).initStateIndex(any());
+        }).when(stateIndexStore).initStateIndex(any());
 
         doAnswer(invocation -> {
             ActionListener<SearchResponse> listener = invocation.getArgument(1);
@@ -146,7 +173,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
             listener.onFailure(new ResourceAlreadyExistsException("test"));
             return null;
-        }).when(detectionIndices).initStateIndex(any());
+        }).when(stateIndexStore).initStateIndex(any());
 
         doAnswer(invocation -> {
             ActionListener<SearchResponse> listener = invocation.getArgument(1);
@@ -166,7 +193,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
             listener.onResponse(new CreateIndexResponse(false, false, DETECTION_STATE_INDEX));
             return null;
-        }).when(detectionIndices).initStateIndex(any());
+        }).when(stateIndexStore).initStateIndex(any());
 
         doAnswer(invocation -> {
             ActionListener<SearchResponse> listener = invocation.getArgument(1);
@@ -186,7 +213,7 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             ActionListener<CreateIndexResponse> listener = invocation.getArgument(0);
             listener.onResponse(new CreateIndexResponse(true, false, DETECTION_STATE_INDEX));
             return null;
-        }).when(detectionIndices).initStateIndex(any());
+        }).when(stateIndexStore).initStateIndex(any());
 
         doAnswer(invocation -> {
             ActionListener<SearchResponse> listener = invocation.getArgument(1);
@@ -270,9 +297,9 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             return null;
         }).when(client).search(any(), any());
 
-        // Return null when get detector and internal error from index.
+        // Return null when get detector internal error from state index.
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<GetResponse> listener = invocation.getArgument(1);
             listener.onResponse(null);
             return null;
         }).when(client).get(any(), any());
@@ -321,18 +348,17 @@ public class ADDataMigratorTests extends ADUnitTestCase {
         }).when(client).search(any(), any());
 
         doAnswer(invocation -> {
-            // Return null when get detector internal error from index.
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            // Return null when get detector internal error from state index.
+            ActionListener<GetResponse> listener = invocation.getArgument(1);
             listener.onResponse(null);
             return null;
-        }).doAnswer(invocation -> {
-            // Return correct detector when get detector index.
-            ActionListener<GetResponse> listener = invocation.getArgument(1);
-            XContentParser parser = TestHelpers.parser(detectorContent, false);
-            GetResponse getResponse = GetResponse.fromXContent(parser);
-            listener.onResponse(getResponse);
-            return null;
         }).when(client).get(any(), any());
+
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends AnomalyDetector>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), null, true)));
+            return null;
+        }).when(stateManager).getConfig(anyString(), any(), eq(AnalysisType.AD), anyBoolean(), any());
 
         doAnswer(invocation -> {
             ActionListener<IndexResponse> listener = invocation.getArgument(1);
@@ -394,14 +420,13 @@ public class ADDataMigratorTests extends ADUnitTestCase {
             GetResponse getResponse = GetResponse.fromXContent(parser);
             listener.onResponse(getResponse);
             return null;
-        }).doAnswer(invocation -> {
-            // Return correct detector when get detector index.
-            ActionListener<GetResponse> listener = invocation.getArgument(1);
-            XContentParser parser = TestHelpers.parser(detectorContent, false);
-            GetResponse getResponse = GetResponse.fromXContent(parser);
-            listener.onResponse(getResponse);
-            return null;
         }).when(client).get(any(), any());
+
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends AnomalyDetector>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(TestHelpers.randomAnomalyDetector(TestHelpers.randomUiMetadata(), null, true)));
+            return null;
+        }).when(stateManager).getConfig(anyString(), any(), eq(AnalysisType.AD), anyBoolean(), any());
 
         doAnswer(invocation -> {
             ActionListener<IndexResponse> listener = invocation.getArgument(1);

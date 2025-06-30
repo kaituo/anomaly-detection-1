@@ -105,6 +105,10 @@ public class RCFResultTransportAction extends HandledTransportAction<RCFResultRe
                                     manager
                                         .clear(
                                             request.getAdID(),
+                                            // this class is kept for backward compatibility of single tenant architecture, so we can safely
+                                            // pass null for
+                                            // tenant id
+                                            null,
                                             ActionListener
                                                 .wrap(
                                                     r -> LOG.info("Deleted model for [{}] with response [{}] ", request.getAdID(), r),

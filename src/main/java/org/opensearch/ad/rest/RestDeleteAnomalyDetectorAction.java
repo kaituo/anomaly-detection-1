@@ -17,15 +17,19 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
+import org.apache.commons.lang3.StringUtils;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.DeleteAnomalyDetectorAction;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.transport.DeleteConfigRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -37,7 +41,11 @@ public class RestDeleteAnomalyDetectorAction extends BaseRestHandler {
 
     public static final String DELETE_ANOMALY_DETECTOR_ACTION = "delete_anomaly_detector";
 
-    public RestDeleteAnomalyDetectorAction() {}
+    private final Settings settings;
+
+    public RestDeleteAnomalyDetectorAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -50,8 +58,14 @@ public class RestDeleteAnomalyDetectorAction extends BaseRestHandler {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
         }
 
-        String detectorId = request.param(DETECTOR_ID);
-        DeleteConfigRequest deleteAnomalyDetectorRequest = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName());
+        String detectorId = request.param("detectorID");
+
+        if (StringUtils.isEmpty(detectorId)) {
+            throw new IllegalArgumentException("Request should contain detectorID");
+        }
+        boolean multiTenancyEnabled = AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings);
+        String tenantId = multiTenancyEnabled ? TenantAwareHelper.getTenantID(multiTenancyEnabled, request) : null;
+        DeleteConfigRequest deleteAnomalyDetectorRequest = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), tenantId);
         return channel -> client
             .execute(DeleteAnomalyDetectorAction.INSTANCE, deleteAnomalyDetectorRequest, new RestToXContentListener<>(channel));
     }

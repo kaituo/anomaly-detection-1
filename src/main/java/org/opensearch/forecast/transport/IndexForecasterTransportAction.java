@@ -16,7 +16,6 @@ import static org.opensearch.forecast.constant.ForecastCommonMessages.FAIL_TO_UP
 import static org.opensearch.forecast.settings.ForecastSettings.FORECAST_FILTER_BY_BACKEND_ROLES;
 import static org.opensearch.timeseries.util.ParseUtils.checkFilterByBackendRoles;
 import static org.opensearch.timeseries.util.ParseUtils.getConfig;
-import static org.opensearch.timeseries.util.ParseUtils.getUserContext;
 import static org.opensearch.timeseries.util.ParseUtils.verifyResourceAccessAndProcessRequest;
 import static org.opensearch.timeseries.util.RestHandlerUtils.wrapRestActionListener;
 
@@ -33,55 +32,57 @@ import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.forecast.constant.ForecastCommonName;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.rest.handler.IndexForecasterActionHandler;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.function.ExecutorFunction;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class IndexForecasterTransportAction extends HandledTransportAction<IndexForecasterRequest, IndexForecasterResponse> {
     private static final Logger LOG = LogManager.getLogger(IndexForecasterTransportAction.class);
-    private final Client client;
-    private final SecurityClientUtil clientUtil;
     private final TransportService transportService;
-    private final ForecastIndexManagement forecastIndices;
+    private final ForecastDelegatingDataManagement forecastIndices;
     private final ClusterService clusterService;
     private final NamedXContentRegistry xContentRegistry;
     private volatile Boolean filterByEnabled;
     private final SearchFeatureDao searchFeatureDao;
     private final ForecastTaskManager taskManager;
     private final Settings settings;
+    private final StateManager stateManager;
+    private final DataAccess dataAccess;
+    private final RunContext runContext;
 
     @Inject
     public IndexForecasterTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
-        Client client,
-        SecurityClientUtil clientUtil,
         ClusterService clusterService,
         Settings settings,
-        ForecastIndexManagement forecastIndices,
+        ForecastDelegatingDataManagement forecastIndices,
         NamedXContentRegistry xContentRegistry,
         SearchFeatureDao searchFeatureDao,
-        ForecastTaskManager taskManager
+        ForecastTaskManager taskManager,
+        StateManager stateManager,
+        DataAccess dataAccess,
+        RunContext runContext
     ) {
         super(IndexForecasterAction.NAME, transportService, actionFilters, IndexForecasterRequest::new);
-        this.client = client;
-        this.clientUtil = clientUtil;
         this.transportService = transportService;
         this.clusterService = clusterService;
         this.forecastIndices = forecastIndices;
@@ -91,23 +92,34 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
         this.searchFeatureDao = searchFeatureDao;
         this.taskManager = taskManager;
         this.settings = settings;
+        this.stateManager = stateManager;
+        this.dataAccess = dataAccess;
+        this.runContext = runContext;
     }
 
     @Override
     protected void doExecute(Task task, IndexForecasterRequest request, ActionListener<IndexForecasterResponse> actionListener) {
-        User user = getUserContext(client);
+        User user = runContext.getUser();
         String forecasterId = request.getForecasterID();
         RestRequest.Method method = request.getMethod();
         String errorMessage = method == RestRequest.Method.PUT ? FAIL_TO_UPDATE_FORECASTER : FAIL_TO_CREATE_FORECASTER;
         ActionListener<IndexForecasterResponse> listener = wrapRestActionListener(actionListener, errorMessage);
 
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
-            verifyResourceAccessAndProcessRequest(
+        try {
+            TenantAwareHelper.validateTenantId(request.getTenantId(), settings, ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED);
+        } catch (Exception e) {
+            listener.onFailure(e);
+            return;
+        }
+
+        runContext
+            .runWithSystemAuth(context -> verifyResourceAccessAndProcessRequest(
                 ForecastCommonName.FORECAST_RESOURCE_TYPE,
                 () -> indexForecaster(
                     user,
                     method,
                     forecasterId,
+                    request.getTenantId(),
                     listener,
                     (forecaster) -> forecastExecute(request, user, forecaster, context, listener)
                 ),
@@ -115,21 +127,21 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
                     user,
                     forecasterId,
                     method,
+                    request.getTenantId(),
                     listener,
                     (forecaster) -> forecastExecute(request, user, forecaster, context, listener)
                 )
-            );
-
-        } catch (Exception e) {
-            LOG.error(e);
-            listener.onFailure(e);
-        }
+            ), exception -> {
+                LOG.error(exception);
+                listener.onFailure(exception);
+            });
     }
 
     private void indexForecaster(
         User requestedUser,
         RestRequest.Method method,
         String forecasterId,
+        String tenantId,
         ActionListener<IndexForecasterResponse> parentListener,
         Consumer<Forecaster> onFound
     ) {
@@ -146,9 +158,9 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
                 forecasterId,
                 parentListener,
                 onFound,
-                client,
-                clusterService,
-                xContentRegistry,
+                stateManager,
+                forecastIndices,
+                tenantId,
                 filterByBackendRole,
                 Forecaster.class
             );
@@ -162,6 +174,7 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
         User requestedUser,
         String forecasterId,
         RestRequest.Method method,
+        String tenantId,
         ActionListener<IndexForecasterResponse> listener,
         Consumer<Forecaster> function
     ) {
@@ -175,7 +188,7 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
                     return;
                 }
             }
-            indexForecaster(requestedUser, method, forecasterId, listener, function);
+            indexForecaster(requestedUser, method, forecasterId, tenantId, listener, function);
         } catch (Exception e) {
             listener.onFailure(e);
         }
@@ -185,15 +198,16 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
         IndexForecasterRequest request,
         User user,
         Forecaster currentForecaster,
-        ThreadContext.StoredContext storedContext,
+        RunContext.RestorableContext storedContext,
         ActionListener<IndexForecasterResponse> listener
     ) {
-        forecastIndices.update();
+        forecastIndices.update(request.getTenantId());
         String forecasterId = request.getForecasterID();
         long seqNo = request.getSeqNo();
         long primaryTerm = request.getPrimaryTerm();
         WriteRequest.RefreshPolicy refreshPolicy = request.getRefreshPolicy();
         Forecaster forecaster = request.getForecaster();
+        forecaster.setTenantId(request.getTenantId());
         RestRequest.Method method = request.getMethod();
         TimeValue requestTimeout = request.getRequestTimeout();
         Integer maxSingleStreamForecasters = request.getMaxSingleStreamForecasters();
@@ -202,14 +216,13 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
         Integer maxCategoricalFields = request.getMaxCategoricalFields();
 
         storedContext.restore();
-        checkIndicesAndExecute(forecaster.getIndices(), () -> {
+        checkIndicesAndExecute(forecaster.getIndices(), request.getTenantId(), () -> {
             // Don't replace forecaster's user when update config
             // Github issue: https://github.com/opensearch-project/anomaly-detection/issues/124
             User forecastUser = currentForecaster == null ? user : currentForecaster.getUser();
             IndexForecasterActionHandler indexForecasterActionHandler = new IndexForecasterActionHandler(
                 clusterService,
-                client,
-                clientUtil,
+                dataAccess,
                 transportService,
                 forecastIndices,
                 forecasterId,
@@ -227,17 +240,23 @@ public class IndexForecasterTransportAction extends HandledTransportAction<Index
                 forecastUser,
                 taskManager,
                 searchFeatureDao,
-                settings
+                settings,
+                runContext
             );
             indexForecasterActionHandler.start(listener);
         }, listener);
     }
 
-    private void checkIndicesAndExecute(List<String> indices, ExecutorFunction function, ActionListener<IndexForecasterResponse> listener) {
+    private void checkIndicesAndExecute(
+        List<String> indices,
+        String tenantId,
+        ExecutorFunction function,
+        ActionListener<IndexForecasterResponse> listener
+    ) {
         SearchRequest searchRequest = new SearchRequest()
             .indices(indices.toArray(new String[0]))
             .source(new SearchSourceBuilder().size(1).query(QueryBuilders.matchAllQuery()));
-        client.search(searchRequest, ActionListener.wrap(r -> { function.execute(); }, e -> {
+        dataAccess.search(searchRequest, TenantContext.user(tenantId), ActionListener.wrap(r -> { function.execute(); }, e -> {
             // Due to below issue with security plugin, we get security_exception when invalid index name is mentioned.
             // https://github.com/opendistro-for-elasticsearch/security/issues/718
             LOG.error(e);

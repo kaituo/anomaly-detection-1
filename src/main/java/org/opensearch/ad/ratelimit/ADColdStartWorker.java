@@ -19,15 +19,16 @@ import java.util.ArrayDeque;
 import java.util.Random;
 
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
@@ -35,8 +36,7 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.ml.ModelState;
@@ -57,7 +57,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 // suppress warning due to the use of generic type ModelState
 public class ADColdStartWorker extends
-    ColdStartWorker<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADColdStart, ADPriorityCache, AnomalyResult, ThresholdingResult, ADModelManager, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager> {
+    ColdStartWorker<ThresholdedRandomCutForest, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADCheckpointWriteWorker, ADColdStart, ADPriorityCache, AnomalyResult, ThresholdingResult, ADModelManager, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager> {
     public static final String WORKER_NAME = "ad-cold-start";
 
     public ADColdStartWorker(
@@ -77,7 +77,7 @@ public class ADColdStartWorker extends
         Duration executionTtl,
         ADColdStart entityColdStarter,
         Duration stateTtl,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         ADPriorityCache cacheProvider,
         ADModelManager modelManager,
         ADSaveResultStrategy saveStrategy,
@@ -93,7 +93,7 @@ public class ADColdStartWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,
@@ -120,6 +120,7 @@ public class ADColdStartWorker extends
             null,
             modelId,
             configId,
+            request.getTenantId(),
             ModelManager.ModelType.TRCF.getName(),
             clock,
             0,

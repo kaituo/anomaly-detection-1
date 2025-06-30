@@ -30,9 +30,10 @@ public abstract class ResultWriteRequest<ResultType extends IndexableResult> ext
         RequestPriority priority,
         ResultType result,
         String resultIndex,
-        String flattenResultIndex
+        String flattenResultIndex,
+        String tenantId
     ) {
-        super(expirationEpochMs, configId, priority);
+        super(expirationEpochMs, configId, priority, tenantId);
         this.result = result;
         this.resultIndex = resultIndex;
         this.flattenResultIndex = flattenResultIndex;
@@ -42,6 +43,8 @@ public abstract class ResultWriteRequest<ResultType extends IndexableResult> ext
         this.result = resultReader.read(in);
         this.resultIndex = in.readOptionalString();
         this.flattenResultIndex = in.readOptionalString();
+        // tenantId is obtained from result.getTenantId() in this case
+        this.tenantId = result.getTenantId();
     }
 
     @Override

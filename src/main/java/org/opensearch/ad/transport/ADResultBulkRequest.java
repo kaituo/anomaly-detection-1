@@ -20,8 +20,8 @@ import org.opensearch.timeseries.transport.ResultBulkRequest;
 
 public class ADResultBulkRequest extends ResultBulkRequest<AnomalyResult, ADResultWriteRequest> {
 
-    public ADResultBulkRequest() {
-        super();
+    public ADResultBulkRequest(String tenantId) {
+        super(tenantId);
     }
 
     public ADResultBulkRequest(StreamInput in) throws IOException {

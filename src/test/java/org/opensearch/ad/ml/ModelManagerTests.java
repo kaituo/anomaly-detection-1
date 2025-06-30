@@ -54,6 +54,7 @@ import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -65,7 +66,6 @@ import org.opensearch.monitor.jvm.JvmService;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
@@ -77,6 +77,7 @@ import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.Sample;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
@@ -157,6 +158,7 @@ public class ModelManagerTests {
     private ActionListener<ThresholdingResult> thresholdResultListener;
     private MemoryTracker memoryTracker;
     private Instant now;
+    private NodeStateManager stateManager;
 
     @Mock
     private CircuitBreakerService adCircuitBreakerService;
@@ -200,7 +202,7 @@ public class ModelManagerTests {
         when(trcf.process(any(), anyLong(), any())).thenReturn(descriptor);
 
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();
@@ -212,6 +214,7 @@ public class ModelManagerTests {
 
         memoryTracker = mock(MemoryTracker.class);
         when(memoryTracker.isHostingAllowed(anyString(), any())).thenReturn(true);
+        stateManager = mock(NodeStateManager.class);
 
         settings = Settings
             .builder()
@@ -234,7 +237,8 @@ public class ModelManagerTests {
                 featureManager,
                 memoryTracker,
                 settings,
-                null
+                null,
+                stateManager
             )
         );
 
@@ -429,7 +433,8 @@ public class ModelManagerTests {
                 featureManager,
                 memoryTracker,
                 settings,
-                null
+                null,
+                stateManager
             )
         );
 
@@ -593,20 +598,22 @@ public class ModelManagerTests {
         }).when(checkpointDao).getTRCFModel(eq(otherModelId), any(ActionListener.class));
         modelManager.getTRcfResult(detectorId, rcfModelId, new double[0], rcfResultListener);
         modelManager.getTRcfResult(otherModelId, otherModelId, new double[0], rcfResultListener);
+        mockDetectorConfigLookup();
         doAnswer(invocation -> {
-            ActionListener<Void> listener = invocation.getArgument(1);
+            ActionListener<Void> listener = invocation.getArgument(2);
             listener.onResponse(null);
             return null;
-        }).when(checkpointDao).deleteModelCheckpoint(eq(rcfModelId), any(ActionListener.class));
+        }).when(checkpointDao).deleteModelCheckpoint(any(), eq(rcfModelId), any(ActionListener.class));
 
         ActionListener<Void> listener = mock(ActionListener.class);
-        modelManager.clear(detectorId, listener);
+        modelManager.clear(detectorId, null, listener);
 
         verify(listener).onResponse(null);
     }
 
     @Test
     public void clear_callListener_whenThresholdDeleted() {
+        mockDetectorConfigLookup();
         doAnswer(invocation -> {
             ActionListener<Optional<ThresholdingModel>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(hybridThresholdingModel));
@@ -615,19 +622,20 @@ public class ModelManagerTests {
 
         modelManager.getThresholdingResult(detectorId, thresholdModelId, 0, thresholdResultListener);
         doAnswer(invocation -> {
-            ActionListener<Void> listener = invocation.getArgument(1);
+            ActionListener<Void> listener = invocation.getArgument(2);
             listener.onResponse(null);
             return null;
-        }).when(checkpointDao).deleteModelCheckpoint(eq(thresholdModelId), any(ActionListener.class));
+        }).when(checkpointDao).deleteModelCheckpoint(any(), eq(thresholdModelId), any(ActionListener.class));
 
         ActionListener<Void> listener = mock(ActionListener.class);
-        modelManager.clear(detectorId, listener);
+        modelManager.clear(detectorId, null, listener);
 
         verify(listener).onResponse(null);
     }
 
     @Test
     public void clear_throwToListener_whenDeleteFail() {
+        mockDetectorConfigLookup();
         doAnswer(invocation -> {
             ActionListener<Optional<ThresholdedRandomCutForest>> listener = invocation.getArgument(1);
             listener.onResponse(Optional.of(trcf));
@@ -635,15 +643,23 @@ public class ModelManagerTests {
         }).when(checkpointDao).getTRCFModel(eq(rcfModelId), any(ActionListener.class));
         modelManager.getTRcfResult(detectorId, rcfModelId, new double[0], rcfResultListener);
         doAnswer(invocation -> {
-            ActionListener<Void> listener = invocation.getArgument(1);
+            ActionListener<Void> listener = invocation.getArgument(2);
             listener.onFailure(new RuntimeException());
             return null;
-        }).when(checkpointDao).deleteModelCheckpoint(eq(rcfModelId), any(ActionListener.class));
+        }).when(checkpointDao).deleteModelCheckpoint(any(), eq(rcfModelId), any(ActionListener.class));
 
         ActionListener<Void> listener = mock(ActionListener.class);
-        modelManager.clear(detectorId, listener);
+        modelManager.clear(detectorId, null, listener);
 
         verify(listener).onFailure(any(Exception.class));
+    }
+
+    private void mockDetectorConfigLookup() {
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends Config>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(anomalyDetector));
+            return null;
+        }).when(stateManager).getConfig(eq(detectorId), any(), any(), eq(false), any(ActionListener.class));
     }
 
     private Object[] trainModelIllegalArgumentData() {
@@ -652,7 +668,7 @@ public class ModelManagerTests {
 
     @Test
     public void getRcfModelId_returnNonEmptyString() {
-        String rcfModelId = SingleStreamModelIdMapper.getRcfModelId(anomalyDetector.getId(), 0);
+        String rcfModelId = SingleStreamModelIdMapper.getRcfModelId(null, anomalyDetector.getId(), 0);
 
         assertFalse(rcfModelId.isEmpty());
     }
@@ -918,7 +934,8 @@ public class ModelManagerTests {
                 featureManager,
                 memoryTracker,
                 settings,
-                clusterService
+                clusterService,
+                stateManager
             )
         );
 
@@ -940,6 +957,7 @@ public class ModelManagerTests {
             null,
             modelId,
             detectorId,
+            null,
             ModelManager.ModelType.TRCF.getName(),
             clock
         );

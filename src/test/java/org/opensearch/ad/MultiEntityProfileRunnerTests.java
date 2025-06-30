@@ -15,8 +15,11 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.emptySet;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -30,6 +33,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import org.junit.AfterClass;
@@ -48,17 +52,18 @@ import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.model.DetectorInternalState;
 import org.opensearch.ad.model.DetectorProfile;
 import org.opensearch.ad.task.ADTaskManager;
-import org.opensearch.ad.transport.ADProfileAction;
 import org.opensearch.ad.transport.AnomalyResultTests;
 import org.opensearch.ad.util.*;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.ConfigProfile;
 import org.opensearch.timeseries.model.ConfigState;
@@ -67,14 +72,14 @@ import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.transport.ProfileNodeResponse;
 import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
 public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
     private AnomalyDetectorProfileRunner runner;
     private Client client;
-    private SecurityClientUtil clientUtil;
+    private NodeCommunicator nodeCommunicator;
+    private DataAccess dataAccess;
     private DiscoveryNodeFilterer nodeFilter;
     private int requiredSamples;
     private AnomalyDetector detector;
@@ -98,6 +103,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
     private TransportService transportService;
     private ADTaskManager adTaskManager;
     private ADTaskProfileRunner taskProfileRunner;
+    private NodeStateManager stateManager;
 
     enum InittedEverResultStatus {
         INITTED,
@@ -121,8 +127,8 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
         super.setUp();
         client = mock(Client.class);
         taskProfileRunner = mock(ADTaskProfileRunner.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        nodeCommunicator = mock(NodeCommunicator.class);
+        dataAccess = mock(DataAccess.class);
         nodeFilter = mock(DiscoveryNodeFilterer.class);
         requiredSamples = 128;
 
@@ -131,23 +137,34 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
         result = new DetectorInternalState.Builder().lastUpdateTime(Instant.now());
         job = TestHelpers.randomJob(true);
         adTaskManager = mock(ADTaskManager.class);
+        stateManager = mock(NodeStateManager.class);
+        when(adTaskManager.getStateManager()).thenReturn(stateManager);
+        when(nodeFilter.getEligibleDataNodes()).thenReturn(new DiscoveryNode[0]);
         transportService = mock(TransportService.class);
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            Consumer<Optional<ADTask>> function = (Consumer<Optional<ADTask>>) args[2];
-
-            function.accept(Optional.of(TestHelpers.randomAdTask()));
+            Consumer<Optional<ADTask>> function = invocation.getArgument(3);
+            function.accept(Optional.empty());
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), any(), any(), any(), anyBoolean(), any());
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        doAnswer(invocation -> {
+            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(detector));
+            return null;
+        }).when(stateManager).getConfig(anyString(), any(), eq(AnalysisType.AD), anyBoolean(), any(ActionListener.class));
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onResponse(Optional.of(job));
+            return null;
+        }).when(stateManager).getJob(anyString(), any(), anyBoolean(), any(ActionListener.class));
         runner = new AnomalyDetectorProfileRunner(
-            client,
-            clientUtil,
+            nodeCommunicator,
             xContentRegistry(),
             nodeFilter,
             requiredSamples,
             transportService,
             adTaskManager,
-            taskProfileRunner
+            taskProfileRunner,
+            dataAccess
         );
 
         doAnswer(invocation -> {
@@ -176,7 +193,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
     private void setUpClientExecuteProfileAction(InittedEverResultStatus initted) {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             node1 = "node1";
             nodeName1 = "nodename1";
@@ -250,7 +267,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
             listener.onResponse(profileResponse);
 
             return null;
-        }).when(client).execute(any(ADProfileAction.class), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
 
     }
 
@@ -259,7 +276,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
             SearchRequest request = (SearchRequest) args[0];
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[2];
 
             AnomalyResult result = null;
             if (request.source().query().toString().contains(AnomalyResult.ANOMALY_SCORE_FIELD)) {
@@ -278,7 +295,7 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
             }
 
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).search(any(), any(), any());
     }
 
     public void testInit() throws InterruptedException {
@@ -286,16 +303,20 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
         setUpClientSearch(InittedEverResultStatus.NOT_INITTED);
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
+        AtomicReference<ConfigProfile> actualProfile = new AtomicReference<>();
+        AtomicReference<Exception> actualException = new AtomicReference<>();
 
         ConfigProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.INIT).build();
-        runner.profile(detectorId, ActionListener.wrap(response -> {
-            assertEquals(expectedProfile, response);
+        runner.profile(detectorId, null, ActionListener.wrap(response -> {
+            actualProfile.set(response);
             inProgressLatch.countDown();
         }, exception -> {
-            assertTrue("Should not reach here", false);
+            actualException.set(exception);
             inProgressLatch.countDown();
         }), stateNError);
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
+        assertNull("Unexpected exception: " + actualException.get(), actualException.get());
+        assertEquals(expectedProfile, actualProfile.get());
     }
 
     public void testRunning() throws InterruptedException {
@@ -303,16 +324,20 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
         setUpClientSearch(InittedEverResultStatus.INITTED);
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
+        AtomicReference<ConfigProfile> actualProfile = new AtomicReference<>();
+        AtomicReference<Exception> actualException = new AtomicReference<>();
 
         ConfigProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.RUNNING).build();
-        runner.profile(detectorId, ActionListener.wrap(response -> {
-            assertEquals(expectedProfile, response);
+        runner.profile(detectorId, null, ActionListener.wrap(response -> {
+            actualProfile.set(response);
             inProgressLatch.countDown();
         }, exception -> {
-            assertTrue("Should not reach here", false);
+            actualException.set(exception);
             inProgressLatch.countDown();
         }), stateNError);
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
+        assertNull("Unexpected exception: " + actualException.get(), actualException.get());
+        assertEquals(expectedProfile, actualProfile.get());
     }
 
     /**
@@ -324,15 +349,19 @@ public class MultiEntityProfileRunnerTests extends AbstractTimeSeriesTest {
         setUpClientSearch(InittedEverResultStatus.INITTED);
 
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
+        AtomicReference<ConfigProfile> actualProfile = new AtomicReference<>();
+        AtomicReference<Exception> actualException = new AtomicReference<>();
 
         ConfigProfile expectedProfile = new DetectorProfile.Builder().state(ConfigState.RUNNING).build();
-        runner.profile(detectorId, ActionListener.wrap(response -> {
-            assertEquals(expectedProfile, response);
+        runner.profile(detectorId, null, ActionListener.wrap(response -> {
+            actualProfile.set(response);
             inProgressLatch.countDown();
         }, exception -> {
-            assertTrue("Should not reach here", false);
+            actualException.set(exception);
             inProgressLatch.countDown();
         }), stateNError);
         assertTrue(inProgressLatch.await(100, TimeUnit.SECONDS));
+        assertNull("Unexpected exception: " + actualException.get(), actualException.get());
+        assertEquals(expectedProfile, actualProfile.get());
     }
 }

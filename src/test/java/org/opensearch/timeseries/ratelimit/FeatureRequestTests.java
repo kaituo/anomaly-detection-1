@@ -27,7 +27,7 @@ public class FeatureRequestTests extends OpenSearchTestCase {
        ------------------------------------------------------------------ */
     public void testConstructor_setsModelIdNullWhenEmptyOptional() {
         Entity mockEntity = mock(Entity.class);
-        when(mockEntity.getModelId(CONFIG_ID)).thenReturn(Optional.empty());
+        when(mockEntity.getModelId(null, CONFIG_ID)).thenReturn(Optional.empty());
 
         FeatureRequest req = new FeatureRequest(/*expirationEpochMs*/ Instant.now().plusSeconds(60).toEpochMilli(),
             CONFIG_ID,
@@ -35,12 +35,13 @@ public class FeatureRequestTests extends OpenSearchTestCase {
             FEATURES,
             DATA_START,
             mockEntity,
-            /*taskId*/ null
+            /*taskId*/ null,
+            null
         );
 
         assertNull("Expected modelId to be null when getModelId() is empty", req.getModelId());
         assertTrue("Entity should be present", req.getEntity().isPresent());
-        verify(mockEntity, times(1)).getModelId(CONFIG_ID); // called once inside ternary
+        verify(mockEntity, times(1)).getModelId(null, CONFIG_ID); // called once inside ternary
     }
 
     /* ------------------------------------------------------------------
@@ -49,7 +50,7 @@ public class FeatureRequestTests extends OpenSearchTestCase {
     public void testConstructor_setsModelIdWhenOptionalPresent() {
         String expectedModelId = "model-123";
         Entity mockEntity = mock(Entity.class);
-        when(mockEntity.getModelId(CONFIG_ID)).thenReturn(Optional.of(expectedModelId));
+        when(mockEntity.getModelId(null, CONFIG_ID)).thenReturn(Optional.of(expectedModelId));
 
         FeatureRequest req = new FeatureRequest(/*expirationEpochMs*/ Instant.now().plusSeconds(60).toEpochMilli(),
             CONFIG_ID,
@@ -57,11 +58,12 @@ public class FeatureRequestTests extends OpenSearchTestCase {
             FEATURES,
             DATA_START,
             mockEntity,
-            /*taskId*/ "task-X"
+            /*taskId*/ "task-X",
+            null
         );
 
         assertEquals("modelId mismatch", expectedModelId, req.getModelId());
         assertTrue("Entity should be present", req.getEntity().isPresent());
-        verify(mockEntity, times(2)).getModelId(CONFIG_ID); // both branches call it twice
+        verify(mockEntity, times(2)).getModelId(null, CONFIG_ID); // both branches call it twice
     }
 }

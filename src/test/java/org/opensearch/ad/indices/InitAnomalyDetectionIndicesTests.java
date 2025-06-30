@@ -40,6 +40,7 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
@@ -98,6 +99,7 @@ public class InitAnomalyDetectionIndicesTests extends AbstractTimeSeriesTest {
         clusterState = ClusterState.builder(clusterName).metadata(Metadata.builder().build()).build();
         when(clusterService.state()).thenReturn(clusterState);
 
+        DataAccess dataAccess = mock(DataAccess.class);
         adIndices = new ADIndexManagement(
             client,
             clusterService,
@@ -105,7 +107,8 @@ public class InitAnomalyDetectionIndicesTests extends AbstractTimeSeriesTest {
             settings,
             nodeFilter,
             TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-            NamedXContentRegistry.EMPTY
+            NamedXContentRegistry.EMPTY,
+            dataAccess
         );
     }
 
@@ -123,7 +126,7 @@ public class InitAnomalyDetectionIndicesTests extends AbstractTimeSeriesTest {
 
         ActionListener<CreateIndexResponse> listener = mock(ActionListener.class);
         if (index.equals(ADCommonName.CONFIG_INDEX)) {
-            adIndices.initConfigIndexIfAbsent(listener);
+            adIndices.initConfigIndexIfAbsent(listener, null);
         } else {
             adIndices.initStateIndex(listener);
         }
@@ -150,7 +153,7 @@ public class InitAnomalyDetectionIndicesTests extends AbstractTimeSeriesTest {
 
         ActionListener<CreateIndexResponse> listener = mock(ActionListener.class);
         if (index.equals(ADCommonName.CONFIG_INDEX)) {
-            adIndices.initConfigIndexIfAbsent(listener);
+            adIndices.initConfigIndexIfAbsent(listener, null);
         } else {
             adIndices.initDefaultResultIndexIfAbsent(listener);
         }
@@ -184,7 +187,7 @@ public class InitAnomalyDetectionIndicesTests extends AbstractTimeSeriesTest {
 
         ActionListener<CreateIndexResponse> listener = mock(ActionListener.class);
         if (index.equals(ADCommonName.CONFIG_INDEX)) {
-            adIndices.initConfigIndexIfAbsent(listener);
+            adIndices.initConfigIndexIfAbsent(listener, null);
         } else if (index.equals(ADCommonName.DETECTION_STATE_INDEX)) {
             adIndices.initStateIndex(listener);
         } else if (index.equals(ADCommonName.CHECKPOINT_INDEX_NAME)) {

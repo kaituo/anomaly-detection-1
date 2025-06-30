@@ -14,6 +14,7 @@ package org.opensearch.ad.ratelimit;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -31,6 +32,7 @@ import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -68,14 +70,14 @@ public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingT
         ADPriorityCache entityCache = mock(ADPriorityCache.class);
         when(cache.get()).thenReturn(entityCache);
         state = MLUtil.randomModelState(new RandomModelStateConfig.Builder().fullModel(true).build());
-        when(entityCache.getForMaintainance(anyString(), anyString())).thenReturn(Optional.of(state));
+        when(entityCache.getForMaintainance(nullable(String.class), anyString(), anyString())).thenReturn(Optional.of(state));
         clusterService = mock(ClusterService.class);
         ClusterSettings settings = new ClusterSettings(
             Settings.EMPTY,
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ)))
         );
         when(clusterService.getClusterSettings()).thenReturn(settings);
-        adapter = new CheckPointMaintainRequestAdapter(
+        adapter = new CheckPointMaintainRequestAdapter<ThresholdedRandomCutForest, org.opensearch.ad.indices.ADIndex, ADDelegatingDataManagement, ADCheckpointDao, ADPriorityCache>(
             checkpointDao,
             indexName,
             checkpointInterval,
@@ -84,7 +86,13 @@ public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingT
             Settings.EMPTY,
             cache
         );
-        request = new CheckpointMaintainRequest(Integer.MAX_VALUE, detectorId, RequestPriority.MEDIUM, entity.getModelId(detectorId).get());
+        request = new CheckpointMaintainRequest(
+            Integer.MAX_VALUE,
+            detectorId,
+            RequestPriority.MEDIUM,
+            entity.getModelId(null, detectorId).get(),
+            null
+        );
 
     }
 
@@ -110,7 +118,7 @@ public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingT
         Map<String, Object> content = new HashMap<String, Object>();
         content.put("a", "b");
         when(checkpointDao.toIndexSource(any())).thenReturn(content);
-        assertTrue(adapter.convert(new CheckpointMaintainRequest(Integer.MAX_VALUE, detectorId, RequestPriority.MEDIUM, null)).isEmpty());
+        assertTrue(adapter.convert(new CheckpointMaintainRequest(Integer.MAX_VALUE, detectorId, RequestPriority.MEDIUM, null, null)).isEmpty());
     }
 
     public void testNormal() throws IOException {
@@ -121,7 +129,7 @@ public class CheckPointMaintainRequestAdapterTests extends AbstractRateLimitingT
         Optional<CheckpointWriteRequest> converted = adapter.convert(request);
         assertTrue(!converted.isEmpty());
         UpdateRequest updateRequest = converted.get().getUpdateRequest();
-        UpdateRequest expectedRequest = new UpdateRequest(indexName, entity.getModelId(detectorId).get()).docAsUpsert(true).doc(content);
+        UpdateRequest expectedRequest = new UpdateRequest(indexName, entity.getModelId(null, detectorId).get()).docAsUpsert(true).doc(content);
         assertEquals(updateRequest.docAsUpsert(), expectedRequest.docAsUpsert());
         assertEquals(updateRequest.detectNoop(), expectedRequest.detectNoop());
         assertEquals(updateRequest.fetchSource(), expectedRequest.fetchSource());

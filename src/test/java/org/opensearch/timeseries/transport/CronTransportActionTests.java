@@ -27,7 +27,6 @@ import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.common.exception.JsonPathNotFoundException;
 import org.opensearch.ad.ml.ADColdStart;
-import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.ClusterName;
@@ -71,7 +70,6 @@ public class CronTransportActionTests extends AbstractTimeSeriesTest {
         TransportService transportService = mock(TransportService.class);
         ActionFilters actionFilters = mock(ActionFilters.class);
         NodeStateManager tarnsportStatemanager = mock(NodeStateManager.class);
-        ADModelManager modelManager = mock(ADModelManager.class);
         FeatureManager featureManager = mock(FeatureManager.class);
         ADCacheProvider cacheProvider = mock(ADCacheProvider.class);
         ADPriorityCache entityCache = mock(ADPriorityCache.class);
@@ -94,7 +92,6 @@ public class CronTransportActionTests extends AbstractTimeSeriesTest {
             transportService,
             actionFilters,
             tarnsportStatemanager,
-            modelManager,
             cacheProvider,
             forecastCacheProvider,
             entityColdStarter,
@@ -127,9 +124,7 @@ public class CronTransportActionTests extends AbstractTimeSeriesTest {
         assertTrue(!response.hasFailures());
 
         XContentBuilder builder = XContentFactory.jsonBuilder();
-        builder.startObject();
         response.toXContent(builder, ToXContent.EMPTY_PARAMS);
-        builder.endObject();
 
         String json = builder.toString();
         Function<JsonElement, String> function = (s) -> {

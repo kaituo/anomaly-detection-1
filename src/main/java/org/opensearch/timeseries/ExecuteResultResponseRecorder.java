@@ -15,7 +15,6 @@ import java.util.concurrent.TimeUnit;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.action.ActionType;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.cluster.node.DiscoveryNode;
@@ -24,11 +23,12 @@ import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.search.SearchHits;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
@@ -36,59 +36,58 @@ import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.ProfileRequest;
-import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.timeseries.transport.ResultResponse;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.timeseries.util.ExceptionUtil;
-import org.opensearch.transport.client.Client;
 
-public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, IndexableResultType extends IndexableResult, ProfileActionType extends ActionType<ProfileResponse>> {
+public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, IndexableResultType extends IndexableResult> {
 
     private static final Logger log = LogManager.getLogger(ExecuteResultResponseRecorder.class);
 
-    protected IndexManagementType indexManagement;
-    private ResultBulkIndexingHandler<IndexableResultType, IndexType, IndexManagementType> resultHandler;
+    private ResultBulkIndexingHandler<IndexableResultType, IndexType, DataManagementType> resultHandler;
     protected TaskManagerType taskManager;
-    private DiscoveryNodeFilterer nodeFilter;
+    private DiscoveryNodeSelector nodeFilter;
     private ThreadPool threadPool;
     private String threadPoolName;
-    private Client client;
-    private NodeStateManager nodeStateManager;
+    private NodeCommunicator nodeCommunicator;
+    private StateManager nodeStateManager;
     private Clock clock;
     protected IndexType resultIndex;
     private AnalysisType analysisType;
-    private ProfileActionType profileAction;
+    protected int resultMappingVersion;
+    protected final DataAccess dataAccess;
 
     public ExecuteResultResponseRecorder(
-        IndexManagementType indexManagement,
-        ResultBulkIndexingHandler<IndexableResultType, IndexType, IndexManagementType> resultHandler,
+        ResultBulkIndexingHandler<IndexableResultType, IndexType, DataManagementType> resultHandler,
         TaskManagerType taskManager,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         ThreadPool threadPool,
         String threadPoolName,
-        Client client,
-        NodeStateManager nodeStateManager,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager nodeStateManager,
         Clock clock,
         IndexType resultIndex,
         AnalysisType analysisType,
-        ProfileActionType profileAction
+        int resultMappingVersion
     ) {
-        this.indexManagement = indexManagement;
         this.resultHandler = resultHandler;
         this.taskManager = taskManager;
         this.nodeFilter = nodeFilter;
         this.threadPool = threadPool;
         this.threadPoolName = threadPoolName;
-        this.client = client;
+        this.nodeCommunicator = nodeCommunicator;
+        this.dataAccess = dataAccess;
         this.nodeStateManager = nodeStateManager;
         this.clock = clock;
         this.resultIndex = resultIndex;
         this.analysisType = analysisType;
-        this.profileAction = profileAction;
+        this.resultMappingVersion = resultMappingVersion;
     }
 
     public void indexResult(
@@ -98,9 +97,10 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
         Config config
     ) {
         String configId = config.getId();
+        String tenantId = config.getTenantId();
         try {
             if (!response.shouldSave()) {
-                updateRealtimeTask(response, configId, clock);
+                updateRealtimeTask(response, configId, tenantId, clock);
                 return;
             }
             IntervalTimeConfiguration windowDelay = (IntervalTimeConfiguration) config.getWindowDelay();
@@ -112,14 +112,16 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
                 log.info("Result action run for {} with error {}", configId, response.getError());
             }
 
+            // data_* fields track the analyzed window; execution_* fields should reflect when we persist the result
+            Instant resultWriteTime = clock.instant();
             List<IndexableResultType> analysisResults = response
                 .toIndexableResults(
                     config,
                     dataStartTime,
                     dataEndTime,
-                    executionStartTime,
-                    clock.instant(),
-                    indexManagement.getSchemaVersion(resultIndex),
+                    resultWriteTime,
+                    resultWriteTime,
+                    resultMappingVersion,
                     user,
                     response.getError()
                 );
@@ -130,13 +132,14 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
                     resultIndex,
                     analysisResults,
                     configId,
+                    tenantId,
                     ActionListener
                         .<BulkResponse>wrap(
                             r -> {},
                             exception -> log.error(String.format(Locale.ROOT, "Fail to bulk for %s", configId), exception)
                         )
                 );
-            updateRealtimeTask(response, configId, clock);
+            updateRealtimeTask(response, configId, tenantId, clock);
         } catch (EndRunException e) {
             throw e;
         } catch (Exception e) {
@@ -155,27 +158,37 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
      * @param configId config Id
      * @param clock clock to get current time
      */
-    protected void delayedUpdate(ResultResponse<IndexableResultType> response, String configId, Clock clock) {
+    protected void delayedUpdate(ResultResponse<IndexableResultType> response, String configId, String tenantId, Clock clock) {
         DiscoveryNode[] dataNodes = nodeFilter.getEligibleDataNodes();
         Set<ProfileName> profiles = new HashSet<>();
         profiles.add(ProfileName.INIT_PROGRESS);
         ProfileRequest profileRequest = new ProfileRequest(configId, profiles, dataNodes);
         Runnable profileInitProgress = () -> {
-            nodeStateManager.getConfig(configId, analysisType, false, ActionListener.wrap(configOptional -> {
+            nodeStateManager.getConfig(configId, tenantId, analysisType, false, ActionListener.wrap(configOptional -> {
                 if (!configOptional.isPresent()) {
                     log.warn("fail to get config");
                     return;
                 }
 
                 Config config = configOptional.get();
+                profileRequest.setTenantId(config.getTenantId());
                 if (config.isLongFrequency()) {
                     log.info("Update latest realtime task for long-interval config {}", configId);
-                    updateLatestRealtimeTask(configId, null, 0L, response.getConfigIntervalInMinutes(), response.getError(), clock);
+                    updateLatestRealtimeTask(
+                        configId,
+                        tenantId,
+                        null,
+                        0L,
+                        response.getConfigIntervalInMinutes(),
+                        response.getError(),
+                        clock
+                    );
                 } else {
-                    client.execute(profileAction, profileRequest, ActionListener.wrap(r -> {
+                    nodeCommunicator.profile(profileRequest, ActionListener.wrap(r -> {
                         log.info("Update latest realtime task for config {}, total updates: {}", configId, r.getTotalUpdates());
                         updateLatestRealtimeTask(
                             configId,
+                            tenantId,
                             null,
                             r.getTotalUpdates(),
                             response.getConfigIntervalInMinutes(),
@@ -198,6 +211,7 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
 
     protected void updateLatestRealtimeTask(
         String configId,
+        String tenantId,
         String taskState,
         Long rcfTotalUpdates,
         Long configIntervalInMinutes,
@@ -220,6 +234,7 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
 
         hasRecentResult(
             configId,
+            tenantId,
             configIntervalInMinutes,
             error,
             clock,
@@ -228,6 +243,7 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
                     r -> taskManager
                         .updateLatestRealtimeTaskOnCoordinatingNode(
                             configId,
+                            tenantId,
                             taskState,
                             rcfTotalUpdates,
                             configIntervalInMinutes,
@@ -240,6 +256,7 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
                         taskManager
                             .updateLatestRealtimeTaskOnCoordinatingNode(
                                 configId,
+                                tenantId,
                                 taskState,
                                 rcfTotalUpdates,
                                 configIntervalInMinutes,
@@ -278,12 +295,22 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
             Instant dataStartTime = executeStartTime.minus(windowDelay.getInterval(), windowDelay.getUnit());
             Instant dataEndTime = executeEndTime.minus(windowDelay.getInterval(), windowDelay.getUnit());
             User user = config.getUser();
+            Instant resultWriteTime = clock.instant();
 
-            IndexableResultType resultToSave = createErrorResult(configId, dataStartTime, dataEndTime, executeEndTime, errorMessage, user);
+            IndexableResultType resultToSave = createErrorResult(
+                configId,
+                dataStartTime,
+                dataEndTime,
+                resultWriteTime,
+                resultWriteTime,
+                errorMessage,
+                user,
+                config.getTenantId()
+            );
             String resultIndexOrAlias = config.getCustomResultIndexOrAlias();
             resultHandler.index(resultToSave, configId, resultIndexOrAlias);
 
-            updateLatestRealtimeTask(configId, taskState, null, null, errorMessage, clock);
+            updateLatestRealtimeTask(configId, config.getTenantId(), taskState, null, null, errorMessage, clock);
         } catch (Exception e) {
             log.error("Failed to index anomaly result for " + configId, e);
         }
@@ -302,13 +329,14 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
      */
     private void hasRecentResult(
         String configId,
+        String tenantId,
         Long overrideIntervalMinutes,
         String error,
         Clock clock,
         ActionListener<Boolean> listener
     ) {
         // run once does not need to cache
-        nodeStateManager.getConfig(configId, analysisType, false, ActionListener.wrap(configOptional -> {
+        nodeStateManager.getConfig(configId, tenantId, analysisType, false, ActionListener.wrap(configOptional -> {
             if (!configOptional.isPresent()) {
                 listener.onFailure(new TimeSeriesException(configId, "fail to get config"));
                 return;
@@ -322,7 +350,7 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
                 .confirmRealtimeResultStatus(
                     config,
                     clock.millis() - 2 * intervalMinutes * 60000,
-                    client,
+                    dataAccess,
                     analysisType,
                     ActionListener.wrap(searchResponse -> {
                         ActionListener.completeWith(listener, () -> {
@@ -350,11 +378,13 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
         String configId,
         Instant dataStartTime,
         Instant dataEndTime,
+        Instant executeStartTime,
         Instant executeEndTime,
         String errorMessage,
-        User user
+        User user,
+        String tenantId
     );
 
     // protected abstract void updateRealtimeTask(ResultResponseType response, String configId);
-    protected abstract void updateRealtimeTask(ResultResponse<IndexableResultType> response, String configId, Clock clock);
+    protected abstract void updateRealtimeTask(ResultResponse<IndexableResultType> response, String configId, String tenantId, Clock clock);
 }

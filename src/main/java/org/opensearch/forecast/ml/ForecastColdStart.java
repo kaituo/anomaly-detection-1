@@ -21,14 +21,14 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.Forecaster;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.ml.ModelColdStart;
@@ -47,14 +47,14 @@ import com.amazon.randomcutforest.parkservices.ForecastDescriptor;
 import com.amazon.randomcutforest.parkservices.RCFCaster;
 import com.amazon.randomcutforest.parkservices.config.Calibration;
 
-public class ForecastColdStart extends ModelColdStart<RCFCaster, ForecastIndex, ForecastIndexManagement, ForecastResult> {
+public class ForecastColdStart extends ModelColdStart<RCFCaster, ForecastIndex, ForecastDelegatingDataManagement, ForecastResult> {
 
     private static final Logger logger = LogManager.getLogger(ForecastColdStart.class);
 
     public ForecastColdStart(
         Clock clock,
         ThreadPool threadPool,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         int rcfSampleSize,
         int numberOfTrees,
         int numMinSamples,
@@ -85,7 +85,7 @@ public class ForecastColdStart extends ModelColdStart<RCFCaster, ForecastIndex, 
             searchFeatureDao,
             featureManager,
             maxRoundofColdStart,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             AnalysisType.FORECAST,
             resultSchemaVersion
         );

@@ -43,7 +43,7 @@ import org.opensearch.threadpool.ThreadPoolStats;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ExpiringState;
 import org.opensearch.timeseries.MaintenanceState;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 
@@ -198,7 +198,7 @@ public abstract class RateLimitedRequestWorker<RequestType extends QueuedRequest
     private float lowRequestQueuePruneRatio;
     protected int maintenanceFreqConstant;
     private final Duration stateTtl;
-    protected final NodeStateManager nodeStateManager;
+    protected final StateManager nodeStateManager;
     protected final AnalysisType context;
 
     public RateLimitedRequestWorker(
@@ -218,7 +218,7 @@ public abstract class RateLimitedRequestWorker<RequestType extends QueuedRequest
         float lowRequestQueuePruneRatio,
         int maintenanceFreqConstant,
         Duration stateTtl,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         AnalysisType context
     ) {
         this.heapSize = heapSizeInBytes;

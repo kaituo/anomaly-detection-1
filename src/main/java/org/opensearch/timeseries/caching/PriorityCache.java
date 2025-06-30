@@ -44,33 +44,35 @@ import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.Strings;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.MemoryTracker.Origin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.ModelProfile;
 import org.opensearch.timeseries.ratelimit.CheckpointMaintainWorker;
 import org.opensearch.timeseries.ratelimit.CheckpointWriteWorker;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.DateUtils;
+import org.opensearch.timeseries.util.StringUtil;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 import com.google.common.cache.Cache;
 import com.google.common.cache.CacheBuilder;
 
-public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, CheckpointMaintainerType extends CheckpointMaintainWorker, CacheBufferType extends CacheBuffer<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType>>
+public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType>, CheckpointMaintainerType extends CheckpointMaintainWorker, CacheBufferType extends CacheBuffer<RCFModelType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, CheckpointMaintainerType>>
     implements
         TimeSeriesCache<RCFModelType> {
 
     private static final Logger LOG = LogManager.getLogger(PriorityCache.class);
-
     // detector id -> CacheBuffer, weight based
     private final Map<String, CacheBufferType> activeEnities;
     private final CheckpointDaoType checkpointDao;
@@ -98,6 +100,8 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
     // mapping config id to priority tracker.
     // Used to track entity priorities
     private Map<String, PriorityTracker> priorityTrackerMap;
+    protected StateManager nodeStateManager;
+    protected AnalysisType analysisType;
 
     public PriorityCache(
         CheckpointDaoType checkpointDao,
@@ -116,7 +120,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         Setting<TimeValue> checkpointSavingFreq,
         Origin origin,
         Setting<Integer> dedicatedCacheSizeSetting,
-        Setting<Double> modelMaxSizePercent
+        Setting<Double> modelMaxSizePercent,
+        StateManager nodeStateManager,
+        AnalysisType analysisType
     ) {
         this.checkpointDao = checkpointDao;
 
@@ -156,12 +162,16 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         });
         this.origin = origin;
         this.priorityTrackerMap = new ConcurrentHashMap<>();
+        this.nodeStateManager = nodeStateManager;
+        this.analysisType = analysisType;
     }
 
     @Override
     public ModelState<RCFModelType> get(String modelId, Config config) {
         String configId = config.getId();
-        CacheBufferType buffer = activeEnities.get(configId);
+        String tenantId = config.getTenantId();
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.get(key);
         ModelState<RCFModelType> modelState = null;
         if (buffer != null) {
             modelState = buffer.get(modelId);
@@ -170,7 +180,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         // during maintenance period, stop putting new entries
         if (!maintenanceLock.isLocked() && modelState == null) {
             if (isDoorKeeperInCacheEnabled()) {
-                DoorKeeper doorKeeper = doorKeepers.computeIfAbsent(configId, id -> {
+                DoorKeeper doorKeeper = doorKeepers.computeIfAbsent(key, id -> {
                     // reset every 60 intervals
                     return new DoorKeeper(
                         TimeSeriesSettings.DOOR_KEEPER_FOR_CACHE_MAX_INSERTION,
@@ -186,7 +196,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
                 // this model Id. We have to call isActive method to make sure. Otherwise,
                 // the entity might miss a result every 60 intervals due to door keeper
                 // reset.
-                if (!doorKeeper.appearsMoreThanOrEqualToThreshold(modelId) && !isActive(configId, modelId)) {
+                if (!doorKeeper.appearsMoreThanOrEqualToThreshold(modelId) && !isActive(tenantId, configId, modelId)) {
                     doorKeeper.put(modelId);
                     return null;
                 }
@@ -196,7 +206,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
                 ModelState<RCFModelType> state = inActiveEntities.get(modelId, new Callable<ModelState<RCFModelType>>() {
                     @Override
                     public ModelState<RCFModelType> call() {
-                        return createEmptyModelState(modelId, configId);
+                        return createEmptyModelState(modelId, configId, tenantId);
                     }
 
                 });
@@ -225,7 +235,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
                 // intervals.
 
                 // update state using new priority or create a new one
-                PriorityTracker tracker = priorityTrackerMap.computeIfAbsent(configId, id -> {
+                PriorityTracker tracker = priorityTrackerMap.computeIfAbsent(key, id -> {
                     return new PriorityTracker(
                         clock,
                         config.getIntervalInSeconds(),
@@ -278,7 +288,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         if (state.isPresent()) {
             modelState = state.get();
         } else {
-            modelState = createEmptyModelState(modelId, configId);
+            modelState = createEmptyModelState(modelId, configId, config.getTenantId());
         }
 
         float priority = modelState.getPriority();
@@ -334,10 +344,10 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         inActiveEntities.put(removed.getModelId(), removed);
     }
 
-    private void addEntity(List<Entity> destination, Entity entity, String configId) {
+    private void addEntity(List<Entity> destination, Entity entity, String tenantId, String configId) {
         // It's possible our doorkeepr prevented the entity from entering inactive entities cache
         if (entity != null) {
-            Optional<String> modelId = entity.getModelId(configId);
+            Optional<String> modelId = entity.getModelId(tenantId, configId);
             if (modelId.isPresent() && inActiveEntities.getIfPresent(modelId.get()) != null) {
                 destination.add(entity);
             }
@@ -354,7 +364,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             return Pair.of(hotEntities, new ArrayList<>(cacheMissEntities));
         }
 
-        CacheBufferType buffer = activeEnities.get(configId);
+        String tenantId = config.getTenantId();
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.get(key);
         if (buffer == null) {
             // when a config is just started or during run once, there is
             // no cache buffer yet. Make every cache miss entities hot
@@ -364,7 +376,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         Iterator<Entity> cacheMissEntitiesIter = cacheMissEntities.iterator();
         // current buffer's dedicated cache has free slots
         while (cacheMissEntitiesIter.hasNext() && buffer.dedicatedCacheAvailable()) {
-            addEntity(hotEntities, cacheMissEntitiesIter.next(), configId);
+            addEntity(hotEntities, cacheMissEntitiesIter.next(), config.getTenantId(), configId);
         }
 
         while (cacheMissEntitiesIter.hasNext() && memoryTracker.canAllocate(buffer.getMemoryConsumptionPerModel())) {
@@ -374,7 +386,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             // more things than we planned. One model in HCAD is small,
             // it is fine we exceed a little. We have regular maintenance to remove
             // extra memory usage.
-            addEntity(hotEntities, cacheMissEntitiesIter.next(), configId);
+            addEntity(hotEntities, cacheMissEntitiesIter.next(), config.getTenantId(), configId);
         }
 
         // check if we can replace anything in dedicated or shared cache
@@ -388,7 +400,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             // thread safe as each detector has one thread at one time and only the
             // thread can access its buffer.
             Entity entity = cacheMissEntitiesIter.next();
-            Optional<String> modelId = entity.getModelId(configId);
+            Optional<String> modelId = entity.getModelId(config.getTenantId(), configId);
 
             if (false == modelId.isPresent()) {
                 continue;
@@ -404,7 +416,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             float priority = modelState.getPriority();
 
             if (buffer.canReplaceWithinConfig(priority)) {
-                addEntity(hotEntities, entity, configId);
+                addEntity(hotEntities, entity, config.getTenantId(), configId);
             } else {
                 // re-evaluate replacement condition in other buffers
                 otherBufferReplaceCandidates.add(entity);
@@ -423,7 +435,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             // If two threads try to remove the same entity and add their own state, the 2nd remove
             // returns null and only the first one succeeds.
             Entity entity = cacheMissEntitiesIter.next();
-            Optional<String> modelId = entity.getModelId(configId);
+            Optional<String> modelId = entity.getModelId(config.getTenantId(), configId);
 
             if (false == modelId.isPresent()) {
                 continue;
@@ -442,7 +454,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
 
             if (scaledPriority <= minPriority) {
                 // not even larger than the minPriority, we can put this to coldEntities
-                addEntity(coldEntities, entity, configId);
+                addEntity(coldEntities, entity, config.getTenantId(), configId);
                 continue;
             }
 
@@ -454,13 +466,13 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             }
 
             if (bufferToRemove != null) {
-                addEntity(hotEntities, entity, configId);
+                addEntity(hotEntities, entity, config.getTenantId(), configId);
                 // reset minPriority after the replacement so that we need to iterate all CacheBuffer
                 // again
                 minPriority = Float.MIN_VALUE;
             } else {
                 // after trying everything, we can now safely put this to cold entities list
-                addEntity(coldEntities, entity, configId);
+                addEntity(coldEntities, entity, config.getTenantId(), configId);
             }
         }
 
@@ -468,7 +480,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
     }
 
     public CacheBufferType computeBufferIfAbsent(Config config, String configId) {
-        CacheBufferType buffer = activeEnities.get(configId);
+        String tenantId = config.getTenantId();
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.get(key);
         if (buffer == null) {
             long bytesPerEntityModel = getRequiredMemoryPerEntity(config, memoryTracker, numberOfTrees);
             long requiredBytes = bytesPerEntityModel * (config.isHighCardinality() ? hcDedicatedCacheSize : 1);
@@ -479,7 +493,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
                     bytesPerEntityModel,
                     priorityTrackerMap
                         .getOrDefault(
-                            configId,
+                            key,
                             new PriorityTracker(
                                 clock,
                                 config.getIntervalInSeconds(),
@@ -488,7 +502,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
                             )
                         )
                 );
-                activeEnities.put(configId, buffer);
+                activeEnities.put(key, buffer);
                 // There can be race conditions between tryClearUpMemory and
                 // activeEntities.put above as tryClearUpMemory accesses activeEnities too.
                 // Put tryClearUpMemory after consumeMemory to prevent that.
@@ -631,13 +645,13 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             // clean up memory if we allocate more memory than we should
             tryClearUpMemory();
             activeEnities.entrySet().stream().forEach(cacheBufferEntry -> {
-                String configId = cacheBufferEntry.getKey();
+                String key = cacheBufferEntry.getKey();
                 CacheBufferType cacheBuffer = cacheBufferEntry.getValue();
                 // remove expired cache buffer
                 if (cacheBuffer.expired(modelTtl)) {
-                    activeEnities.remove(configId);
+                    activeEnities.remove(key);
                     cacheBuffer.clear();
-                    priorityTrackerMap.remove(configId);
+                    priorityTrackerMap.remove(key);
                 } else {
                     List<ModelState<RCFModelType>> removedStates = cacheBuffer.maintenance();
                     for (ModelState<RCFModelType> state : removedStates) {
@@ -649,11 +663,11 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             maintainInactiveCache();
 
             doorKeepers.entrySet().stream().forEach(doorKeeperEntry -> {
-                String configId = doorKeeperEntry.getKey();
+                String key = doorKeeperEntry.getKey();
                 DoorKeeper doorKeeper = doorKeeperEntry.getValue();
                 // doorKeeper has its own state ttl
                 if (doorKeeper.expired(null)) {
-                    doorKeepers.remove(configId);
+                    doorKeepers.remove(key);
                 } else {
                     doorKeeper.maintenance();
                 }
@@ -671,18 +685,19 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @param configId id the of the config for which models are to be permanently deleted
      */
     @Override
-    public void clear(String configId) {
+    public void clear(String tenantId, String configId) {
         if (Strings.isEmpty(configId)) {
             return;
         }
-        CacheBufferType buffer = activeEnities.remove(configId);
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.remove(key);
         if (buffer != null) {
             buffer.clear();
         }
-        priorityTrackerMap.remove(configId);
-        checkpointDao.deleteModelCheckpointByConfigId(configId);
-        doorKeepers.remove(configId);
-        priorityTrackerMap.remove(configId);
+        priorityTrackerMap.remove(key);
+        checkpointDao.deleteModelCheckpointByConfigId(tenantId, configId);
+        doorKeepers.remove(key);
+        priorityTrackerMap.remove(key);
     }
 
     /**
@@ -691,8 +706,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @return The number of active entities
      */
     @Override
-    public int getActiveEntities(String detectorId) {
-        CacheBufferType cacheBuffer = activeEnities.get(detectorId);
+    public int getActiveEntities(String tenantId, String detectorId) {
+        String key = StringUtil.getCompositeKey(tenantId, detectorId);
+        CacheBufferType cacheBuffer = activeEnities.get(key);
         if (cacheBuffer != null) {
             return cacheBuffer.getActiveEntities();
         }
@@ -706,8 +722,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @return Whether an entity is active or not
      */
     @Override
-    public boolean isActive(String configId, String entityModelId) {
-        CacheBufferType cacheBuffer = activeEnities.get(configId);
+    public boolean isActive(String tenantId, String configId, String entityModelId) {
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType cacheBuffer = activeEnities.get(key);
         if (cacheBuffer != null) {
             return cacheBuffer.isActive(entityModelId);
         }
@@ -715,14 +732,15 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
     }
 
     @Override
-    public long getTotalUpdates(String configId) {
+    public long getTotalUpdates(String tenantId, String configId) {
         // Check if activeEnities is null
         if (activeEnities == null) {
             return 0L;
         }
 
         // Fetch the entity from the map
-        CacheBufferType buffer = activeEnities.get(configId);
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.get(key);
         if (buffer == null) {
             return 0L;
         }
@@ -742,15 +760,16 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
         String entityModelId = maybeEntityId.get();
 
         // Call the underlying getTotalUpdates
-        long updates = getTotalUpdates(configId, entityModelId);
+        long updates = getTotalUpdates(tenantId, configId, entityModelId);
 
         return updates;
     }
 
     @Override
-    public long getTotalUpdates(String configId, String entityModelId) {
+    public long getTotalUpdates(String tenantId, String configId, String entityModelId) {
+        String key = StringUtil.getCompositeKey(tenantId, configId);
         return Optional
-            .ofNullable(activeEnities.get(configId))
+            .ofNullable(activeEnities.get(key))
             .map(cacheBuffer -> getTotalUpdates(cacheBuffer.getModelState(entityModelId)))
             .orElse(0L);
     }
@@ -784,9 +803,10 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @return list of modelStates
      */
     @Override
-    public List<ModelState<RCFModelType>> getAllModels(String configId) {
+    public List<ModelState<RCFModelType>> getAllModels(String tenantId, String configId) {
         List<ModelState<RCFModelType>> states = new ArrayList<>();
-        CacheBufferType cacheBuffer = activeEnities.get(configId);
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType cacheBuffer = activeEnities.get(key);
         if (cacheBuffer != null) {
             states.addAll(cacheBuffer.getAllModelStates());
         }
@@ -800,8 +820,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @return a map of model id to its memory size
      */
     @Override
-    public Map<String, Long> getModelSize(String configId) {
-        CacheBufferType cacheBuffer = activeEnities.get(configId);
+    public Map<String, Long> getModelSize(String tenantId, String configId) {
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType cacheBuffer = activeEnities.get(key);
         Map<String, Long> res = new HashMap<>();
         if (cacheBuffer != null) {
             long size = cacheBuffer.getMemoryConsumptionPerModel();
@@ -824,8 +845,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * milliseconds when the entity's state is lastly used.  Otherwise, return -1.
      */
     @Override
-    public long getLastActiveTime(String detectorId, String entityModelId) {
-        CacheBufferType cacheBuffer = activeEnities.get(detectorId);
+    public long getLastActiveTime(String tenantId, String detectorId, String entityModelId) {
+        String key = StringUtil.getCompositeKey(tenantId, detectorId);
+        CacheBufferType cacheBuffer = activeEnities.get(key);
         long lastUsedMs = -1;
         if (cacheBuffer != null) {
             lastUsedMs = cacheBuffer.getLastUsedTime(entityModelId);
@@ -887,8 +909,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
     }
 
     @Override
-    public List<ModelProfile> getAllModelProfile(String detectorId) {
-        CacheBufferType cacheBuffer = activeEnities.get(detectorId);
+    public List<ModelProfile> getAllModelProfile(String tenantId, String detectorId) {
+        String key = StringUtil.getCompositeKey(tenantId, detectorId);
+        CacheBufferType cacheBuffer = activeEnities.get(key);
         if (cacheBuffer != null) {
             long size = cacheBuffer.getMemoryConsumptionPerModel();
             return cacheBuffer
@@ -908,8 +931,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @return the model state
      */
     @Override
-    public Optional<ModelProfile> getModelProfile(String detectorId, String entityModelId) {
-        CacheBufferType cacheBuffer = activeEnities.get(detectorId);
+    public Optional<ModelProfile> getModelProfile(String tenantId, String detectorId, String entityModelId) {
+        String key = StringUtil.getCompositeKey(tenantId, detectorId);
+        CacheBufferType cacheBuffer = activeEnities.get(key);
         if (cacheBuffer != null && cacheBuffer.getModelState(entityModelId) != null) {
             ModelState<RCFModelType> modelState = cacheBuffer.getModelState(entityModelId);
             Entity entity = null;
@@ -919,6 +943,19 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             return Optional.of(new ModelProfile(entityModelId, entity, cacheBuffer.getMemoryConsumptionPerModel()));
         }
         return Optional.empty();
+    }
+
+    @Override
+    public void stopModel(String tenantId, String configId, String modelId) {
+        if (Strings.isEmpty(configId) || Strings.isEmpty(modelId)) {
+            return;
+        }
+        inActiveEntities.invalidate(modelId);
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.get(key);
+        if (buffer != null) {
+            buffer.remove(modelId, true);
+        }
     }
 
     /**
@@ -948,8 +985,9 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @return Model state
      */
     @Override
-    public Optional<ModelState<RCFModelType>> getForMaintainance(String configId, String modelId) {
-        CacheBufferType buffer = activeEnities.get(configId);
+    public Optional<ModelState<RCFModelType>> getForMaintainance(String tenantId, String configId, String modelId) {
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.get(key);
         if (buffer == null) {
             return Optional.empty();
         }
@@ -962,23 +1000,32 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
      * @param modelId Model Id
      */
     @Override
-    public void removeModel(String configId, String modelId) {
-        CacheBufferType buffer = activeEnities.get(configId);
+    public void removeModel(String tenantId, String configId, String modelId) {
+        String key = StringUtil.getCompositeKey(tenantId, configId);
+        CacheBufferType buffer = activeEnities.get(key);
         if (buffer != null) {
             ModelState<RCFModelType> removed = buffer.remove(modelId, false);
             if (removed != null) {
                 addIntoInactiveCache(removed);
             }
         }
-        checkpointDao
-            .deleteModelCheckpoint(
-                modelId,
-                ActionListener
-                    .wrap(
-                        r -> LOG.debug(new ParameterizedMessage("Succeeded in deleting checkpoint [{}].", modelId)),
-                        e -> LOG.error(new ParameterizedMessage("Failed to delete checkpoint [{}].", modelId), e)
-                    )
-            );
+
+        nodeStateManager.getConfig(configId, tenantId, analysisType, false, ActionListener.wrap(config -> {
+            if (config.isPresent()) {
+                checkpointDao
+                    .deleteModelCheckpoint(
+                        config.get(),
+                        modelId,
+                        ActionListener
+                            .wrap(
+                                r -> LOG.debug(new ParameterizedMessage("Succeeded in deleting checkpoint [{}].", modelId)),
+                                e -> LOG.error(new ParameterizedMessage("Failed to delete checkpoint [{}].", modelId), e)
+                            )
+                    );
+            } else {
+                LOG.error(new ParameterizedMessage("Failed to get config for [{}].", configId));
+            }
+        }, e -> LOG.error(new ParameterizedMessage("Failed to get config for [{}].", configId), e)));
     }
 
     private Cache<String, ModelState<RCFModelType>> createInactiveCache(Duration inactiveEntityTtl, int maxInactiveStates) {
@@ -990,7 +1037,7 @@ public abstract class PriorityCache<RCFModelType extends ThresholdedRandomCutFor
             .build();
     }
 
-    protected abstract ModelState<RCFModelType> createEmptyModelState(String modelId, String configId);
+    protected abstract ModelState<RCFModelType> createEmptyModelState(String modelId, String configId, String tenantId);
 
     protected abstract CacheBufferType createEmptyCacheBuffer(Config config, long memoryConsumptionPerEntity, PriorityTracker tracker);
 

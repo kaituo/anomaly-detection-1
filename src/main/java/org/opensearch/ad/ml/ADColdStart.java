@@ -20,15 +20,15 @@ import java.util.List;
 import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.IgnoreSimilarExtractor.ThresholdArrays;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.ml.ModelColdStart;
@@ -49,7 +49,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * Training models for HCAD detectors
  *
  */
-public class ADColdStart extends ModelColdStart<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, AnomalyResult> {
+public class ADColdStart extends ModelColdStart<ThresholdedRandomCutForest, ADIndex, ADDelegatingDataManagement, AnomalyResult> {
     private static final Logger logger = LogManager.getLogger(ADColdStart.class);
 
     /**
@@ -77,7 +77,7 @@ public class ADColdStart extends ModelColdStart<ThresholdedRandomCutForest, ADIn
     public ADColdStart(
         Clock clock,
         ThreadPool threadPool,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         int rcfSampleSize,
         int numberOfTrees,
         int numMinSamples,
@@ -108,7 +108,7 @@ public class ADColdStart extends ModelColdStart<ThresholdedRandomCutForest, ADIn
             searchFeatureDao,
             featureManager,
             maxRoundofColdStart,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             AnalysisType.AD,
             resultSchemaVersion
         );
@@ -117,7 +117,7 @@ public class ADColdStart extends ModelColdStart<ThresholdedRandomCutForest, ADIn
     public ADColdStart(
         Clock clock,
         ThreadPool threadPool,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         int rcfSampleSize,
         int numberOfTrees,
         int numMinSamples,

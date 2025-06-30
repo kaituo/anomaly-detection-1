@@ -42,9 +42,9 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
     public void setUp() throws Exception {
         super.setUp();
 
-        handler = new ADIndexMemoryPressureAwareResultHandler(client, anomalyDetectionIndices, clusterService);
+        handler = new ADIndexMemoryPressureAwareResultHandler(client, anomalyDetectionIndices, discoveryNodeSelector);
 
-        request = new ADResultBulkRequest();
+        request = new ADResultBulkRequest((String) null);
         ADResultWriteRequest resultWriteRequest = new ADResultWriteRequest(
             Instant.now().plus(10, ChronoUnit.MINUTES).toEpochMilli(),
             detectorId,
@@ -78,7 +78,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
 
         CountDownLatch verified = new CountDownLatch(1);
 
-        handler.flush(request, ActionListener.wrap(response -> {
+        handler.flush(request, null, ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }, exception -> {
@@ -95,7 +95,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
         setUpSavingAnomalyResultIndex(false);
 
         CountDownLatch verified = new CountDownLatch(1);
-        handler.flush(request, ActionListener.wrap(response -> { verified.countDown(); }, exception -> {
+        handler.flush(request, null, ActionListener.wrap(response -> { verified.countDown(); }, exception -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }));
@@ -113,7 +113,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
         }).when(client).execute(eq(ADResultBulkAction.INSTANCE), any(), ArgumentMatchers.<ActionListener<ResultBulkResponse>>any());
 
         CountDownLatch verified = new CountDownLatch(1);
-        handler.flush(request, ActionListener.wrap(response -> {
+        handler.flush(request, null, ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }, exception -> {
@@ -128,7 +128,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
         setUpSavingAnomalyResultIndex(true);
 
         CountDownLatch verified = new CountDownLatch(1);
-        handler.flush(request, ActionListener.wrap(response -> { verified.countDown(); }, exception -> {
+        handler.flush(request, null, ActionListener.wrap(response -> { verified.countDown(); }, exception -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }));
@@ -141,7 +141,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
         setUpSavingAnomalyResultIndex(false);
 
         CountDownLatch verified = new CountDownLatch(1);
-        handler.flush(new ADResultBulkRequest(), ActionListener.wrap(response -> {
+        handler.flush(new ADResultBulkRequest((String) null), null, ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }, exception -> {
@@ -156,7 +156,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
         setUpSavingAnomalyResultIndex(false, IndexCreation.NOT_ACKED);
 
         CountDownLatch verified = new CountDownLatch(1);
-        handler.flush(request, ActionListener.wrap(response -> {
+        handler.flush(request, null, ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }, exception -> {
@@ -171,7 +171,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
         setUpSavingAnomalyResultIndex(false, IndexCreation.RUNTIME_EXCEPTION);
 
         CountDownLatch verified = new CountDownLatch(1);
-        handler.flush(request, ActionListener.wrap(response -> {
+        handler.flush(request, null, ActionListener.wrap(response -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }, exception -> {
@@ -186,7 +186,7 @@ public class MultiEntityResultHandlerTests extends AbstractIndexHandlerTest {
         setUpSavingAnomalyResultIndex(false, IndexCreation.RESOURCE_EXISTS_EXCEPTION);
 
         CountDownLatch verified = new CountDownLatch(1);
-        handler.flush(request, ActionListener.wrap(response -> { verified.countDown(); }, exception -> {
+        handler.flush(request, null, ActionListener.wrap(response -> { verified.countDown(); }, exception -> {
             assertTrue("Should not reach here ", false);
             verified.countDown();
         }));

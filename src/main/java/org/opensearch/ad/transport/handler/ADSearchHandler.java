@@ -14,16 +14,23 @@ package org.opensearch.ad.transport.handler;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.transport.handler.SearchHandler;
 import org.opensearch.timeseries.util.PluginClient;
-import org.opensearch.transport.client.Client;
 
 /**
  * Handle general search request, check user role and return search response.
  */
 public class ADSearchHandler extends SearchHandler {
 
-    public ADSearchHandler(Settings settings, ClusterService clusterService, Client client, PluginClient pluginClient) {
-        super(settings, clusterService, client, pluginClient, AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES);
+    public ADSearchHandler(
+        Settings settings,
+        ClusterService clusterService,
+        PluginClient pluginClient,
+        DataAccess searcher,
+        RunContext runContext
+    ) {
+        super(settings, clusterService, pluginClient, searcher, AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES, runContext);
     }
 }

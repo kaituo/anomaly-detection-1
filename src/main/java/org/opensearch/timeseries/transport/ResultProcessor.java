@@ -36,13 +36,9 @@ import org.opensearch.OpenSearchTimeoutException;
 import org.opensearch.action.ActionListenerResponseHandler;
 import org.opensearch.action.search.SearchPhaseExecutionException;
 import org.opensearch.action.search.ShardSearchFailure;
-import org.opensearch.action.support.IndicesOptions;
 import org.opensearch.action.support.clustermanager.AcknowledgedResponse;
-import org.opensearch.cluster.ClusterState;
 import org.opensearch.cluster.block.ClusterBlockLevel;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNode;
-import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
@@ -56,7 +52,9 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.node.NodeClosedException;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.NodeCommunicator;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.common.exception.ClientException;
 import org.opensearch.timeseries.common.exception.EndRunException;
@@ -68,7 +66,6 @@ import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.feature.CompositeRetriever;
 import org.opensearch.timeseries.feature.CompositeRetriever.PageIterator;
 import org.opensearch.timeseries.feature.FeatureManager;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.ml.SingleStreamModelIdMapper;
 import org.opensearch.timeseries.model.Config;
@@ -78,13 +75,14 @@ import org.opensearch.timeseries.model.IndexableResult;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.stats.Stats;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.util.DataUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.timeseries.util.ExceptionUtil;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.timeseries.util.TimeUtil;
 import org.opensearch.transport.ActionNotFoundTransportException;
 import org.opensearch.transport.ConnectTransportException;
@@ -92,9 +90,8 @@ import org.opensearch.transport.NodeNotConnectedException;
 import org.opensearch.transport.ReceiveTimeoutTransportException;
 import org.opensearch.transport.TransportRequestOptions;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
-public abstract class ResultProcessor<TransportResultRequestType extends ResultRequest, IndexableResultType extends IndexableResult, ResultResponseType extends ResultResponse<IndexableResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>> {
+public abstract class ResultProcessor<TransportResultRequestType extends ResultRequest, IndexableResultType extends IndexableResult, ResultResponseType extends ResultResponse<IndexableResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends DelegatingDataManagement<IndexType>, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexManagementType>> {
 
     private static final Logger LOG = LogManager.getLogger(ResultProcessor.class);
 
@@ -113,7 +110,6 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
     public static final String NODE_UNRESPONSIVE_ERR_MSG = "Model node is unresponsive.  Mute node";
 
     protected final TransportRequestOptions option;
-    private String entityResultAction;
     protected Class<ResultResponseType> transportResultResponseClazz;
     private StatNames hcRequestCountStat;
     private String threadPoolName;
@@ -121,46 +117,42 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
     private int pageSize;
     protected final ThreadPool threadPool;
     protected final HashRing hashRing;
-    protected final NodeStateManager nodeStateManager;
+    protected final StateManager nodeStateManager;
     protected final TransportService transportService;
     private final Stats timeSeriesStats;
     private final TaskManagerType realTimeTaskManager;
     private NamedXContentRegistry xContentRegistry;
-    protected final Client client;
-    private final SecurityClientUtil clientUtil;
+    private final DataAccess dataAccess;
     private Settings settings;
-    private final IndexNameExpressionResolver indexNameExpressionResolver;
-    private final ClusterService clusterService;
+    private final DiscoveryNodeSelector discoveryNodeSelector;
+    protected final NodeCommunicator nodeCommunicator;
     protected final FeatureManager featureManager;
     protected final AnalysisType analysisType;
-    protected final String singleStreamActionName;
 
     protected boolean runOnce;
 
     public ResultProcessor(
         Setting<TimeValue> requestTimeoutSetting,
-        String entityResultAction,
         StatNames hcRequestCountStat,
         Settings settings,
         ClusterService clusterService,
         ThreadPool threadPool,
         String threadPoolName,
         HashRing hashRing,
-        NodeStateManager nodeStateManager,
+        StateManager nodeStateManager,
         TransportService transportService,
         Stats timeSeriesStats,
         TaskManagerType realTimeTaskManager,
         NamedXContentRegistry xContentRegistry,
-        Client client,
-        SecurityClientUtil clientUtil,
-        IndexNameExpressionResolver indexNameExpressionResolver,
+        DataAccess dataAccess,
         Class<ResultResponseType> transportResultResponseClazz,
         FeatureManager featureManager,
         Setting<Integer> maxEntitiesPerIntervalSetting,
         Setting<Integer> pageSizeSetting,
         AnalysisType context,
         boolean runOnce,
-        String singleStreamActionName
+        DiscoveryNodeSelector discoveryNodeSelector,
+        NodeCommunicator nodeCommunicator
     ) {
         this.option = TransportRequestOptions
             .builder()
@@ -173,7 +165,6 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
         this.pageSize = pageSizeSetting.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(pageSizeSetting, it -> pageSize = it);
 
-        this.entityResultAction = entityResultAction;
         this.hcRequestCountStat = hcRequestCountStat;
         this.threadPool = threadPool;
         this.hashRing = hashRing;
@@ -182,17 +173,15 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
         this.timeSeriesStats = timeSeriesStats;
         this.realTimeTaskManager = realTimeTaskManager;
         this.xContentRegistry = xContentRegistry;
-        this.client = client;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
         this.settings = settings;
-        this.indexNameExpressionResolver = indexNameExpressionResolver;
-        this.clusterService = clusterService;
         this.transportResultResponseClazz = transportResultResponseClazz;
         this.featureManager = featureManager;
         this.analysisType = context;
         this.threadPoolName = threadPoolName;
         this.runOnce = runOnce;
-        this.singleStreamActionName = singleStreamActionName;
+        this.discoveryNodeSelector = discoveryNodeSelector;
+        this.nodeCommunicator = nodeCommunicator;
     }
 
     /**
@@ -298,24 +287,25 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                         node2Entities.stream().forEach(nodeEntity -> {
                             sentOutPages.incrementAndGet();
                             DiscoveryNode node = nodeEntity.getKey();
-                            transportService
-                                .sendRequest(
+                            nodeCommunicator
+                                .entityResult(
                                     node,
-                                    entityResultAction,
                                     new EntityResultRequest(
                                         configId,
                                         nodeEntity.getValue(),
                                         dataStartTime,
                                         dataEndTime,
                                         analysisType,
-                                        taskId
+                                        taskId,
+                                        config.getTenantId()
                                     ),
                                     option,
                                     new ActionListenerResponseHandler<>(
                                         new ErrorResponseListener(node.getId(), configId, failure, receivedPages),
                                         AcknowledgedResponse::new,
                                         ThreadPool.Names.SAME
-                                    )
+                                    ),
+                                    transportService
                                 );
                         });
 
@@ -374,7 +364,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                         if (!sent.get()) {
                             // since we don't know when cancel will succeed, need sent to ensure imputeHC is only called once
                             sent.set(true);
-                            imputeHC(dataStartTime, dataEndTime, configId, taskId);
+                            imputeHC(dataStartTime, dataEndTime, configId, config.getTenantId(), taskId);
                         }
 
                         if (cancellable.get() != null) {
@@ -518,14 +508,11 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                 dataEndTime,
                 config,
                 xContentRegistry,
-                client,
-                clientUtil,
+                dataAccess,
                 nextDetectionStartTime,
                 settings,
                 maxEntitiesPerInterval,
                 pageSize,
-                indexNameExpressionResolver,
-                clusterService,
                 analysisType
             );
             LOG.debug("CompositeRetriever created for config [{}]", configID);
@@ -547,7 +534,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                 pageIterator.next(getEntityFeatureslistener);
             } else if (config.getImputationOption() != null) {
                 LOG.debug("Starting imputation for HC config [{}]", configID);
-                imputeHC(dataStartTime, dataEndTime, configID, taskId);
+                imputeHC(dataStartTime, dataEndTime, configID, config.getTenantId(), taskId);
             }
 
             // return early to not wait for completion of all entities so we won't block next interval
@@ -566,7 +553,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
         // HC logic ends and single entity logic starts here
         // We are going to use only 1 model partition for a single stream detector.
         // That's why we use 0 here.
-        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(configID, 0);
+        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(config.getTenantId(), configID, 0);
         Optional<DiscoveryNode> asRCFNode = hashRing.getOwningNodeWithSameLocalVersionForRealtime(rcfModelID);
         if (asRCFNode.isEmpty()) {
             listener.onFailure(new InternalFailure(configID, "RCF model node is not available."));
@@ -575,19 +562,17 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
 
         DiscoveryNode rcfNode = asRCFNode.get();
 
-        // early return listener in shouldStart
-        if (!shouldStart(listener, configID, config, rcfNode.getId(), rcfModelID)) {
-            return;
-        }
-
-        featureManager
-            .getCurrentFeatures(
-                config,
-                dataStartTime,
-                dataEndTime,
-                analysisType,
-                onFeatureResponseForSingleStreamConfig(config, listener, rcfModelID, rcfNode, dataStartTime, dataEndTime, taskId)
-            );
+        // Async check if we should start - on success, proceed to get features
+        shouldStart(listener, configID, config, rcfNode.getId(), rcfModelID, () -> {
+            featureManager
+                .getCurrentFeatures(
+                    config,
+                    dataStartTime,
+                    dataEndTime,
+                    analysisType,
+                    onFeatureResponseForSingleStreamConfig(config, listener, rcfModelID, rcfNode, dataStartTime, dataEndTime, taskId)
+                );
+        });
     }
 
     protected void handleQueryFailure(Exception exception, ActionListener<ResultResponseType> listener, String adID) {
@@ -732,8 +717,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
     }
 
     private void handleConnectionException(String node, String detectorId) {
-        final DiscoveryNodes nodes = clusterService.state().nodes();
-        if (!nodes.nodeExists(node)) {
+        if (!discoveryNodeSelector.nodeExists(node)) {
             hashRing.buildCirclesForRealtime();
             return;
         }
@@ -742,74 +726,66 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
     }
 
     /**
-     * Since we need to read from customer index and write to anomaly result index,
-     * we need to make sure we can read and write.
+     * Check if we should start anomaly prediction. This method performs async block checks
+     * and invokes the appropriate callback based on the result.
      *
-     * @param state Cluster state
-     * @return whether we have global block or not
-     */
-    private boolean checkGlobalBlock(ClusterState state) {
-        return state.blocks().globalBlockedException(ClusterBlockLevel.READ) != null
-            || state.blocks().globalBlockedException(ClusterBlockLevel.WRITE) != null;
-    }
-
-    /**
-     * Similar to checkGlobalBlock, we check block on the indices level.
-     *
-     * @param state   Cluster state
-     * @param level   block level
-     * @param indices the indices on which to check block
-     * @return whether any of the index has block on the level.
-     */
-    private boolean checkIndicesBlocked(ClusterState state, ClusterBlockLevel level, String... indices) {
-        // the original index might be an index expression with wildcards like "log*",
-        // so we need to expand the expression to concrete index name
-        String[] concreteIndices = indexNameExpressionResolver.concreteIndexNames(state, IndicesOptions.lenientExpandOpen(), indices);
-
-        return state.blocks().indicesBlockedException(level, concreteIndices) != null;
-    }
-
-    /**
-     * Check if we should start anomaly prediction.
-     *
-     * @param listener listener to respond back to AnomalyResultRequest.
-     * @param adID     detector ID
+     * @param listener listener to respond back to AnomalyResultRequest on failure
+     * @param adID detector ID
      * @param detector detector instance corresponds to adID
      * @param rcfNodeId the rcf model hosting node ID for adID
      * @param rcfModelID the rcf model ID for adID
-     * @return if we can start anomaly prediction.
+     * @param onSuccess callback to invoke if all checks pass
      */
-    private boolean shouldStart(
+    private void shouldStart(
         ActionListener<ResultResponseType> listener,
         String adID,
         Config detector,
         String rcfNodeId,
-        String rcfModelID
+        String rcfModelID,
+        Runnable onSuccess
     ) {
-        ClusterState state = clusterService.state();
-        if (checkGlobalBlock(state)) {
-            listener.onFailure(new InternalFailure(adID, ResultProcessor.READ_WRITE_BLOCKED));
-            return false;
-        }
+        // First check global block
+        discoveryNodeSelector.hasGlobalBlock(ActionListener.wrap(hasGlobalBlock -> {
+            if (hasGlobalBlock) {
+                listener.onFailure(new InternalFailure(adID, ResultProcessor.READ_WRITE_BLOCKED));
+                return;
+            }
 
-        if (nodeStateManager.isMuted(rcfNodeId, adID)) {
-            listener
-                .onFailure(
-                    new InternalFailure(
-                        adID,
-                        String
-                            .format(Locale.ROOT, ResultProcessor.NODE_UNRESPONSIVE_ERR_MSG + " %s for rcf model %s", rcfNodeId, rcfModelID)
-                    )
+            // Check if node is muted
+            if (nodeStateManager.isMuted(rcfNodeId, adID)) {
+                listener
+                    .onFailure(
+                        new InternalFailure(
+                            adID,
+                            String
+                                .format(Locale.ROOT, ResultProcessor.NODE_UNRESPONSIVE_ERR_MSG + " %s for rcf model %s", rcfNodeId, rcfModelID)
+                        )
+                    );
+                return;
+            }
+
+            // Check indices block
+            discoveryNodeSelector
+                .hasIndicesBlock(
+                    ClusterBlockLevel.READ,
+                    detector.getIndices().toArray(new String[0]),
+                    ActionListener.wrap(hasIndicesBlock -> {
+                        if (hasIndicesBlock) {
+                            listener.onFailure(new InternalFailure(adID, ResultProcessor.INDEX_READ_BLOCKED));
+                            return;
+                        }
+
+                        // All checks passed, invoke success callback
+                        onSuccess.run();
+                    }, e -> {
+                        LOG.error("Failed to check indices block for {}", adID, e);
+                        listener.onFailure(new InternalFailure(adID, e));
+                    })
                 );
-            return false;
-        }
-
-        if (checkIndicesBlocked(state, ClusterBlockLevel.READ, detector.getIndices().toArray(new String[0]))) {
-            listener.onFailure(new InternalFailure(adID, ResultProcessor.INDEX_READ_BLOCKED));
-            return false;
-        }
-
-        return true;
+        }, e -> {
+            LOG.error("Failed to check global block for {}", adID, e);
+            listener.onFailure(new InternalFailure(adID, e));
+        }));
     }
 
     public static void handleExecuteException(Exception ex, ActionListener<? extends ActionResponse> listener, String id) {
@@ -953,17 +929,17 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
                         configId
                     );
             }
-            transportService
-                .sendRequest(
+            nodeCommunicator
+                .singleStreamResult(
                     rcfNode,
-                    singleStreamActionName,
-                    new SingleStreamResultRequest(configId, rcfModelId, dataStartTime, dataEndTime, point, taskId),
+                    new SingleStreamResultRequest(configId, rcfModelId, dataStartTime, dataEndTime, point, taskId, config.getTenantId()),
                     option,
                     new ActionListenerResponseHandler<>(
                         new ErrorResponseListener(rcfNode.getId(), configId, failure, new AtomicInteger()),
                         AcknowledgedResponse::new,
                         ThreadPool.Names.SAME
-                    )
+                    ),
+                    transportService
                 );
 
             if (previousException.isPresent()) {
@@ -987,5 +963,5 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
         String taskId
     );
 
-    protected abstract void imputeHC(long dataStartTime, long dataEndTime, String configID, String taskId);
+    protected abstract void imputeHC(long dataStartTime, long dataEndTime, String configID, String tenantId, String taskId);
 }

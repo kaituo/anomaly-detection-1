@@ -116,7 +116,8 @@ public class SearchTopAnomalyResultTransportActionTests extends ADIntegTestCase 
             Arrays.asList(categoryFields.get(0)),
             SearchTopAnomalyResultTransportAction.OrderType.SEVERITY.getName(),
             Instant.now().minus(10, ChronoUnit.DAYS),
-            Instant.now()
+            Instant.now(),
+            null
         );
         SearchTopAnomalyResultResponse searchResponse = client()
             .execute(SearchTopAnomalyResultAction.INSTANCE, searchRequest)

@@ -12,49 +12,49 @@
 package org.opensearch.ad.transport;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.opensearch.OpenSearchStatusException;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
-import org.opensearch.action.get.MultiGetItemResponse;
-import org.opensearch.action.get.MultiGetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.PlainActionFuture;
 import org.opensearch.ad.ADTaskProfileRunner;
-import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.client.ADNodeCommunicator;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
+import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
-import org.opensearch.core.common.bytes.BytesReference;
-import org.opensearch.index.get.GetResult;
 import org.opensearch.telemetry.tracing.noop.NoopTracer;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkRunContext;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.transport.EntityProfileTests;
 import org.opensearch.timeseries.transport.GetConfigRequest;
@@ -71,6 +71,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
     private ActionFilters actionFilters;
     private Client client;
     private SecurityClientUtil clientUtil;
+    private NodeStateManager nodeStateManager;
     private GetConfigRequest request;
     private String detectorId = "yecrdnUBqurvo9uKU_d8";
     private String entityValue = "app_0";
@@ -119,8 +120,10 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
         client = mock(Client.class);
         when(client.threadPool()).thenReturn(threadPool);
 
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
+        nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        DataAccess dataAccess = new DefaultDataAccess(client, clusterService, clientUtil, mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class));
+        RunContext runContext = new SdkRunContext();
 
         adTaskManager = mock(ADTaskManager.class);
 
@@ -131,12 +134,15 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
             nodeFilter,
             actionFilters,
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
+            nodeStateManager,
+            mock(ADNodeCommunicator.class),
             Settings.EMPTY,
             xContentRegistry(),
             adTaskManager,
-            adTaskProfileRunner
+            adTaskProfileRunner,
+            mock(ADDelegatingDataManagement.class),
+            runContext
         );
 
         entity = Entity.createSingleAttributeEntity(categoryField, entityValue);
@@ -147,7 +153,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
 
         rawPath = "_opendistro/_anomaly_detection/detectors/T4c3dXUBj-2IZN7itix_/_profile";
 
-        request = new GetConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), 0L, false, false, typeStr, rawPath, false, entity);
+        request = new GetConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), 0L, false, false, typeStr, rawPath, false, entity, null);
 
         future = new PlainActionFuture<>();
         action.doExecute(null, request, future);
@@ -157,22 +163,16 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
     @SuppressWarnings("unchecked")
     public void testValidRequest() {
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            GetRequest request = (GetRequest) args[0];
-            ActionListener<GetResponse> listener = (ActionListener<GetResponse>) args[1];
-
-            String indexName = request.index();
-            if (indexName.equals(ADCommonName.CONFIG_INDEX)) {
-                listener.onResponse(null);
-            }
+            ActionListener<Optional<AnomalyDetector>> listener = (ActionListener<Optional<AnomalyDetector>>) invocation.getArguments()[4];
+            listener.onResponse(Optional.empty());
             return null;
-        }).when(client).get(any(), any());
+        }).when(nodeStateManager).getConfig(eq(detectorId), eq(null), eq(AnalysisType.AD), anyBoolean(), any());
 
         typeStr = "entity_info,init_progress";
 
         rawPath = "_opendistro/_anomaly_detection/detectors/T4c3dXUBj-2IZN7itix_/_profile";
 
-        request = new GetConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), 0L, false, false, typeStr, rawPath, false, entity);
+        request = new GetConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), 0L, false, false, typeStr, rawPath, false, entity, null);
 
         future = new PlainActionFuture<>();
         action.doExecute(null, request, future);
@@ -182,7 +182,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
     public void testGetTransportActionWithReturnTask() {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            Consumer<List<ADTask>> consumer = (Consumer<List<ADTask>>) args[4];
+            Consumer<List<ADTask>> consumer = (Consumer<List<ADTask>>) args[5];
 
             consumer.accept(createADTaskList());
             return null;
@@ -190,6 +190,7 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
             .when(adTaskManager)
             .getAndExecuteOnLatestTasks(
                 anyString(),
+                eq(null),
                 eq(null),
                 eq(null),
                 anyList(),
@@ -201,38 +202,24 @@ public class GetAnomalyDetectorTests extends AbstractTimeSeriesTest {
             );
 
         doAnswer(invocation -> {
-            Object[] args = invocation.getArguments();
-            ActionListener<MultiGetResponse> listener = (ActionListener<MultiGetResponse>) args[1];
-
-            listener.onResponse(createMultiGetResponse());
+            ActionListener<Optional<AnomalyDetector>> listener = (ActionListener<Optional<AnomalyDetector>>) invocation.getArguments()[4];
+            AnomalyDetector detector = mock(AnomalyDetector.class);
+            when(detector.getVersion()).thenReturn(1L);
+            when(detector.getId()).thenReturn(detectorId);
+            listener.onResponse(Optional.of(detector));
             return null;
-        }).when(client).multiGet(any(), any());
+        }).when(nodeStateManager).getConfig(eq(detectorId), eq(null), eq(AnalysisType.AD), anyBoolean(), any());
 
         rawPath = "_opendistro/_anomaly_detection/detectors/T4c3dXUBj-2IZN7itix_";
 
-        request = new GetConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), 0L, false, true, typeStr, rawPath, false, entity);
+        request = new GetConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), 0L, false, true, typeStr, rawPath, false, entity, null);
         future = new PlainActionFuture<>();
         action.getExecute(request, future);
 
-        verify(client).multiGet(any(), any());
-    }
-
-    private MultiGetResponse createMultiGetResponse() {
-        MultiGetItemResponse[] items = new MultiGetItemResponse[2];
-        ByteBuffer[] buffers = new ByteBuffer[0];
-        items[0] = new MultiGetItemResponse(
-            new GetResponse(
-                new GetResult(CommonName.JOB_INDEX, "test_1", 1, 1, 0, true, BytesReference.fromByteBuffers(buffers), null, null)
-            ),
-            null
-        );
-        items[1] = new MultiGetItemResponse(
-            new GetResponse(
-                new GetResult(CommonName.JOB_INDEX, "test_2", 1, 1, 0, true, BytesReference.fromByteBuffers(buffers), null, null)
-            ),
-            null
-        );
-        return new MultiGetResponse(items);
+        GetAnomalyDetectorResponse response = future.actionGet();
+        assertEquals("test3", response.getRealtimeAdTask().getTaskId());
+        assertEquals("test4", response.getHistoricalAdTask().getTaskId());
+        assertNotNull(response.getDetector());
     }
 
     private List<ADTask> createADTaskList() {

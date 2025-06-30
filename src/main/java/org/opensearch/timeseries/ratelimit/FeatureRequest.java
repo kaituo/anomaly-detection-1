@@ -30,12 +30,13 @@ public class FeatureRequest extends QueuedRequest {
         double[] currentFeature,
         long dataStartTimeMs,
         Entity entity,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
-        super(expirationEpochMs, configId, priority);
+        super(expirationEpochMs, configId, priority, tenantId);
         this.currentFeature = currentFeature;
         this.dataStartTimeMillis = dataStartTimeMs;
-        this.modelId = entity.getModelId(configId).isEmpty() ? null : entity.getModelId(configId).get();
+        this.modelId = entity.getModelId(tenantId, configId).isEmpty() ? null : entity.getModelId(tenantId, configId).get();
         this.entity = Optional.ofNullable(entity);
         this.taskId = taskId;
     }
@@ -48,9 +49,10 @@ public class FeatureRequest extends QueuedRequest {
         String modelId,
         double[] currentFeature,
         long dataStartTimeMs,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
-        super(expirationEpochMs, configId, priority);
+        super(expirationEpochMs, configId, priority, tenantId);
         this.currentFeature = currentFeature;
         this.dataStartTimeMillis = dataStartTimeMs;
         this.modelId = modelId;

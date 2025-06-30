@@ -64,6 +64,7 @@ public class GetAnomalyDetectorActionTests extends OpenSearchSingleNodeTestCase 
             "nonempty",
             "",
             false,
+            null,
             null
         );
         request.writeTo(out);

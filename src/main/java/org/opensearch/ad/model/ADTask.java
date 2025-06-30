@@ -348,7 +348,8 @@ public class ADTask extends TimeSeriesTask {
                 detector.getFlattenResultIndexMapping(),
                 detector.getLastBreakingUIChangeTime(),
                 detector.getFrequency(),
-                detector.getAutoCreated()
+                detector.getAutoCreated(),
+                detector.getTenantId()
             );
         return new Builder()
             .taskId(parsedTaskId)
@@ -411,5 +412,10 @@ public class ADTask extends TimeSeriesTask {
 
     public void setDetectionDateRange(DateRange detectionDateRange) {
         this.detectionDateRange = detectionDateRange;
+    }
+
+    @Override
+    public String getTenantId() {
+        return detector.getTenantId();
     }
 }

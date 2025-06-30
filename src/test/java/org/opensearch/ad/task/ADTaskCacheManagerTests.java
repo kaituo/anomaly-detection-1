@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.After;
 import org.junit.Before;
 import org.opensearch.ad.model.ADTask;
@@ -381,9 +382,9 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
 
     public void testDeletedTask() {
         String taskId = randomAlphaOfLength(10);
-        adTaskCacheManager.addDeletedTask(taskId);
+        adTaskCacheManager.addDeletedTask(taskId, null);
         assertTrue(adTaskCacheManager.hasDeletedTask());
-        assertEquals(taskId, adTaskCacheManager.pollDeletedTask());
+        assertEquals(taskId, adTaskCacheManager.pollDeletedTask().getLeft());
         assertFalse(adTaskCacheManager.hasDeletedTask());
     }
 
@@ -539,9 +540,9 @@ public class ADTaskCacheManagerTests extends OpenSearchTestCase {
 
     public void testAddDeletedDetector() {
         String detectorId = randomAlphaOfLength(5);
-        adTaskCacheManager.addDeletedConfig(detectorId);
-        String polledDetectorId = adTaskCacheManager.pollDeletedConfig();
-        assertEquals(detectorId, polledDetectorId);
+        adTaskCacheManager.addDeletedConfig(detectorId, null);
+        Pair<String, String> polledDetector = adTaskCacheManager.pollDeletedConfig();
+        assertEquals(detectorId, polledDetector.getLeft());
         assertNull(adTaskCacheManager.pollDeletedConfig());
     }
 

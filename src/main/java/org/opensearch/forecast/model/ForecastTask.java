@@ -1,8 +1,4 @@
 /*
-<<<<<<< HEAD
- * Copyright OpenSearch Contributors
- * SPDX-License-Identifier: Apache-2.0
-=======
  * SPDX-License-Identifier: Apache-2.0
  *
  * The OpenSearch Contributors require contributions made to
@@ -11,7 +7,6 @@
  *
  * Modifications Copyright OpenSearch Contributors. See
  * GitHub history for details.
->>>>>>> f22eaa95 (test)
  */
 
 package org.opensearch.forecast.model;
@@ -346,7 +341,8 @@ public class ForecastTask extends TimeSeriesTask {
                 forecaster.getFlattenResultIndexMapping(),
                 forecaster.getLastBreakingUIChangeTime(),
                 forecaster.getFrequency(),
-                forecaster.getAutoCreated()
+                forecaster.getAutoCreated(),
+                forecaster.getTenantId()
             );
         return new Builder()
             .taskId(parsedTaskId)
@@ -409,5 +405,10 @@ public class ForecastTask extends TimeSeriesTask {
 
     public void setDateRange(DateRange dateRange) {
         this.dateRange = dateRange;
+    }
+
+    @Override
+    public String getTenantId() {
+        return forecaster.getTenantId();
     }
 }

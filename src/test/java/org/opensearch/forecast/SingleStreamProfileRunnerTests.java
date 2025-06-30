@@ -9,8 +9,10 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.emptySet;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -37,7 +39,6 @@ import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.cluster.ClusterName;
 import org.opensearch.cluster.node.DiscoveryNode;
-import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.common.transport.TransportAddress;
 import org.opensearch.forecast.constant.ForecastCommonName;
@@ -47,10 +48,11 @@ import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.forecast.model.ForecasterProfile;
 import org.opensearch.forecast.task.ForecastTaskManager;
-import org.opensearch.forecast.transport.ForecastProfileAction;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.model.ConfigProfile;
 import org.opensearch.timeseries.model.ConfigState;
@@ -59,14 +61,14 @@ import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.transport.ProfileNodeResponse;
 import org.opensearch.timeseries.transport.ProfileResponse;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
 public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
     private ForecastProfileRunner runner;
     private Client client;
-    private SecurityClientUtil clientUtil;
+    private NodeCommunicator nodeCommunicator;
+    private DataAccess dataAccess;
     private DiscoveryNodeFilterer nodeFilter;
     private int requiredSamples;
     private Forecaster forecaster;
@@ -89,6 +91,7 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
     private ForecastTaskManager forecastTaskManager;
     private ForecastTaskProfileRunner taskProfileRunner;
     private ForecastTask task;
+    private StateManager stateManager;
 
     enum InittedEverResultStatus {
         INITTED,
@@ -112,8 +115,8 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
         super.setUp();
         client = mock(Client.class);
         taskProfileRunner = mock(ForecastTaskProfileRunner.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        clientUtil = new SecurityClientUtil(nodeStateManager, Settings.EMPTY);
+        nodeCommunicator = mock(NodeCommunicator.class);
+        dataAccess = mock(DataAccess.class);
         nodeFilter = mock(DiscoveryNodeFilterer.class);
         requiredSamples = 128;
 
@@ -121,24 +124,28 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
         forecaster = TestHelpers.ForecasterBuilder.newInstance().setConfigId(forecasterId).setCategoryFields(null).build();
         job = TestHelpers.randomJob(true);
         forecastTaskManager = mock(ForecastTaskManager.class);
+        stateManager = mock(StateManager.class);
         transportService = mock(TransportService.class);
         task = TestHelpers.ForecastTaskBuilder.newInstance().build();
+        when(forecastTaskManager.getStateManager()).thenReturn(stateManager);
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            Consumer<Optional<ForecastTask>> function = (Consumer<Optional<ForecastTask>>) args[2];
+            Consumer<Optional<ForecastTask>> function = (Consumer<Optional<ForecastTask>>) args[3];
 
             function.accept(Optional.of(task));
             return null;
-        }).when(forecastTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), any(), any(), any(), anyBoolean(), any());
+        })
+            .when(forecastTaskManager)
+            .getAndExecuteOnLatestConfigLevelTask(anyString(), any(), any(), any(), any(), anyBoolean(), any());
         runner = new ForecastProfileRunner(
-            client,
-            clientUtil,
+            nodeCommunicator,
             xContentRegistry(),
             nodeFilter,
             requiredSamples,
             transportService,
             forecastTaskManager,
-            taskProfileRunner
+            taskProfileRunner,
+            dataAccess
         );
 
         doAnswer(invocation -> {
@@ -158,6 +165,18 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).get(any(), any());
 
+        doAnswer(invocation -> {
+            ActionListener<Optional<? extends org.opensearch.timeseries.model.Config>> listener = invocation.getArgument(4);
+            listener.onResponse(Optional.of(forecaster));
+            return null;
+        }).when(stateManager).getConfig(anyString(), any(), any(), anyBoolean(), any());
+
+        doAnswer(invocation -> {
+            ActionListener<Optional<Job>> listener = invocation.getArgument(3);
+            listener.onResponse(Optional.of(job));
+            return null;
+        }).when(stateManager).getJob(anyString(), any(), anyBoolean(), any());
+
         stateNError = new HashSet<ProfileName>();
         stateNError.add(ProfileName.ERROR);
         stateNError.add(ProfileName.STATE);
@@ -167,7 +186,7 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
     private void setUpClientExecuteProfileAction(InittedEverResultStatus initted) {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[2];
+            ActionListener<ProfileResponse> listener = (ActionListener<ProfileResponse>) args[1];
 
             node1 = "node1";
             nodeName1 = "nodename1";
@@ -239,7 +258,7 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
             listener.onResponse(profileResponse);
 
             return null;
-        }).when(client).execute(any(ForecastProfileAction.class), any(), any());
+        }).when(nodeCommunicator).profile(any(), any());
 
     }
 
@@ -247,27 +266,23 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
     private void setUpClientSearch(InittedEverResultStatus inittedEverResultStatus) {
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            SearchRequest request = (SearchRequest) args[0];
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[2];
 
-            ForecastResult result = null;
-            if (request.source().query().toString().contains(ForecastResult.VALUE_FIELD)) {
-                switch (inittedEverResultStatus) {
-                    case INITTED:
-                        result = TestHelpers.ForecastResultBuilder.newInstance().build();
-                        listener.onResponse(TestHelpers.createSearchResponse(result));
-                        break;
-                    case NOT_INITTED:
-                        listener.onResponse(TestHelpers.createEmptySearchResponse());
-                        break;
-                    default:
-                        assertTrue("should not reach here", false);
-                        break;
-                }
+            switch (inittedEverResultStatus) {
+                case INITTED:
+                    ForecastResult result = TestHelpers.ForecastResultBuilder.newInstance().build();
+                    listener.onResponse(TestHelpers.createSearchResponse(result));
+                    break;
+                case NOT_INITTED:
+                    listener.onResponse(TestHelpers.createEmptySearchResponse());
+                    break;
+                default:
+                    assertTrue("should not reach here", false);
+                    break;
             }
 
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).search(any(), any(), any());
     }
 
     public void testInit() throws InterruptedException {
@@ -277,7 +292,7 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
         ConfigProfile expectedProfile = new ForecasterProfile.Builder().state(ConfigState.INIT).build();
-        runner.profile(forecasterId, ActionListener.wrap(response -> {
+        runner.profile(forecasterId, null, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -294,7 +309,7 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
         ConfigProfile expectedProfile = new ForecasterProfile.Builder().state(ConfigState.RUNNING).build();
-        runner.profile(forecasterId, ActionListener.wrap(response -> {
+        runner.profile(forecasterId, null, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -315,7 +330,7 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
         ConfigProfile expectedProfile = new ForecasterProfile.Builder().state(ConfigState.RUNNING).build();
-        runner.profile(forecasterId, ActionListener.wrap(response -> {
+        runner.profile(forecasterId, null, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {
@@ -360,7 +375,7 @@ public class SingleStreamProfileRunnerTests extends AbstractTimeSeriesTest {
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
 
         ConfigProfile expectedProfile = new ForecasterProfile.Builder().state(ConfigState.RUNNING).build();
-        runner.profile(forecasterId, ActionListener.wrap(response -> {
+        runner.profile(forecasterId, null, ActionListener.wrap(response -> {
             assertEquals(expectedProfile, response);
             inProgressLatch.countDown();
         }, exception -> {

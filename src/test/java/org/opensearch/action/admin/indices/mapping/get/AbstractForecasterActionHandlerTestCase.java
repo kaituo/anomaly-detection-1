@@ -24,24 +24,25 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
-import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
-import org.opensearch.forecast.model.ForecastTask;
-import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.model.Forecaster;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
-import org.opensearch.timeseries.task.TaskCacheManager;
-import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
+import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
 
@@ -50,7 +51,8 @@ public class AbstractForecasterActionHandlerTestCase extends AbstractTimeSeriesT
     protected ClusterService clusterService;
     protected ActionListener<ValidateConfigResponse> channel;
     protected TransportService transportService;
-    protected ForecastIndexManagement forecastISM;
+    protected ForecastDelegatingDataManagement forecastISM;
+    protected ForecastIndexManagement forecastIndexManagement;
     protected String forecasterId;
     protected Long seqNo;
     protected Long primaryTerm;
@@ -63,8 +65,9 @@ public class AbstractForecasterActionHandlerTestCase extends AbstractTimeSeriesT
     protected Integer maxCategoricalFields;
     protected Settings settings;
     protected RestRequest.Method method;
-    protected TaskManager<TaskCacheManager, ForecastTaskType, ForecastTask, ForecastIndex, ForecastIndexManagement> forecastTaskManager;
+    protected ForecastTaskManager forecastTaskManager;
     protected SearchFeatureDao searchFeatureDao;
+    protected DataAccess dataAccess;
     protected Clock clock;
     @Mock
     protected Client clientMock;
@@ -72,6 +75,7 @@ public class AbstractForecasterActionHandlerTestCase extends AbstractTimeSeriesT
     protected ThreadPool threadPool;
     protected ThreadContext threadContext;
     protected SecurityClientUtil clientUtil;
+    protected RunContext runContext;
     protected String categoricalField;
     // @Mock
     protected ClusterName clusterName;
@@ -86,6 +90,7 @@ public class AbstractForecasterActionHandlerTestCase extends AbstractTimeSeriesT
         settings = Settings.EMPTY;
 
         clusterService = mock(ClusterService.class);
+        when(clusterService.getSettings()).thenReturn(settings);
         ClusterName clusterName = new ClusterName("test");
         clusterName = mock(ClusterName.class);
         when(clusterService.getClusterName()).thenReturn(clusterName);
@@ -96,8 +101,9 @@ public class AbstractForecasterActionHandlerTestCase extends AbstractTimeSeriesT
         channel = mock(ActionListener.class);
         transportService = mock(TransportService.class);
 
-        forecastISM = mock(ForecastIndexManagement.class);
-        when(forecastISM.doesConfigIndexExist()).thenReturn(true);
+        forecastIndexManagement = mock(ForecastIndexManagement.class);
+        when(forecastIndexManagement.doesConfigIndexExist()).thenReturn(true);
+        forecastISM = new ForecastDelegatingDataManagement(forecastIndexManagement, null, clusterService);
 
         forecasterId = "123";
         seqNo = 0L;
@@ -123,13 +129,24 @@ public class AbstractForecasterActionHandlerTestCase extends AbstractTimeSeriesT
         method = RestRequest.Method.POST;
         forecastTaskManager = mock(ForecastTaskManager.class);
         searchFeatureDao = mock(SearchFeatureDao.class);
+        dataAccess = mock(DataAccess.class);
 
         threadContext = new ThreadContext(settings);
         Mockito.doReturn(threadPool).when(clientMock).threadPool();
         Mockito.doReturn(threadContext).when(threadPool).getThreadContext();
+        runContext = new ThreadRunContext(threadContext);
 
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+    }
+
+    protected void useDataAccess(NodeClient client) {
+        dataAccess = new DefaultDataAccess(
+            client,
+            clusterService,
+            clientUtil,
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
     }
 
 }

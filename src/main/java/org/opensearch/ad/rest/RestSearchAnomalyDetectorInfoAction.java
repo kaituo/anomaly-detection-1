@@ -22,13 +22,16 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.SearchAnomalyDetectorInfoAction;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.rest.BaseRestHandler;
 import org.opensearch.rest.RestHandler;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.transport.SearchConfigInfoRequest;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 
 import com.google.common.collect.ImmutableList;
 
@@ -37,8 +40,11 @@ public class RestSearchAnomalyDetectorInfoAction extends BaseRestHandler {
     public static final String SEARCH_ANOMALY_DETECTOR_INFO_ACTION = "search_anomaly_detector_info";
 
     private static final Logger logger = LogManager.getLogger(RestSearchAnomalyDetectorInfoAction.class);
+    private final Settings settings;
 
-    public RestSearchAnomalyDetectorInfoAction() {}
+    public RestSearchAnomalyDetectorInfoAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -55,7 +61,8 @@ public class RestSearchAnomalyDetectorInfoAction extends BaseRestHandler {
         String detectorName = request.param("name", null);
         String rawPath = request.rawPath();
 
-        SearchConfigInfoRequest searchAnomalyDetectorInfoRequest = new SearchConfigInfoRequest(detectorName, rawPath);
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
+        SearchConfigInfoRequest searchAnomalyDetectorInfoRequest = new SearchConfigInfoRequest(detectorName, rawPath, tenantId);
         return channel -> client
             .execute(SearchAnomalyDetectorInfoAction.INSTANCE, searchAnomalyDetectorInfoRequest, new RestToXContentListener<>(channel));
     }

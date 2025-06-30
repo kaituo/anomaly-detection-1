@@ -40,6 +40,7 @@ import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.rest.handler.IndexAnomalyDetectorActionHandler;
 import org.opensearch.ad.rest.handler.ValidateAnomalyDetectorActionHandler;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.ClusterName;
@@ -53,11 +54,14 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.ValidationAspect;
-import org.opensearch.timeseries.task.TaskManager;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
@@ -67,12 +71,12 @@ import org.opensearch.transport.client.node.NodeClient;
 import com.google.common.collect.ImmutableList;
 
 public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSeriesTest {
-
     protected ValidateAnomalyDetectorActionHandler handler;
     protected ClusterService clusterService;
     protected ActionListener<ValidateConfigResponse> channel;
     protected TransportService transportService;
-    protected ADIndexManagement anomalyDetectionIndices;
+    protected ADDelegatingDataManagement anomalyDetectionIndices;
+    protected ADIndexManagement adIndexManagement;
     protected String detectorId;
     protected Long seqNo;
     protected Long primaryTerm;
@@ -85,9 +89,11 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
     protected Integer maxCategoricalFields;
     protected Settings settings;
     protected RestRequest.Method method;
-    protected TaskManager<ADTaskCacheManager, ADTaskType, ADTask, ADIndex, ADIndexManagement> adTaskManager;
+    protected ADTaskManager adTaskManager;
     protected SearchFeatureDao searchFeatureDao;
+    protected DataAccess dataAccess;
     protected Clock clock;
+    protected RunContext runContext;
 
     @Mock
     private Client clientMock;
@@ -105,11 +111,13 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
 
         settings = Settings.EMPTY;
         clusterService = mock(ClusterService.class);
+        when(clusterService.getSettings()).thenReturn(settings);
         channel = mock(ActionListener.class);
         transportService = mock(TransportService.class);
 
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
-        when(anomalyDetectionIndices.doesConfigIndexExist()).thenReturn(true);
+        adIndexManagement = mock(ADIndexManagement.class);
+        when(adIndexManagement.doesConfigIndexExist()).thenReturn(true);
+        anomalyDetectionIndices = new ADDelegatingDataManagement(adIndexManagement, null, clusterService);
         mockClusterName = mock(ClusterName.class);
         when(clusterService.getClusterName()).thenReturn(mockClusterName);
         when(mockClusterName.value()).thenReturn("test");
@@ -121,8 +129,7 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         refreshPolicy = WriteRequest.RefreshPolicy.IMMEDIATE;
 
         String field = "a";
-        detector = TestHelpers
-            .randomAnomalyDetectorUsingCategoryFields(detectorId, "timestamp", ImmutableList.of("test-index"), Arrays.asList(field));
+        detector = TestHelpers.randomAnomalyDetectorUsingCategoryFields(detectorId, "timestamp", ImmutableList.of("test-index"), Arrays.asList(field));
 
         requestTimeout = new TimeValue(1000L);
         maxSingleEntityAnomalyDetectors = 1000;
@@ -132,10 +139,21 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         method = RestRequest.Method.POST;
         adTaskManager = mock(ADTaskManager.class);
         searchFeatureDao = mock(SearchFeatureDao.class);
+        dataAccess = mock(DataAccess.class);
 
         threadContext = new ThreadContext(settings);
         Mockito.doReturn(threadPool).when(clientMock).threadPool();
         Mockito.doReturn(threadContext).when(threadPool).getThreadContext();
+        runContext = new ThreadRunContext(threadContext);
+    }
+
+    private DataAccess createDataAccess(NodeClient client, SecurityClientUtil clientUtil) {
+        return new DefaultDataAccess(
+            client,
+            clusterService,
+            clientUtil,
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
     }
 
     public void testValidateMoreThanThousandSingleEntityDetectorLimit() throws IOException, InterruptedException {
@@ -157,11 +175,11 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         SecurityClientUtil clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        dataAccess = createDataAccess(clientSpy, clientUtil);
 
         handler = new ValidateAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             anomalyDetectionIndices,
             singleEntityDetector,
             requestTimeout,
@@ -175,7 +193,8 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
             searchFeatureDao,
             ValidationAspect.DETECTOR.getName(),
             clock,
-            settings
+            settings,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -214,11 +233,11 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         SecurityClientUtil clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        dataAccess = createDataAccess(clientSpy, clientUtil);
 
         handler = new ValidateAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             anomalyDetectionIndices,
             detector,
             requestTimeout,
@@ -232,7 +251,8 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
             searchFeatureDao,
             "",
             clock,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
         final CountDownLatch inProgressLatch = new CountDownLatch(1);
         handler.start(ActionListener.wrap(r -> {
@@ -277,11 +297,11 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
         NodeClient clientSpy = spy(client);
         NodeStateManager nodeStateManager = mock(NodeStateManager.class);
         SecurityClientUtil clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        dataAccess = createDataAccess(clientSpy, clientUtil);
 
         handler = new ValidateAnomalyDetectorActionHandler(
             clusterService,
-            clientSpy,
-            clientUtil,
+            dataAccess,
             anomalyDetectionIndices,
             singleEntityDetector,
             requestTimeout,
@@ -295,7 +315,8 @@ public class ValidateAnomalyDetectorActionHandlerTests extends AbstractTimeSerie
             searchFeatureDao,
             ValidationAspect.DETECTOR.getName(),
             clock,
-            settings
+            settings,
+            runContext
         );
         PlainActionFuture<ValidateConfigResponse> future = PlainActionFuture.newFuture();
         handler.start(future);

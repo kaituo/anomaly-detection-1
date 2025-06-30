@@ -453,6 +453,8 @@ public abstract class TimeSeriesTask implements ToXContentObject, Writeable {
     public abstract boolean isHistoricalEntityTask();
 
     public String getEntityModelId() {
-        return entity == null ? null : entity.getModelId(configId).orElse(null);
+        return entity == null ? null : entity.getModelId(getTenantId(), configId).orElse(null);
     }
+
+    public abstract String getTenantId();
 }

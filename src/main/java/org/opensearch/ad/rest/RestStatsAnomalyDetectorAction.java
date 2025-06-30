@@ -18,13 +18,16 @@ import java.util.List;
 
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.stats.ADStats;
 import org.opensearch.ad.transport.StatsAnomalyDetectorAction;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.rest.RestStatsAction;
 import org.opensearch.timeseries.transport.StatsRequest;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -35,15 +38,18 @@ import com.google.common.collect.ImmutableList;
 public class RestStatsAnomalyDetectorAction extends RestStatsAction {
 
     private static final String STATS_ANOMALY_DETECTOR_ACTION = "stats_anomaly_detector";
+    private final Settings settings;
 
     /**
      * Constructor
      *
      * @param timeSeriesStats TimeSeriesStats object
      * @param nodeFilter util class to get eligible data nodes
+     * @param settings Settings object
      */
-    public RestStatsAnomalyDetectorAction(ADStats timeSeriesStats, DiscoveryNodeFilterer nodeFilter) {
+    public RestStatsAnomalyDetectorAction(ADStats timeSeriesStats, DiscoveryNodeSelector nodeFilter, Settings settings) {
         super(timeSeriesStats, nodeFilter);
+        this.settings = settings;
     }
 
     @Override
@@ -56,7 +62,8 @@ public class RestStatsAnomalyDetectorAction extends RestStatsAction {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
         }
-        StatsRequest adStatsRequest = getRequest(request);
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
+        StatsRequest adStatsRequest = getRequest(request, tenantId);
         return channel -> client.execute(StatsAnomalyDetectorAction.INSTANCE, adStatsRequest, new RestToXContentListener<>(channel));
     }
 

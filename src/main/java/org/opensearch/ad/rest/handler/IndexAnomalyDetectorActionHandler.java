@@ -12,8 +12,8 @@
 package org.opensearch.ad.rest.handler;
 
 import org.opensearch.action.support.WriteRequest;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.ad.transport.IndexAnomalyDetectorResponse;
 import org.opensearch.cluster.service.ClusterService;
@@ -22,10 +22,10 @@ import org.opensearch.common.unit.TimeValue;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.rest.RestRequest;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
-import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 /**
  * Anomaly detector REST action handler to process POST/PUT request.
@@ -34,37 +34,11 @@ import org.opensearch.transport.client.Client;
  */
 public class IndexAnomalyDetectorActionHandler extends AbstractAnomalyDetectorActionHandler<IndexAnomalyDetectorResponse> {
 
-    /**
-     * Constructor function.
-     *
-     * @param clusterService           ClusterService
-     * @param client                   ES node client that executes actions on the local node
-     * @param clientUtil               AD client util
-     * @param transportService         ES transport service
-     * @param anomalyDetectionIndices  anomaly detector index manager
-     * @param detectorId               detector identifier
-     * @param seqNo                    sequence number of last modification
-     * @param primaryTerm              primary term of last modification
-     * @param refreshPolicy            refresh policy
-     * @param anomalyDetector          anomaly detector instance
-     * @param requestTimeout           request time out configuration
-     * @param maxSingleStreamDetectors max single-stream anomaly detectors allowed
-     * @param maxHCDetectors           max HC detectors allowed
-     * @param maxFeatures              max features allowed per detector
-     * @param maxCategoricalFields     max number of categorical fields
-     * @param method                   Rest Method type
-     * @param xContentRegistry         Registry which is used for XContentParser
-     * @param user                     User context
-     * @param adTaskManager            AD Task manager
-     * @param searchFeatureDao         Search feature dao
-     * @param settings                 Node settings
-     */
     public IndexAnomalyDetectorActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         TransportService transportService,
-        ADIndexManagement anomalyDetectionIndices,
+        ADDelegatingDataManagement anomalyDetectionIndices,
         String detectorId,
         Long seqNo,
         Long primaryTerm,
@@ -80,12 +54,12 @@ public class IndexAnomalyDetectorActionHandler extends AbstractAnomalyDetectorAc
         User user,
         ADTaskManager adTaskManager,
         SearchFeatureDao searchFeatureDao,
-        Settings settings
+        Settings settings,
+        RunContext runContext
     ) {
         super(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             transportService,
             anomalyDetectionIndices,
             detectorId,
@@ -106,7 +80,8 @@ public class IndexAnomalyDetectorActionHandler extends AbstractAnomalyDetectorAc
             null,
             false,
             null,
-            settings
+            settings,
+            runContext
         );
     }
 }

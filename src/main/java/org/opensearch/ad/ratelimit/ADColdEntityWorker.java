@@ -19,9 +19,9 @@ import java.time.Duration;
 import java.util.Random;
 
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
@@ -29,6 +29,7 @@ import org.opensearch.ad.ml.ThresholdingResult;
 import org.opensearch.ad.model.ADTask;
 import org.opensearch.ad.model.ADTaskType;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
 import org.opensearch.cluster.service.ClusterService;
@@ -36,8 +37,7 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.ColdEntityWorker;
 
@@ -59,7 +59,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  *
  */
 public class ADColdEntityWorker extends
-    ColdEntityWorker<ThresholdedRandomCutForest, AnomalyResult, ADIndex, ADIndexManagement, ADCheckpointDao, ThresholdingResult, ADModelManager, ADCheckpointWriteWorker, ADColdStart, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker, ADRealTimeInferencer, ADCheckpointReadWorker> {
+    ColdEntityWorker<ThresholdedRandomCutForest, AnomalyResult, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ThresholdingResult, ADModelManager, ADCheckpointWriteWorker, ADColdStart, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker, ADRealTimeInferencer, ADCheckpointReadWorker> {
     public static final String WORKER_NAME = "ad-cold-entity";
 
     public ADColdEntityWorker(
@@ -78,7 +78,7 @@ public class ADColdEntityWorker extends
         int maintenanceFreqConstant,
         ADCheckpointReadWorker checkpointReadQueue,
         Duration stateTtl,
-        NodeStateManager nodeStateManager
+        StateManager nodeStateManager
     ) {
         super(
             WORKER_NAME,
@@ -89,7 +89,7 @@ public class ADColdEntityWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,

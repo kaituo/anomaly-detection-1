@@ -19,6 +19,8 @@ import org.opensearch.timeseries.transport.JobResponse;
 
 public class ForwardADTaskAction extends ActionType<JobResponse> {
     // Internal Action which is not used for public facing RestAPIs.
+    // Mostly used for historical analysis. Realtime needed it to find coordinating node in record to execute task.
+    // There is fallback if no coordinating node is found.
     public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "detector/" + AD_TASK + "/forward";
     public static final ForwardADTaskAction INSTANCE = new ForwardADTaskAction();
 

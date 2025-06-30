@@ -14,6 +14,7 @@ package org.opensearch.timeseries.feature;
 import static org.hamcrest.core.IsInstanceOf.instanceOf;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -98,6 +99,7 @@ import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
 import org.opensearch.timeseries.model.Entity;
@@ -119,6 +121,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
 
     private AnomalyDetector detector;
     private Client client;
+    private DataAccess dataAccess;
     private SearchFeatureDao searchFeatureDao;
     private Imputer imputer;
     private SecurityClientUtil clientUtil;
@@ -172,18 +175,11 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
         clusterService = mock(ClusterService.class);
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
         clock = mock(Clock.class);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
-            listener.onResponse(Optional.of(detector));
-            return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
-        clientUtil = new SecurityClientUtil(nodeStateManager, settings);
+        dataAccess = mock(DataAccess.class);
 
         searchFeatureDao = new SearchFeatureDao(
-            client,
             xContentRegistry(), // Important. Without this, ParseUtils cannot parse anything
-            clientUtil,
+            dataAccess,
             clusterService,
             TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
@@ -292,10 +288,10 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             assertTrue(!factory.isEmpty());
             assertThat(factory.iterator().next(), instanceOf(TermsAggregationBuilder.class));
 
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), anyString(), any(), any(), any(ActionListener.class));
 
         String categoryField = "fieldName";
         when(detector.getCategoryFields()).thenReturn(Collections.singletonList(categoryField));
@@ -316,13 +312,13 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
 
         CountDownLatch inProgress = new CountDownLatch(1);
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
 
             inProgress.countDown();
             listener.onResponse(response1);
 
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), anyString(), any(), any(), any(ActionListener.class));
 
         ActionListener<List<Entity>> listener = mock(ActionListener.class);
 
@@ -352,7 +348,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
 
         CountDownLatch inProgress = new CountDownLatch(2);
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             inProgress.countDown();
             if (inProgress.getCount() == 1) {
                 listener.onResponse(response1);
@@ -361,14 +357,13 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             }
 
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), anyString(), any(), any(), any(ActionListener.class));
 
         ActionListener<List<Entity>> listener = mock(ActionListener.class);
 
         searchFeatureDao = new SearchFeatureDao(
-            client,
             xContentRegistry(),
-            clientUtil,
+            dataAccess,
             clusterService,
             TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
@@ -395,7 +390,7 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
 
         CountDownLatch inProgress = new CountDownLatch(2);
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             inProgress.countDown();
             if (inProgress.getCount() == 1) {
                 listener.onResponse(response1);
@@ -404,15 +399,14 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
             }
 
             return null;
-        }).when(client).search(any(), any());
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), anyString(), any(), any(), any(ActionListener.class));
 
         ActionListener<List<Entity>> listener = mock(ActionListener.class);
 
         long timeoutMillis = 60_000L;
         searchFeatureDao = new SearchFeatureDao(
-            client,
             xContentRegistry(),
-            clientUtil,
+            dataAccess,
             clusterService,
             TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
             clock,
@@ -507,10 +501,10 @@ public class NoPowermockSearchFeatureDaoTests extends AbstractTimeSeriesTest {
         );
 
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             listener.onResponse(response);
             return null;
-        }).when(client).search(any(), any(ActionListener.class));
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), anyString(), any(), any(), any(ActionListener.class));
 
         List<Entry<Long, Long>> sampleRanges = new ArrayList<>();
         sampleRanges.add(new SimpleImmutableEntry<Long, Long>(1634793970964L, 1634794030964L));

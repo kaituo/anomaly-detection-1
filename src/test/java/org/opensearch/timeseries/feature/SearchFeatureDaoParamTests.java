@@ -14,6 +14,7 @@ package org.opensearch.timeseries.feature;
 import static java.util.Arrays.asList;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -44,6 +45,7 @@ import org.opensearch.action.search.MultiSearchResponse;
 import org.opensearch.action.search.MultiSearchResponse.Item;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.action.ActionFuture;
@@ -64,7 +66,7 @@ import org.opensearch.search.aggregations.metrics.Percentile;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
@@ -94,6 +96,8 @@ public class SearchFeatureDaoParamTests {
     @Mock
     private NamedXContentRegistry xContent;
     private SecurityClientUtil clientUtil;
+    @Mock
+    private DataAccess dataAccess;
 
     @Mock
     private Factory factory;
@@ -143,7 +147,7 @@ public class SearchFeatureDaoParamTests {
         imputer = new LinearUniformImputer(false);
 
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();
@@ -152,15 +156,7 @@ public class SearchFeatureDaoParamTests {
 
         settings = Settings.EMPTY;
 
-        when(client.threadPool()).thenReturn(threadPool);
-        NodeStateManager nodeStateManager = mock(NodeStateManager.class);
-        doAnswer(invocation -> {
-            ActionListener<Optional<AnomalyDetector>> listener = invocation.getArgument(3);
-            listener.onResponse(Optional.of(detector));
-            return null;
-        }).when(nodeStateManager).getConfig(any(String.class), eq(AnalysisType.AD), any(boolean.class), any(ActionListener.class));
-        clientUtil = new SecurityClientUtil(nodeStateManager, settings);
-        searchFeatureDao = spy(new SearchFeatureDao(client, xContent, clientUtil, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE));
+        searchFeatureDao = spy(new SearchFeatureDao(xContent, dataAccess, settings, null, TimeSeriesSettings.NUM_SAMPLES_PER_TREE));
 
         detectionInterval = new IntervalTimeConfiguration(1, ChronoUnit.MINUTES);
         detectorId = "123";
@@ -183,10 +179,10 @@ public class SearchFeatureDaoParamTests {
 
         doAnswer(invocation -> {
             Object[] args = invocation.getArguments();
-            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[1];
+            ActionListener<SearchResponse> listener = (ActionListener<SearchResponse>) args[4];
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(eq(searchRequest), any());
+        }).when(dataAccess).searchWithInjectedSecurity(eq(searchRequest), anyString(), any(), any(), any());
         when(searchResponse.getAggregations()).thenReturn(aggregations);
 
         multiSearchRequest = new MultiSearchRequest();
@@ -214,10 +210,10 @@ public class SearchFeatureDaoParamTests {
         when(searchResponse.getAggregations()).thenReturn(new Aggregations(aggs));
         when(detector.getEnabledFeatureIds()).thenReturn(featureIds);
         doAnswer(invocation -> {
-            ActionListener<SearchResponse> listener = invocation.getArgument(1);
+            ActionListener<SearchResponse> listener = invocation.getArgument(4);
             listener.onResponse(searchResponse);
             return null;
-        }).when(client).search(any(SearchRequest.class), any(ActionListener.class));
+        }).when(dataAccess).searchWithInjectedSecurity(any(SearchRequest.class), anyString(), any(), any(), any(ActionListener.class));
 
         ActionListener<Optional<double[]>> listener = mock(ActionListener.class);
         searchFeatureDao.getFeaturesForPeriod(detector, start, end, listener);

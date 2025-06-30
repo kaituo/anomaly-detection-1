@@ -36,8 +36,8 @@ import org.opensearch.forecast.transport.ForecastResultBulkTransportAction;
 import org.opensearch.index.IndexingPressure;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ForecastResultBulkTransportActionTests extends AbstractTimeSeriesTest {
 
@@ -45,7 +45,7 @@ public class ForecastResultBulkTransportActionTests extends AbstractTimeSeriesTe
     private TransportService transportService;
     private ClusterService clusterService;
     private IndexingPressure indexingPressure;
-    private Client client;
+    private DataAccess dataAccess;
 
     @BeforeClass
     public static void setUpBeforeClass() {
@@ -74,8 +74,7 @@ public class ForecastResultBulkTransportActionTests extends AbstractTimeSeriesTe
 
         ActionFilters actionFilters = mock(ActionFilters.class);
         indexingPressure = mock(IndexingPressure.class);
-
-        client = mock(Client.class);
+        dataAccess = mock(DataAccess.class);
 
         resultBulk = new ForecastResultBulkTransportAction(
             transportService,
@@ -83,7 +82,7 @@ public class ForecastResultBulkTransportActionTests extends AbstractTimeSeriesTe
             indexingPressure,
             settings,
             clusterService,
-            client
+            dataAccess
         );
     }
 
@@ -101,7 +100,7 @@ public class ForecastResultBulkTransportActionTests extends AbstractTimeSeriesTe
         when(indexingPressure.getCurrentReplicaBytes()).thenReturn(0L);
 
         // Create a ForecastResultBulkRequest with some results
-        ForecastResultBulkRequest originalRequest = new ForecastResultBulkRequest();
+        ForecastResultBulkRequest originalRequest = new ForecastResultBulkRequest((String) null);
         originalRequest.add(TestHelpers.randomForecastResultWriteRequest());
         originalRequest.add(TestHelpers.randomForecastResultWriteRequest());
 
@@ -111,7 +110,7 @@ public class ForecastResultBulkTransportActionTests extends AbstractTimeSeriesTe
             ActionListener<BulkResponse> listener = (ActionListener<BulkResponse>) args[2];
             listener.onFailure(new RuntimeException("Simulated bulk indexing failure"));
             return null;
-        }).when(client).execute(any(), any(), any());
+        }).when(dataAccess).bulk(any(), any(), any());
 
         // Execute the action
         PlainActionFuture<ResultBulkResponse> future = PlainActionFuture.newFuture();
@@ -138,7 +137,7 @@ public class ForecastResultBulkTransportActionTests extends AbstractTimeSeriesTe
         doThrow(new IOException("Simulated IOException in toXContent")).when(faultyResult).toXContent(any(XContentBuilder.class), any());
 
         // Create a ForecastResultBulkRequest with the faulty write request
-        ForecastResultBulkRequest originalRequest = new ForecastResultBulkRequest();
+        ForecastResultBulkRequest originalRequest = new ForecastResultBulkRequest((String) null);
         originalRequest.add(faultyWriteRequest);
 
         // Execute the prepareBulkRequest method directly

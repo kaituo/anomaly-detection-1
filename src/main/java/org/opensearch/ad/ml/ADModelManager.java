@@ -30,15 +30,17 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.feature.FeatureManager;
@@ -63,7 +65,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * A facade managing ML operations and models.
  */
 public class ADModelManager extends
-    ModelManager<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADIndexManagement, ADCheckpointDao, ADColdStart> {
+    ModelManager<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADColdStart> {
     protected static final String ENTITY_SAMPLE = "sp";
     protected static final String ENTITY_RCF = "rcf";
     protected static final String ENTITY_THRESHOLD = "th";
@@ -102,7 +104,7 @@ public class ADModelManager extends
      * @param clusterService Cluster service accessor
      */
     public ADModelManager(
-        ADCheckpointDao checkpointDao,
+        ADCheckpointStore checkpointDao,
         Clock clock,
         int rcfNumTrees,
         int rcfNumSamplesInTree,
@@ -115,9 +117,21 @@ public class ADModelManager extends
         FeatureManager featureManager,
         MemoryTracker memoryTracker,
         Settings settings,
-        ClusterService clusterService
+        ClusterService clusterService,
+        StateManager nodeStateManager
     ) {
-        super(rcfNumTrees, rcfNumSamplesInTree, rcfNumMinSamples, entityColdStarter, memoryTracker, clock, featureManager, checkpointDao);
+        super(
+            rcfNumTrees,
+            rcfNumSamplesInTree,
+            rcfNumMinSamples,
+            entityColdStarter,
+            memoryTracker,
+            clock,
+            featureManager,
+            checkpointDao,
+            nodeStateManager,
+            AnalysisType.AD
+        );
 
         this.thresholdMinPvalue = thresholdMinPvalue;
         this.minPreviewSize = minPreviewSize;
@@ -204,7 +218,16 @@ public class ADModelManager extends
         }
     }
 
-    Optional<ModelState<ThresholdedRandomCutForest>> restoreModelState(
+    @Deprecated
+    /**
+     * callers of this method are all deprecated.
+     * 
+     * @param rcfModel RCF model restored from its checkpoint
+     * @param modelId model Id
+     * @param detectorId detector Id
+     * @return model state
+     */
+    private Optional<ModelState<ThresholdedRandomCutForest>> restoreModelState(
         Optional<ThresholdedRandomCutForest> rcfModel,
         String modelId,
         String detectorId
@@ -214,9 +237,30 @@ public class ADModelManager extends
         }
         return rcfModel
             .filter(rcf -> memoryTracker.isHostingAllowed(detectorId, rcf))
-            .map(rcf -> new ModelState<ThresholdedRandomCutForest>(rcf, modelId, detectorId, ModelManager.ModelType.TRCF.getName(), clock));
+            .map(
+                rcf -> new ModelState<ThresholdedRandomCutForest>(
+                    rcf,
+                    modelId,
+                    detectorId,
+                    null,
+                    ModelManager.ModelType.TRCF.getName(),
+                    clock
+                )
+            );
     }
 
+    @Deprecated
+    /**
+     *
+     * used in RCFResultTransportAction to handle request from old node request.
+     * In the new logic, we switch to SingleStreamResultAction.
+     * 
+     * @param rcfModel RCF model restored from its checkpoint
+     * @param modelId model Id
+     * @param detectorId detector Id
+     * @param point point to score
+     * @param listener listener to return the result
+     */
     private void processRestoredTRcf(
         Optional<ThresholdedRandomCutForest> rcfModel,
         String modelId,
@@ -233,6 +277,7 @@ public class ADModelManager extends
         }
     }
 
+    @Deprecated
     /**
      * Process rcf checkpoint for total rcf updates polling
      * @param checkpointModel rcf model restored from its checkpoint
@@ -308,6 +353,8 @@ public class ADModelManager extends
 
     }
 
+    @Deprecated
+    // use ThresholdedRandomCutForest instead of separate thresholding model
     private void processThresholdCheckpoint(
         Optional<ThresholdingModel> thresholdModel,
         String modelId,
@@ -316,7 +363,7 @@ public class ADModelManager extends
         ActionListener<ThresholdingResult> listener
     ) {
         Optional<ModelState<ThresholdingModel>> model = thresholdModel
-            .map(threshold -> new ModelState<>(threshold, modelId, detectorId, ModelManager.ModelType.THRESHOLD.getName(), clock));
+            .map(threshold -> new ModelState<>(threshold, modelId, detectorId, null, ModelManager.ModelType.THRESHOLD.getName(), clock));
         if (model.isPresent()) {
             thresholds.put(modelId, model.get());
             getThresholdingResult(model.get(), score, listener);
@@ -396,8 +443,13 @@ public class ADModelManager extends
      * @param detectorId id the of the detector for which models are to be permanently deleted
      * @param listener onResponse is called with null when this operation is completed
      */
-    public void clear(String detectorId, ActionListener<Void> listener) {
-        clearModels(detectorId, forests, ActionListener.wrap(r -> clearModels(detectorId, thresholds, listener), listener::onFailure));
+    public void clear(String detectorId, String tenantId, ActionListener<Void> listener) {
+        clearModels(
+            detectorId,
+            tenantId,
+            forests,
+            ActionListener.wrap(r -> clearModels(detectorId, tenantId, thresholds, listener), listener::onFailure)
+        );
     }
 
     /**
@@ -530,8 +582,13 @@ public class ADModelManager extends
         }).collect(Collectors.toList());
     }
 
+    @Deprecated
     /**
      * Get a RCF model's total updates.
+     * 
+     * used in deprecated RCFPollingTransportAction.
+     * In the new logic, we switch to gain total updates from each tranport result response.
+     * 
      * @param modelId the RCF model's id
      * @param detectorId detector Id
      * @param listener listener to return the result

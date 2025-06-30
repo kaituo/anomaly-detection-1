@@ -44,6 +44,9 @@ import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
@@ -56,18 +59,16 @@ public class SearchAnomalyDetectorInfoActionTests extends OpenSearchIntegTestCas
     private Client client;
     private ThreadPool threadPool;
     ThreadContext threadContext;
+    private Settings settings;
     private PlainActionFuture<SearchConfigInfoResponse> future;
+    private DataAccess dataAccess;
+    private RunContext runContext;
 
     @Override
     @Before
     public void setUp() throws Exception {
         super.setUp();
-        action = new SearchAnomalyDetectorInfoTransportAction(
-            mock(TransportService.class),
-            mock(ActionFilters.class),
-            client(),
-            clusterService()
-        );
+        dataAccess = mock(DataAccess.class);
         task = mock(Task.class);
         response = new ActionListener<SearchConfigInfoResponse>() {
             @Override
@@ -87,9 +88,10 @@ public class SearchAnomalyDetectorInfoActionTests extends OpenSearchIntegTestCas
         when(client.threadPool()).thenReturn(threadPool);
         threadPool = mock(ThreadPool.class);
         when(client.threadPool()).thenReturn(threadPool);
-        Settings settings = Settings.builder().build();
+        settings = Settings.builder().build();
         threadContext = new ThreadContext(settings);
         when(threadPool.getThreadContext()).thenReturn(threadContext);
+        runContext = new ThreadRunContext(threadContext);
 
         clusterService = mock(ClusterService.class);
         ClusterSettings clusterSettings = new ClusterSettings(
@@ -97,6 +99,21 @@ public class SearchAnomalyDetectorInfoActionTests extends OpenSearchIntegTestCas
             Collections.unmodifiableSet(new HashSet<>(Arrays.asList(AnomalyDetectorSettings.AD_FILTER_BY_BACKEND_ROLES)))
         );
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
+
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
+            listener.onResponse(createEmptySearchResponse());
+            return null;
+        }).when(dataAccess).search(any(), any(), any());
+
+        action = new SearchAnomalyDetectorInfoTransportAction(
+            mock(TransportService.class),
+            mock(ActionFilters.class),
+            clusterService(),
+            dataAccess,
+            settings,
+            runContext
+        );
     }
 
     @Test
@@ -152,11 +169,20 @@ public class SearchAnomalyDetectorInfoActionTests extends OpenSearchIntegTestCas
             return null;
         }).when(client).search(any(), any());
 
+        DataAccess searchDataAccess = mock(DataAccess.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
+            SearchResponse searchResponse = createEmptySearchResponse();
+            listener.onResponse(searchResponse);
+            return null;
+        }).when(searchDataAccess).search(any(), any(), any());
         action = new SearchAnomalyDetectorInfoTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client,
-            clusterService
+            clusterService,
+            searchDataAccess,
+            settings,
+            runContext
         );
         SearchConfigInfoRequest request = new SearchConfigInfoRequest("testDetector", "count");
         action.doExecute(task, request, future);
@@ -172,11 +198,20 @@ public class SearchAnomalyDetectorInfoActionTests extends OpenSearchIntegTestCas
             return null;
         }).when(client).search(any(), any());
 
+        DataAccess searchDataAccess = mock(DataAccess.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
+            SearchResponse searchResponse = createEmptySearchResponse();
+            listener.onResponse(searchResponse);
+            return null;
+        }).when(searchDataAccess).search(any(), any(), any());
         action = new SearchAnomalyDetectorInfoTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client,
-            clusterService
+            clusterService,
+            searchDataAccess,
+            settings,
+            runContext
         );
         SearchConfigInfoRequest request = new SearchConfigInfoRequest("testDetector", "match");
         action.doExecute(task, request, future);
@@ -190,11 +225,19 @@ public class SearchAnomalyDetectorInfoActionTests extends OpenSearchIntegTestCas
             listener.onFailure(new RuntimeException("searchResponse failed!"));
             return null;
         }).when(client).search(any(), any());
+        DataAccess searchDataAccess = mock(DataAccess.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
+            listener.onFailure(new RuntimeException("searchResponse failed!"));
+            return null;
+        }).when(searchDataAccess).search(any(), any(), any());
         action = new SearchAnomalyDetectorInfoTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client,
-            clusterService
+            clusterService,
+            searchDataAccess,
+            settings,
+            runContext
         );
         SearchConfigInfoRequest request = new SearchConfigInfoRequest("testDetector", "count");
         action.doExecute(task, request, future);
@@ -208,11 +251,19 @@ public class SearchAnomalyDetectorInfoActionTests extends OpenSearchIntegTestCas
             listener.onFailure(new RuntimeException("searchResponse failed!"));
             return null;
         }).when(client).search(any(), any());
+        DataAccess searchDataAccess = mock(DataAccess.class);
+        doAnswer(invocation -> {
+            ActionListener<SearchResponse> listener = invocation.getArgument(2);
+            listener.onFailure(new RuntimeException("searchResponse failed!"));
+            return null;
+        }).when(searchDataAccess).search(any(), any(), any());
         action = new SearchAnomalyDetectorInfoTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client,
-            clusterService
+            clusterService,
+            searchDataAccess,
+            settings,
+            runContext
         );
         SearchConfigInfoRequest request = new SearchConfigInfoRequest("testDetector", "match");
         action.doExecute(task, request, future);

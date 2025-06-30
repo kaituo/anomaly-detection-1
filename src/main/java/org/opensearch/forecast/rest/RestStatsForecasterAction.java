@@ -22,7 +22,7 @@ import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.rest.RestStatsAction;
 import org.opensearch.timeseries.transport.StatsRequest;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
@@ -41,7 +41,7 @@ public class RestStatsForecasterAction extends RestStatsAction {
      * @param timeSeriesStats TimeSeriesStats object
      * @param nodeFilter util class to get eligible data nodes
      */
-    public RestStatsForecasterAction(ForecastStats timeSeriesStats, DiscoveryNodeFilterer nodeFilter) {
+    public RestStatsForecasterAction(ForecastStats timeSeriesStats, DiscoveryNodeSelector nodeFilter) {
         super(timeSeriesStats, nodeFilter);
     }
 
@@ -57,7 +57,7 @@ public class RestStatsForecasterAction extends RestStatsAction {
         }
 
         try {
-            StatsRequest forecastStatsRequest = getRequest(request);
+            StatsRequest forecastStatsRequest = getRequest(request, null);
             return channel -> client.execute(StatsForecasterAction.INSTANCE, forecastStatsRequest, new RestToXContentListener<>(channel));
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(Encode.forHtml(e.getMessage()));

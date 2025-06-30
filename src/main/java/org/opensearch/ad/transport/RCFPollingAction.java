@@ -16,6 +16,7 @@ import org.opensearch.ad.constant.ADCommonValue;
 
 public class RCFPollingAction extends ActionType<RCFPollingResponse> {
     // Internal Action which is not used for public facing RestAPIs.
+    // Not used. Kept for bwc.
     public static final String NAME = ADCommonValue.INTERNAL_ACTION_PREFIX + "rcfpolling";
     public static final RCFPollingAction INSTANCE = new RCFPollingAction();
 

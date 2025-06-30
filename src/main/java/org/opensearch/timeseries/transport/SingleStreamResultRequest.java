@@ -35,8 +35,17 @@ public class SingleStreamResultRequest extends ActionRequest implements ToXConte
     private final long endMillis;
     private final double[] datapoint;
     private final String taskId;
+    private final String tenantId;
 
-    public SingleStreamResultRequest(String configId, String modelId, long start, long end, double[] datapoint, String taskId) {
+    public SingleStreamResultRequest(
+        String configId,
+        String modelId,
+        long start,
+        long end,
+        double[] datapoint,
+        String taskId,
+        String tenantId
+    ) {
         super();
         this.configId = configId;
         this.modelId = modelId;
@@ -44,6 +53,7 @@ public class SingleStreamResultRequest extends ActionRequest implements ToXConte
         this.endMillis = end;
         this.datapoint = datapoint;
         this.taskId = taskId;
+        this.tenantId = tenantId;
     }
 
     public SingleStreamResultRequest(StreamInput in) throws IOException {
@@ -54,6 +64,11 @@ public class SingleStreamResultRequest extends ActionRequest implements ToXConte
         this.endMillis = in.readLong();
         this.datapoint = in.readDoubleArray();
         this.taskId = in.readOptionalString();
+        if (in.available() > 0) {
+            this.tenantId = in.readOptionalString();
+        } else {
+            this.tenantId = null;
+        }
     }
 
     public String getConfigId() {
@@ -80,6 +95,10 @@ public class SingleStreamResultRequest extends ActionRequest implements ToXConte
         return taskId;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
@@ -89,6 +108,7 @@ public class SingleStreamResultRequest extends ActionRequest implements ToXConte
         out.writeLong(this.endMillis);
         out.writeDoubleArray(datapoint);
         out.writeOptionalString(this.taskId);
+        out.writeOptionalString(this.tenantId);
     }
 
     @Override
@@ -100,6 +120,9 @@ public class SingleStreamResultRequest extends ActionRequest implements ToXConte
         builder.field(CommonName.END_JSON_KEY, endMillis);
         builder.array(CommonName.VALUE_LIST_FIELD, datapoint);
         builder.field(CommonName.RUN_ONCE_FIELD, taskId);
+        if (tenantId != null) {
+            builder.field(CommonName.TENANT_ID_FIELD, tenantId);
+        }
         builder.endObject();
         return builder;
     }

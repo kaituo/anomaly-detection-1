@@ -32,7 +32,12 @@ import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.ConfigConstants;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.util.PluginClient;
+import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.client.Client;
 
 public class ADSearchHandlerTests extends ADUnitTestCase {
@@ -43,6 +48,8 @@ public class ADSearchHandlerTests extends ADUnitTestCase {
     private ClusterService clusterService;
     private ADSearchHandler searchHandler;
     private ClusterSettings clusterSettings;
+    private DataAccess searcher;
+    private RunContext runContext;
 
     private SearchRequest request;
 
@@ -58,14 +65,15 @@ public class ADSearchHandlerTests extends ADUnitTestCase {
         clusterService = new ClusterService(settings, clusterSettings, mock(ThreadPool.class), null);
         client = mock(Client.class);
         pluginClient = mock(PluginClient.class);
-        searchHandler = new ADSearchHandler(settings, clusterService, client, pluginClient);
-
+        searcher = new DefaultDataAccess(client, clusterService, mock(SecurityClientUtil.class), mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class));
         ThreadContext threadContext = new ThreadContext(settings);
         threadContext.putTransient(ConfigConstants.OPENSEARCH_SECURITY_USER_INFO_THREAD_CONTEXT, "alice|odfe,aes|engineering,operations");
+        runContext = new ThreadRunContext(threadContext);
         org.opensearch.threadpool.ThreadPool mockThreadPool = mock(ThreadPool.class);
         when(client.threadPool()).thenReturn(mockThreadPool);
         when(client.threadPool().getThreadContext()).thenReturn(threadContext);
         when(mockThreadPool.getThreadContext()).thenReturn(threadContext);
+        searchHandler = new ADSearchHandler(settings, clusterService, pluginClient, searcher, runContext);
 
         request = mock(SearchRequest.class);
         listener = mock(ActionListener.class);
@@ -81,7 +89,7 @@ public class ADSearchHandlerTests extends ADUnitTestCase {
         settings = Settings.builder().put(AD_FILTER_BY_BACKEND_ROLES.getKey(), true).build();
         clusterService = new ClusterService(settings, clusterSettings, mock(ThreadPool.class), null);
 
-        searchHandler = new ADSearchHandler(settings, clusterService, client, pluginClient);
+        searchHandler = new ADSearchHandler(settings, clusterService, pluginClient, searcher, runContext);
         searchHandler.search(request, ADCommonName.AD_RESOURCE_TYPE, listener);
         verify(listener, times(1)).onFailure(any());
     }
@@ -90,7 +98,7 @@ public class ADSearchHandlerTests extends ADUnitTestCase {
         settings = Settings.builder().put(AD_FILTER_BY_BACKEND_ROLES.getKey(), true).build();
         clusterService = new ClusterService(settings, clusterSettings, mock(ThreadPool.class), null);
 
-        searchHandler = new ADSearchHandler(settings, clusterService, client, pluginClient);
+        searchHandler = new ADSearchHandler(settings, clusterService, pluginClient, searcher, runContext);
         searchHandler.search(matchAllRequest(), ADCommonName.AD_RESOURCE_TYPE, listener);
         verify(client, times(1)).search(any(), any());
     }

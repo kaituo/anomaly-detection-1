@@ -26,7 +26,7 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 
 /**
@@ -60,7 +60,7 @@ public abstract class BatchWorker<RequestType extends QueuedRequest, BatchReques
         Duration executionTtl,
         Setting<Integer> batchSizeSetting,
         Duration stateTtl,
-        NodeStateManager timeSeriesNodeStateManager,
+        StateManager timeSeriesNodeStateManager,
         AnalysisType context
     ) {
         super(
@@ -100,9 +100,10 @@ public abstract class BatchWorker<RequestType extends QueuedRequest, BatchReques
     /**
      * We convert from queued requests understood by AD to batchRequest understood by OpenSearch.
      * @param toProcess Queued requests
+     * @param tenantId tenant id
      * @return batch requests
      */
-    protected abstract BatchRequestType toBatchRequest(List<RequestType> toProcess);
+    protected abstract BatchRequestType toBatchRequest(List<RequestType> toProcess, String tenantId);
 
     @Override
     protected void execute(Runnable afterProcessCallback, Runnable emptyQueueCallback) {
@@ -121,7 +122,8 @@ public abstract class BatchWorker<RequestType extends QueuedRequest, BatchReques
                 }
             }
 
-            BatchRequestType batchRequest = toBatchRequest(toProcess);
+            String tenantId = toProcess.get(0).getTenantId();
+            BatchRequestType batchRequest = toBatchRequest(toProcess, tenantId);
 
             ThreadedActionListener<BatchResponseType> listener = new ThreadedActionListener<>(
                 LOG,

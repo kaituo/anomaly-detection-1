@@ -25,6 +25,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.indices.ADIndex;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.AnomalyDetectorJobAction;
@@ -40,9 +41,11 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.tasks.Task;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.model.DateRange;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
     private AnomalyDetectorJobTransportAction action;
@@ -63,20 +66,19 @@ public class AnomalyDetectorJobActionTests extends OpenSearchIntegTestCase {
         Settings build = Settings.builder().build();
         ThreadContext threadContext = new ThreadContext(build);
         threadContext.putTransient(ConfigConstants.OPENSEARCH_SECURITY_USER_INFO_THREAD_CONTEXT, "alice|odfe,aes|engineering,operations");
+        RunContext runContext = new ThreadRunContext(threadContext);
         when(clusterService.getClusterSettings()).thenReturn(clusterSettings);
-        Client client = mock(Client.class);
-        org.opensearch.threadpool.ThreadPool mockThreadPool = mock(ThreadPool.class);
-        when(client.threadPool()).thenReturn(mockThreadPool);
-        when(mockThreadPool.getThreadContext()).thenReturn(threadContext);
 
         action = new AnomalyDetectorJobTransportAction(
             mock(TransportService.class),
             mock(ActionFilters.class),
-            client,
             clusterService,
             indexSettings(),
             xContentRegistry(),
-            mock(ADIndexJobActionHandler.class)
+            mock(ADIndexJobActionHandler.class),
+            mock(StateManager.class),
+            mock(ADDelegatingDataManagement.class),
+            runContext
         );
         task = mock(Task.class);
         request = new JobRequest(

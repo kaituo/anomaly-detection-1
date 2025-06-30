@@ -76,6 +76,8 @@ public class CommonName {
     // current key for entity samples
     public static final String SAMPLE_QUEUE = "samples";
 
+    public static final String FIELD_MODELV2 = "modelV2";
+
     // ======================================
     // Profile name
     // ======================================
@@ -106,6 +108,7 @@ public class CommonName {
     public static final String TASK_ID_FIELD = "task_id";
     public static final String TASK = "task";
     public static final String ENTITY_ID_FIELD = "entity_id";
+    public static final String TENANT_ID_INFIX = "_tenant_";
 
     // ======================================
     // plugin info
@@ -141,8 +144,43 @@ public class CommonName {
     public static String WARM_BOX_TYPE = "warm";
     // box type
     public static final String BOX_TYPE_KEY = "box_type";
+
     // ======================================
     // Format name
     // ======================================
     public static final String EPOCH_MILLIS_FORMAT = "epoch_millis";
+
+    // ======================================
+    // Setting
+    // ======================================
+    // setting defined in opensearch.yml
+    public static final String NODE_ROLE = "timeseries.node.roles";
+
+    public static final String COORDINATOR_ROLE = "coordinator";
+
+    public static final String MASTER_ROLE = "coordinator";
+
+    public static final String WORKER_ROLE = "worker";
+
+    public static final String SETTING_PREFIX = "plugins.timeseries.";
+
+    // ======================================
+    // Thread pool name
+    // ======================================
+    // common constants
+    public static final String CLOUD_MAP_WATCHER_THREAD_POOL_NAME = "cloud-map-watcher-threadpool";
+    public static final String SQS_CONSUMER_THREAD_POOL_NAME = "sqs-consumer-threadpool";
+
+    // ======================================
+    // multi-tenant
+    // ======================================
+    /** The field name containing the tenant id */
+    public static final String TENANT_ID_FIELD = "tenant_id";
+    public static final String TENANT_ID_HEADER = "x-tenant-id";
+
+    // ======================================
+    // EventBridge
+    // ======================================
+    public static final String EB_SCHEDULED_TIME_FIELD = "scheduled_time";
+    public static final String EB_SCHEDULED_TIME_VALUE = "<aws.scheduler.scheduled-time>";
 }

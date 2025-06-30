@@ -81,7 +81,8 @@ public class RestValidateAction {
         return (!Collections.disjoint(typesInRequest, AbstractTimeSeriesActionHandler.ALL_VALIDATION_ASPECTS_STRS));
     }
 
-    public ValidateConfigRequest prepareRequest(RestRequest request, NodeClient client, String typesStr) throws IOException {
+    public ValidateConfigRequest prepareRequest(RestRequest request, NodeClient client, String typesStr, String tenantId)
+        throws IOException {
         XContentParser parser = request.contentParser();
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
         // if type param isn't blank and isn't a part of possible validation types throws exception
@@ -109,7 +110,8 @@ public class RestValidateAction {
             maxHCConfigs,
             maxFeatures,
             requestTimeout,
-            maxCategoricalFields
+            maxCategoricalFields,
+            tenantId
         );
         return validateAnomalyDetectorRequest;
     }

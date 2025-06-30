@@ -55,23 +55,33 @@ public class ClusterEventListener implements ClusterStateListener {
         }
 
         try {
+            Delta delta = event.nodesDelta();
+            boolean nodeChanged = delta.removed() || delta.added();
+
             // Init version hash ring as early as possible. Some test case may fail as AD
             // version hash ring not initialized when test run.
             if (!hashRing.isHashRingInited()) {
-                hashRing
-                    .buildCircles(
-                        ActionListener
-                            .wrap(r -> LOG.info("Init version hash ring successfully"), e -> LOG.error("Failed to init version hash ring"))
-                    );
+                if (nodeChanged) {
+                    buildHashRingForNodeDelta(delta);
+                } else {
+                    hashRing
+                        .buildCircles(
+                            ActionListener
+                                .runAfter(
+                                    ActionListener
+                                        .wrap(
+                                            r -> LOG.info("Init version hash ring successfully"),
+                                            e -> LOG.error("Failed to init version hash ring", e)
+                                        ),
+                                    () -> inProgress.release()
+                                )
+                        );
+                }
+                return;
             }
-            Delta delta = event.nodesDelta();
 
-            if (delta.removed() || delta.added()) {
-                LOG.info(NODE_CHANGED_MSG + ", node removed: {}, node added: {}", delta.removed(), delta.added());
-                hashRing.addNodeChangeEvent();
-                hashRing.buildCircles(delta, ActionListener.runAfter(ActionListener.wrap(hasRingBuildDone -> {
-                    LOG.info("Hash ring build result: {}", hasRingBuildDone);
-                }, e -> { LOG.error("Failed updating version hash ring", e); }), () -> inProgress.release()));
+            if (nodeChanged) {
+                buildHashRingForNodeDelta(delta);
             } else {
                 inProgress.release();
             }
@@ -81,5 +91,13 @@ public class ClusterEventListener implements ClusterStateListener {
             LOG.error("Cluster state change handler has issue(s)", ex);
             inProgress.release();
         }
+    }
+
+    private void buildHashRingForNodeDelta(Delta delta) {
+        LOG.info(NODE_CHANGED_MSG + ", node removed: {}, node added: {}", delta.removed(), delta.added());
+        hashRing.addNodeChangeEvent();
+        hashRing.buildCircles(delta, ActionListener.runAfter(ActionListener.wrap(hasRingBuildDone -> {
+            LOG.info("Hash ring build result: {}", hasRingBuildDone);
+        }, e -> { LOG.error("Failed updating version hash ring", e); }), () -> inProgress.release()));
     }
 }

@@ -21,19 +21,21 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.util.DataUtil;
 
 import com.amazon.randomcutforest.RandomCutForest;
 import com.amazon.randomcutforest.parkservices.AnomalyDescriptor;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>> {
+public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, IndexableResultType>> {
 
     private static final Logger LOG = LogManager.getLogger(ModelManager.class);
 
@@ -62,6 +64,8 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
     protected final Clock clock;
     protected FeatureManager featureManager;
     protected final CheckpointDaoType checkpointDao;
+    protected final StateManager nodeStateManager;
+    protected final AnalysisType analysisType;
 
     public ModelManager(
         int rcfNumTrees,
@@ -71,7 +75,9 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         MemoryTracker memoryTracker,
         Clock clock,
         FeatureManager featureManager,
-        CheckpointDaoType checkpointDao
+        CheckpointDaoType checkpointDao,
+        StateManager nodeStateManager,
+        AnalysisType analysisType
     ) {
         this.rcfNumTrees = rcfNumTrees;
         this.rcfNumSamplesInTree = rcfNumSamplesInTree;
@@ -81,6 +87,8 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         this.clock = clock;
         this.featureManager = featureManager;
         this.checkpointDao = checkpointDao;
+        this.nodeStateManager = nodeStateManager;
+        this.analysisType = analysisType;
     }
 
     public IntermediateResultType getResult(
@@ -107,23 +115,38 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         return result;
     }
 
-    public void clearModels(String detectorId, Map<String, ?> models, ActionListener<Void> listener) {
+    public void clearModels(String detectorId, String tenantId, Map<String, ?> models, ActionListener<Void> listener) {
         Iterator<String> id = models.keySet().iterator();
-        clearModelForIterator(detectorId, models, id, listener);
+        clearModelForIterator(detectorId, tenantId, models, id, listener);
     }
 
-    protected void clearModelForIterator(String detectorId, Map<String, ?> models, Iterator<String> idIter, ActionListener<Void> listener) {
+    protected void clearModelForIterator(
+        String detectorId,
+        String tenantId,
+        Map<String, ?> models,
+        Iterator<String> idIter,
+        ActionListener<Void> listener
+    ) {
         if (idIter.hasNext()) {
             String modelId = idIter.next();
             if (SingleStreamModelIdMapper.getConfigIdForModelId(modelId).equals(detectorId)) {
-                models.remove(modelId);
-                checkpointDao
-                    .deleteModelCheckpoint(
-                        modelId,
-                        ActionListener.wrap(r -> clearModelForIterator(detectorId, models, idIter, listener), listener::onFailure)
-                    );
+                nodeStateManager.getConfig(detectorId, tenantId, analysisType, false, ActionListener.wrap(config -> {
+                    if (config.isPresent()) {
+                        models.remove(modelId);
+                        checkpointDao
+                            .deleteModelCheckpoint(
+                                config.get(),
+                                modelId,
+                                ActionListener
+                                    .wrap(r -> clearModelForIterator(detectorId, tenantId, models, idIter, listener), listener::onFailure)
+                            );
+                    } else {
+                        clearModelForIterator(detectorId, tenantId, models, idIter, listener);
+                    }
+                }, listener::onFailure));
+
             } else {
-                clearModelForIterator(detectorId, models, idIter, listener);
+                clearModelForIterator(detectorId, tenantId, models, idIter, listener);
             }
         } else {
             listener.onResponse(null);

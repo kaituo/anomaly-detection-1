@@ -16,9 +16,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Optional;
-import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -35,7 +36,6 @@ import org.opensearch.timeseries.caching.CacheProvider;
 import org.opensearch.timeseries.caching.TimeSeriesCache;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
@@ -48,6 +48,7 @@ import org.opensearch.timeseries.ratelimit.ColdStartWorker;
 import org.opensearch.timeseries.ratelimit.FeatureRequest;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
 import org.opensearch.timeseries.ratelimit.SaveResultStrategy;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.stats.Stats;
 import org.opensearch.timeseries.task.TaskCacheManager;
@@ -62,7 +63,7 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * Since we assume model state's last access time is current time and compare it with incoming data's execution time,
  * this class is only meant to be used by real time analysis.
  */
-public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, CacheType extends TimeSeriesCache<RCFModelType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>>
+public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, DataManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, DataManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, CacheType extends TimeSeriesCache<RCFModelType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, DataManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>>
     implements
         MaintenanceState {
 
@@ -70,7 +71,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
     protected ModelManagerType modelManager;
     protected Stats stats;
     private String modelCorruptionStat;
-    protected CheckpointDaoType checkpointDao;
+    protected CheckpointDaoInterface<RCFModelType> checkpointDao;
     protected ColdStartWorkerType coldStartWorker;
     protected SaveResultStrategyType resultWriteWorker;
     private CacheProvider<RCFModelType, CacheType> cache;
@@ -83,7 +84,9 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
     private ThreadPool threadPool;
     private String threadPoolName;
     // ensure we process samples in the ascending order of time in case race conditions.
-    private Map<String, ExpiringValue<TreeSet<Sample>>> sampleQueues;
+    private Map<String, ExpiringValue<ConcurrentSkipListSet<Sample>>> sampleQueues;
+    // ensure only one getFeatures runs per model at a time
+    private Map<String, ExpiringValue<AtomicBoolean>> featureFetchInFlight;
     private Comparator<Sample> sampleComparator;
     private Clock clock;
     private SearchFeatureDao searchFeatureDao;
@@ -93,7 +96,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
         ModelManagerType modelManager,
         Stats stats,
         String modelCorruptionStat,
-        CheckpointDaoType checkpointDao,
+        CheckpointDaoInterface<RCFModelType> checkpointDao,
         ColdStartWorkerType coldStartWorker,
         SaveResultStrategyType resultWriteWorker,
         CacheProvider<RCFModelType, CacheType> cache,
@@ -114,6 +117,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
         this.threadPoolName = threadPoolName;
         this.modelLocks = new ConcurrentHashMap<>();
         this.sampleQueues = new ConcurrentHashMap<>();
+        this.featureFetchInFlight = new ConcurrentHashMap<>();
         this.sampleComparator = Comparator.comparing(Sample::getDataEndTime);
         this.clock = clock;
         this.searchFeatureDao = searchFeatureDao;
@@ -135,16 +139,16 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
         ActionListener<Boolean> listener
     ) {
         String modelId = modelState.getModelId();
-        ExpiringValue<TreeSet<Sample>> expiringSampleQueue = sampleQueues
+        ExpiringValue<ConcurrentSkipListSet<Sample>> expiringSampleQueue = sampleQueues
             .computeIfAbsent(
                 modelId,
                 k -> new ExpiringValue<>(
-                    new TreeSet<>(sampleComparator),
+                    new ConcurrentSkipListSet<>(sampleComparator),
                     config.getIntervalDuration().multipliedBy(TimeSeriesSettings.EXPIRING_VALUE_MAINTENANCE_FREQ).toMillis(),
                     clock
                 )
             );
-        TreeSet<Sample> queue = expiringSampleQueue.getValue();
+        ConcurrentSkipListSet<Sample> queue = expiringSampleQueue.getValue();
         // model state might have samples that are not processed yet
         addSamples(queue, modelState.getSamples(), config);
         // record the last unprocessed historical sample's data end time
@@ -174,6 +178,21 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
             // it is expected that the time gap is at least 1 interval. So 2 intervals is the minimum gap to fetch data.
             long minGapSecs = 2 * config.getIntervalInSeconds();
             if (diffSecs >= minGapSecs && diffSecs / config.getIntervalInSeconds() <= TimeSeriesSettings.MAX_FREQUENCY_MULTIPLE) {
+                AtomicBoolean inFlight = featureFetchInFlight
+                    .computeIfAbsent(
+                        modelId,
+                        k -> new ExpiringValue<>(
+                            new AtomicBoolean(false),
+                            config.getIntervalDuration().multipliedBy(TimeSeriesSettings.EXPIRING_VALUE_MAINTENANCE_FREQ).toMillis(),
+                            clock
+                        )
+                    )
+                    .getValue();
+                if (false == inFlight.compareAndSet(false, true)) {
+                    LOG.debug("getFeatures already in-flight for model [{}]; skipping duplicate fetch.", modelId);
+                    listener.onResponse(false);
+                    return;
+                }
                 LOG.info("fetching features between {} and {}", lastInputTimestampSecs, currentTimeSecs);
                 // get features for the interval since last input timestamp and current sample's data start time
                 // getFeatures uses milliseconds as unit, so we need to convert seconds to milliseconds
@@ -187,13 +206,24 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
                     lastInputTimestampSecs * 1000,
                     sample.getDataStartTime().getEpochSecond() * 1000,
                     ActionListener.wrap(samples -> {
-                        LOG.info("samples size: {}", samples.size());
-                        for (Sample s : samples) {
-                            addSample(queue, s, config);
+                        try {
+                            LOG.info("samples size: {}", samples.size());
+                            for (Sample s : samples) {
+                                addSample(queue, s, config);
+                            }
+                            processWithTimeout(modelState, config, taskId, sample, listener);
+                        } finally {
+                            inFlight.set(false);
                         }
-                        processWithTimeout(modelState, config, taskId, sample, listener);
-                    }, listener::onFailure)
+                    }, e -> {
+                        inFlight.set(false);
+                        listener.onFailure(e);
+                    })
                 );
+            } else if (diffSecs < 0) {
+                // prevent out of order processing
+                LOG.warn("Time gap {} is negative for config [{}], model [{}]. Skipping.", diffSecs, config.getId(), modelId);
+                listener.onResponse(false);
             } else if (diffSecs < minGapSecs) {
                 processWithTimeout(modelState, config, taskId, sample, listener);
             } else {
@@ -238,7 +268,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
         if (lock.tryLock()) {
             LOG.debug("lock acquired");
             try {
-                TreeSet<Sample> queue = sampleQueues.get(modelId).getValue();
+                ConcurrentSkipListSet<Sample> queue = sampleQueues.get(modelId).getValue();
                 LOG.debug("queue size:{}", queue.size());
                 if (!queue.isEmpty()) {
                     List<Sample> samples = new ArrayList<>(queue);
@@ -288,11 +318,10 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
                 }
                 listener.onResponse(success);
             } catch (Exception e) {
-                LOG.error("Error processing samples", e);
                 if (e.getMessage() != null && e.getMessage().contains("incorrect ordering of time")) {
                     // ignore current timestamp.
                     LOG
-                        .warn(
+                        .debug(
                             String
                                 .format(
                                     Locale.ROOT,
@@ -302,10 +331,12 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
                                     sample.getDataEndTime().toEpochMilli()
                                 )
                         );
+                    listener.onResponse(false);
                 } else {
+                    LOG.error("Error processing samples", e);
                     reColdStart(config, modelId, e, sample, taskId);
+                    listener.onFailure(e);
                 }
-                listener.onFailure(e);
             } finally {
                 LOG.debug("unlock");
                 if (lock.isHeldByCurrentThread()) {
@@ -360,10 +391,11 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
             LOG.warn(new ParameterizedMessage("Likely model corruption for [{}]", modelId));
         }
         stats.getStat(modelCorruptionStat).increment();
-        cache.get().removeModel(config.getId(), modelId);
+        cache.get().removeModel(config.getTenantId(), config.getId(), modelId);
         if (null != modelId) {
             checkpointDao
                 .deleteModelCheckpoint(
+                    config,
                     modelId,
                     ActionListener
                         .wrap(
@@ -382,7 +414,8 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
                     modelId,
                     sample.getValueList(),
                     sample.getDataStartTime().toEpochMilli(),
-                    taskId
+                    taskId,
+                    config.getTenantId()
                 )
             );
     }
@@ -488,7 +521,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
      * @param sample The sample to be added.
      * @param config The detector configuration.
      */
-    private void addSample(TreeSet<Sample> queue, Sample sample, Config config) {
+    private void addSample(ConcurrentSkipListSet<Sample> queue, Sample sample, Config config) {
         long intervalSeconds = config.getIntervalInSeconds();
         long sampleTime = sample.getDataStartTime().getEpochSecond();
 
@@ -512,7 +545,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
         }
     }
 
-    private void addSamples(TreeSet<Sample> queue, Deque<Sample> samples, Config config) {
+    private void addSamples(ConcurrentSkipListSet<Sample> queue, Deque<Sample> samples, Config config) {
         if (samples != null) {
             for (Sample sample : samples) {
                 addSample(queue, sample, config);
@@ -526,9 +559,10 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
             // clean up expired items
             modelLocks.entrySet().removeIf(entry -> entry.getValue().isExpired());
             sampleQueues.entrySet().removeIf(entry -> entry.getValue().isExpired());
+            featureFetchInFlight.entrySet().removeIf(entry -> entry.getValue().isExpired());
         } catch (Exception e) {
             // will be thrown to transport broadcast handler
-            throw new TimeSeriesException("Fail to maintain RealTimeInferencer", e);
+            throw new TimeSeriesException("Failed to maintain RealTimeInferencer", e);
         }
     }
 
@@ -536,7 +570,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
         return modelLocks;
     }
 
-    public Map<String, ExpiringValue<TreeSet<Sample>>> getSampleQueues() {
+    public Map<String, ExpiringValue<ConcurrentSkipListSet<Sample>>> getSampleQueues() {
         return sampleQueues;
     }
 }

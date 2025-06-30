@@ -11,8 +11,6 @@
 
 package org.opensearch.ad.rest;
 
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
-
 import java.io.IOException;
 import java.util.List;
 
@@ -20,8 +18,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.support.IndicesOptions;
 import org.opensearch.ad.constant.ADCommonMessages;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.DeleteAnomalyResultsAction;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.ToXContent;
@@ -32,6 +33,7 @@ import org.opensearch.rest.BytesRestResponse;
 import org.opensearch.rest.RestRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -53,7 +55,11 @@ public class RestDeleteAnomalyResultsAction extends BaseRestHandler {
     private static final String DELETE_AD_RESULTS_ACTION = "delete_anomaly_results";
     private static final Logger logger = LogManager.getLogger(RestDeleteAnomalyResultsAction.class);
 
-    public RestDeleteAnomalyResultsAction() {}
+    private final Settings settings;
+
+    public RestDeleteAnomalyResultsAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -65,11 +71,18 @@ public class RestDeleteAnomalyResultsAction extends BaseRestHandler {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
         }
+
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
         searchSourceBuilder.parseXContent(request.contentOrSourceParamParser());
-        DeleteByQueryRequest deleteRequest = new DeleteByQueryRequest(ALL_AD_RESULTS_INDEX_PATTERN)
+        DeleteByQueryRequest deleteRequest = new DeleteByQueryRequest(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN)
             .setQuery(searchSourceBuilder.query())
             .setIndicesOptions(IndicesOptions.LENIENT_EXPAND_OPEN_HIDDEN);
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
+        // DeleteByQueryRequest is OpenSearch core class and I cannot change it, so need to use preference to pass tenant id to the
+        // transport action.
+        // DeleteByQueryRequest does not support setting preference, so we need to set it on the SearchRequest.
+        deleteRequest.getSearchRequest().preference(tenantId);
+
         return channel -> client.execute(DeleteAnomalyResultsAction.INSTANCE, deleteRequest, ActionListener.wrap(r -> {
             XContentBuilder contentBuilder = r.toXContent(channel.newBuilder().startObject(), ToXContent.EMPTY_PARAMS);
             contentBuilder.endObject();

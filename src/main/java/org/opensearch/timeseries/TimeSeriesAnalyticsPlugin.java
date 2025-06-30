@@ -15,7 +15,6 @@ import static java.util.Collections.unmodifiableList;
 import static org.opensearch.ad.constant.ADCommonName.ANOMALY_RESULT_INDEX_ALIAS;
 import static org.opensearch.ad.constant.ADCommonName.CHECKPOINT_INDEX_NAME;
 import static org.opensearch.ad.constant.ADCommonName.DETECTION_STATE_INDEX;
-import static org.opensearch.ad.indices.ADIndexManagement.ALL_AD_RESULTS_INDEX_PATTERN;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_COOLDOWN_MINUTES;
 import static org.opensearch.forecast.constant.ForecastCommonName.FORECAST_CHECKPOINT_INDEX_NAME;
 import static org.opensearch.forecast.constant.ForecastCommonName.FORECAST_STATE_INDEX;
@@ -27,6 +26,7 @@ import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
@@ -42,19 +42,29 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.SpecialPermission;
 import org.opensearch.action.ActionRequest;
+import org.opensearch.action.delete.DeleteResponse;
+import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.ADJobProcessor;
 import org.opensearch.ad.ADTaskProfileRunner;
 import org.opensearch.ad.AnomalyDetectorRunner;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.client.ADHttpNodeCommunicator;
+import org.opensearch.ad.client.ADNodeCommunicator;
+import org.opensearch.ad.client.ADTransportNodeCommunicator;
 import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.executor.ADCoordinatorContributor;
+import org.opensearch.ad.executor.ADModelContributor;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
+import org.opensearch.ad.ml.ADS3CheckpointDao;
+import org.opensearch.ad.ml.DelegatingADCheckpointStore;
 import org.opensearch.ad.ml.HybridThresholdingModel;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
@@ -66,14 +76,20 @@ import org.opensearch.ad.ratelimit.ADColdEntityWorker;
 import org.opensearch.ad.ratelimit.ADColdStartWorker;
 import org.opensearch.ad.ratelimit.ADResultWriteWorker;
 import org.opensearch.ad.ratelimit.ADSaveResultStrategy;
+import org.opensearch.ad.rest.RestADStatsNodesAction;
+import org.opensearch.ad.rest.RestAnomalyDetectorEntityProfileAction;
+import org.opensearch.ad.rest.RestAnomalyDetectorNodeProfileAction;
 import org.opensearch.ad.rest.RestAnomalyDetectorJobAction;
 import org.opensearch.ad.rest.RestAnomalyDetectorSuggestAction;
+import org.opensearch.ad.rest.RestDeleteADModelAction;
 import org.opensearch.ad.rest.RestDeleteAnomalyDetectorAction;
 import org.opensearch.ad.rest.RestDeleteAnomalyResultsAction;
+import org.opensearch.ad.rest.RestEntityADResultAction;
 import org.opensearch.ad.rest.RestExecuteAnomalyDetectorAction;
 import org.opensearch.ad.rest.RestGetAnomalyDetectorAction;
 import org.opensearch.ad.rest.RestIndexAnomalyDetectorAction;
 import org.opensearch.ad.rest.RestPreviewAnomalyDetectorAction;
+import org.opensearch.ad.rest.RestADSingleStreamResultAction;
 import org.opensearch.ad.rest.RestSearchADTasksAction;
 import org.opensearch.ad.rest.RestSearchAnomalyDetectorAction;
 import org.opensearch.ad.rest.RestSearchAnomalyDetectorInfoAction;
@@ -81,7 +97,10 @@ import org.opensearch.ad.rest.RestSearchAnomalyResultAction;
 import org.opensearch.ad.rest.RestSearchTopAnomalyResultAction;
 import org.opensearch.ad.rest.RestStatsAnomalyDetectorAction;
 import org.opensearch.ad.rest.RestValidateAnomalyDetectorAction;
+import org.opensearch.ad.rest.handler.ADEventBridgeHandler;
 import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
+import org.opensearch.ad.rest.handler.store.ADSdkDataManagement;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.ad.settings.ADNumericSetting;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
@@ -119,6 +138,7 @@ import org.opensearch.ad.transport.AnomalyResultTransportAction;
 import org.opensearch.ad.transport.DeleteADModelAction;
 import org.opensearch.ad.transport.DeleteADModelTransportAction;
 import org.opensearch.ad.transport.DeleteAnomalyDetectorAction;
+import org.opensearch.ad.transport.DeleteAnomalyDetectorMutliTenantTransportAction;
 import org.opensearch.ad.transport.DeleteAnomalyDetectorTransportAction;
 import org.opensearch.ad.transport.DeleteAnomalyResultsAction;
 import org.opensearch.ad.transport.DeleteAnomalyResultsTransportAction;
@@ -161,13 +181,14 @@ import org.opensearch.ad.transport.handler.ADSearchHandler;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.service.ClusterService;
+import org.opensearch.common.inject.AbstractModule;
+import org.opensearch.common.inject.Module;
+import org.opensearch.common.inject.Provider;
 import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.IndexScopedSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.settings.SettingsFilter;
-import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.OpenSearchExecutors;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
@@ -180,7 +201,10 @@ import org.opensearch.forecast.ForecastJobProcessor;
 import org.opensearch.forecast.ForecastTaskProfileRunner;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
+import org.opensearch.forecast.client.ForecastNodeCommunicator;
+import org.opensearch.forecast.client.ForecastTransportNodeCommunicator;
 import org.opensearch.forecast.constant.ForecastCommonName;
+import org.opensearch.forecast.executor.ForecastModelContributor;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
@@ -209,6 +233,7 @@ import org.opensearch.forecast.rest.RestSearchTopForecastResultAction;
 import org.opensearch.forecast.rest.RestStatsForecasterAction;
 import org.opensearch.forecast.rest.RestValidateForecasterAction;
 import org.opensearch.forecast.rest.handler.ForecastIndexJobActionHandler;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.settings.ForecastEnabledSetting;
 import org.opensearch.forecast.settings.ForecastNumericSetting;
 import org.opensearch.forecast.settings.ForecastSettings;
@@ -274,26 +299,37 @@ import org.opensearch.plugins.IdentityAwarePlugin;
 import org.opensearch.plugins.Plugin;
 import org.opensearch.plugins.ScriptPlugin;
 import org.opensearch.plugins.SystemIndexPlugin;
+import org.opensearch.remote.metadata.client.SdkClient;
 import org.opensearch.repositories.RepositoriesService;
 import org.opensearch.rest.RestController;
 import org.opensearch.rest.RestHandler;
 import org.opensearch.script.ScriptService;
 import org.opensearch.threadpool.ExecutorBuilder;
-import org.opensearch.threadpool.ScalingExecutorBuilder;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.DefaultDataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.SdkDataAccess;
+import org.opensearch.timeseries.client.SdkRunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
 import org.opensearch.timeseries.cluster.ADDataMigrator;
 import org.opensearch.timeseries.cluster.ClusterEventListener;
-import org.opensearch.timeseries.cluster.ClusterManagerEventListener;
+import org.opensearch.timeseries.cluster.ClusterManagerTaskRegistry;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.executor.CloudMapWatcherContributor;
+import org.opensearch.timeseries.executor.ExecutorBuilderContributor;
+import org.opensearch.timeseries.executor.SQSConsumerContributor;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.function.ThrowingSupplierWrapper;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.ratelimit.CheckPointMaintainRequestAdapter;
+import org.opensearch.timeseries.rest.handler.store.SDKDataManagement;
 import org.opensearch.timeseries.settings.TimeSeriesEnabledSetting;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.stats.StatNames;
@@ -304,11 +340,18 @@ import org.opensearch.timeseries.stats.suppliers.SettableSupplier;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.CronAction;
 import org.opensearch.timeseries.transport.CronTransportAction;
+import org.opensearch.timeseries.transport.DeleteConfigRequest;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
 import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.IndexOperations;
 import org.opensearch.timeseries.util.IndexUtils;
+import org.opensearch.timeseries.util.ParseUtils;
 import org.opensearch.timeseries.util.PluginClient;
+import org.opensearch.timeseries.util.SDKIndexOperations;
+import org.opensearch.timeseries.util.SDKNodeFilter;
+import org.opensearch.timeseries.util.SdkClientProvider;
 import org.opensearch.timeseries.util.SecurityClientUtil;
 import org.opensearch.transport.client.Client;
 import org.opensearch.watcher.ResourceWatcherService;
@@ -333,6 +376,7 @@ import io.protostuff.runtime.RuntimeSchema;
 /**
  * Entry point of time series analytics plugin.
  */
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Pass parameter for single-tenant-only components.")
 public class TimeSeriesAnalyticsPlugin extends Plugin
     implements
         ActionPlugin,
@@ -348,43 +392,47 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
     public static final String LEGACY_OPENDISTRO_AD_BASE_URI = LEGACY_AD_BASE + "/detectors";
     public static final String AD_BASE_URI = "/_plugins/_anomaly_detection";
     public static final String AD_BASE_DETECTORS_URI = AD_BASE_URI + "/detectors";
-    public static final String AD_THREAD_POOL_PREFIX = "opensearch.ad.";
-    public static final String AD_THREAD_POOL_NAME = "ad-threadpool";
-    public static final String AD_BATCH_TASK_THREAD_POOL_NAME = "ad-batch-task-threadpool";
-
     // forecasting constants
     public static final String FORECAST_BASE_URI = "/_plugins/_forecast";
+    // common timeseries constants
+    public static final String TIMESERIES_BASE_URI = "/_plugins/_timeseries";
     public static final String FORECAST_FORECASTERS_URI = FORECAST_BASE_URI + "/forecasters";
-    public static final String FORECAST_THREAD_POOL_PREFIX = "opensearch.forecast.";
-    public static final String FORECAST_THREAD_POOL_NAME = "forecast-threadpool";
-
     public static final String TIME_SERIES_JOB_TYPE = "opensearch_time_series_analytics";
 
     private static Gson gson;
     private ADIndexManagement anomalyDetectionIndices;
+    private ADDelegatingDataManagement adDataManagement;
     private ForecastIndexManagement forecastIndices;
+    private ForecastDelegatingDataManagement forecastDataManagement;
     private AnomalyDetectorRunner anomalyDetectorRunner;
     private Client client;
+    private Settings pluginSettings = Settings.EMPTY;
     private ClusterService clusterService;
     private ThreadPool threadPool;
     private ADStats adStats;
     private ForecastStats forecastStats;
     private ClientUtil clientUtil;
     private SecurityClientUtil securityClientUtil;
-    private DiscoveryNodeFilterer nodeFilter;
+    private DiscoveryNodeSelector nodeFilter;
     private IndexUtils indexUtils;
+    private IndexOperations indexOperations;
     private ADTaskManager adTaskManager;
     private ForecastTaskManager forecastTaskManager;
     private ADBatchTaskRunner adBatchTaskRunner;
     // package private for testing
     GenericObjectPool<LinkedBuffer> serializeRCFBufferPool;
-    private NodeStateManager stateManager;
+    private StateManager stateManager;
+    private DataAccess dataAccess;
+    private RunContext runContext;
+    private ADNodeCommunicator adNodeCommunicator;
+    private ForecastNodeCommunicator forecastNodeCommunicator;
     private ExecuteADResultResponseRecorder adResultResponseRecorder;
     private ExecuteForecastResultResponseRecorder forecastResultResponseRecorder;
     private ADIndexJobActionHandler adIndexJobActionHandler;
     private ForecastIndexJobActionHandler forecastIndexJobActionHandler;
 
     private PluginClient pluginClient;
+    private ADEventBridgeHandler eventBridgeHandler;
 
     static {
         SpecialPermission.check();
@@ -394,6 +442,107 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
     }
 
     public TimeSeriesAnalyticsPlugin() {}
+
+    @Override
+    public Collection<Module> createGuiceModules() {
+        // Transport actions get constructed during Guice injector creation (see Node#createInjector),
+        // which happens *before* OpenSearch calls plugin#createComponents. Objects returned by
+        // createComponents are only auto-bound to themselves, so interfaces such as StateManager
+        // remain unbound and injected constructors (e.g. SecurityClientUtil) fail. Providing an
+        // explicit module here lets us bind StateManager via a Provider that looks up the instance
+        // initialized later in createComponents, satisfying Guice without duplicating construction logic.
+        return Collections.singletonList(new AbstractModule() {
+            @Override
+            protected void configure() {
+                final Provider<Settings> settingsProvider = getProvider(Settings.class);
+                final Provider<ClusterService> clusterServiceProvider = getProvider(ClusterService.class);
+                final Provider<IndexNameExpressionResolver> indexNameExpressionResolverProvider = getProvider(IndexNameExpressionResolver.class);
+
+                // DiscoveryNodeSelector is needed by several transport action constructors during
+                // injector creation. That happens before createComponents(), so unlike
+                // StateManager/DataAccess/RunContext we cannot wait for createComponents()
+                // to initialize it.
+                bind(DiscoveryNodeSelector.class).toProvider(new Provider<DiscoveryNodeSelector>() {
+                    @Override
+                    public DiscoveryNodeSelector get() {
+                        Settings settings = settingsProvider.get();
+                        boolean multiTenancyEnabled = AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings)
+                            || ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED.get(settings);
+                        return getOrCreateDiscoveryNodeSelector(
+                            multiTenancyEnabled,
+                            clusterServiceProvider.get(),
+                            indexNameExpressionResolverProvider.get()
+                        );
+                    }
+                });
+                bind(StateManager.class).toProvider(new Provider<StateManager>() {
+                    @Override
+                    public StateManager get() {
+                        StateManager manager = stateManager;
+                        if (manager == null) {
+                            throw new IllegalStateException("StateManager has not been initialized yet");
+                        }
+                        return manager;
+                    }
+                });
+                bind(DataAccess.class).toProvider(new Provider<DataAccess>() {
+                    @Override
+                    public DataAccess get() {
+                        DataAccess access = dataAccess;
+                        if (access == null) {
+                            throw new IllegalStateException("DataAccess has not been initialized yet");
+                        }
+                        return access;
+                    }
+                });
+                bind(RunContext.class).toProvider(new Provider<RunContext>() {
+                    @Override
+                    public RunContext get() {
+                        RunContext context = runContext;
+                        if (context == null) {
+                            throw new IllegalStateException("RunContext has not been initialized yet");
+                        }
+                        return context;
+                    }
+                });
+                bind(ADNodeCommunicator.class).toProvider(new Provider<ADNodeCommunicator>() {
+                    @Override
+                    public ADNodeCommunicator get() {
+                        ADNodeCommunicator communicator = adNodeCommunicator;
+                        if (communicator == null) {
+                            throw new IllegalStateException("ADNodeCommunicator has not been initialized yet");
+                        }
+                        return communicator;
+                    }
+                });
+                bind(ForecastNodeCommunicator.class).toProvider(new Provider<ForecastNodeCommunicator>() {
+                    @Override
+                    public ForecastNodeCommunicator get() {
+                        ForecastNodeCommunicator communicator = forecastNodeCommunicator;
+                        if (communicator == null) {
+                            throw new IllegalStateException("ForecastNodeCommunicator has not been initialized yet");
+                        }
+                        return communicator;
+                    }
+                });
+            }
+        });
+    }
+
+    /**
+     * Returns the singleton DiscoveryNodeSelector used by both Guice-time injections
+     * and createComponents() wiring.
+     */
+    private synchronized DiscoveryNodeSelector getOrCreateDiscoveryNodeSelector(
+        boolean multiTenancyEnabled,
+        ClusterService clusterService,
+        IndexNameExpressionResolver indexNameExpressionResolver
+    ) {
+        if (nodeFilter == null) {
+            nodeFilter = multiTenancyEnabled ? new SDKNodeFilter() : new DiscoveryNodeFilterer(clusterService, indexNameExpressionResolver);
+        }
+        return nodeFilter;
+    }
 
     @Override
     public List<RestHandler> getRestHandlers(
@@ -410,48 +559,61 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
         adJobRunner.setClient(client);
         adJobRunner.setThreadPool(threadPool);
         adJobRunner.registerSettings(settings);
-        adJobRunner.setIndexManagement(anomalyDetectionIndices);
+        adJobRunner.setIndexManagement(adDataManagement);
         adJobRunner.setTaskManager(adTaskManager);
         adJobRunner.setNodeStateManager(stateManager);
         adJobRunner.setExecuteResultResponseRecorder(adResultResponseRecorder);
         adJobRunner.setIndexJobActionHandler(adIndexJobActionHandler);
         adJobRunner.setClock(getClock());
 
-        RestGetAnomalyDetectorAction restGetAnomalyDetectorAction = new RestGetAnomalyDetectorAction();
+        RestGetAnomalyDetectorAction restGetAnomalyDetectorAction = new RestGetAnomalyDetectorAction(settings);
+        RestAnomalyDetectorEntityProfileAction restAnomalyDetectorEntityProfileAction = new RestAnomalyDetectorEntityProfileAction(settings);
+        RestAnomalyDetectorNodeProfileAction restAnomalyDetectorNodeProfileAction = new RestAnomalyDetectorNodeProfileAction(
+            settings,
+            clusterService
+        );
+        RestEntityADResultAction restEntityADResultAction = new RestEntityADResultAction();
+        RestADSingleStreamResultAction restADSingleStreamResultAction = new RestADSingleStreamResultAction();
         RestIndexAnomalyDetectorAction restIndexAnomalyDetectorAction = new RestIndexAnomalyDetectorAction(settings, clusterService);
-        RestSearchAnomalyDetectorAction searchAnomalyDetectorAction = new RestSearchAnomalyDetectorAction();
-        RestSearchAnomalyResultAction searchAnomalyResultAction = new RestSearchAnomalyResultAction();
-        RestSearchADTasksAction searchADTasksAction = new RestSearchADTasksAction();
-        RestDeleteAnomalyDetectorAction deleteAnomalyDetectorAction = new RestDeleteAnomalyDetectorAction();
+        RestSearchAnomalyDetectorAction searchAnomalyDetectorAction = new RestSearchAnomalyDetectorAction(settings);
+        RestSearchAnomalyResultAction searchAnomalyResultAction = new RestSearchAnomalyResultAction(settings);
+        RestSearchADTasksAction searchADTasksAction = new RestSearchADTasksAction(settings);
+        RestDeleteAnomalyDetectorAction deleteAnomalyDetectorAction = new RestDeleteAnomalyDetectorAction(settings);
+        RestDeleteADModelAction deleteADModelAction = new RestDeleteADModelAction(settings, clusterService);
         RestExecuteAnomalyDetectorAction executeAnomalyDetectorAction = new RestExecuteAnomalyDetectorAction(settings, clusterService);
-        RestStatsAnomalyDetectorAction statsAnomalyDetectorAction = new RestStatsAnomalyDetectorAction(adStats, this.nodeFilter);
+        RestStatsAnomalyDetectorAction statsAnomalyDetectorAction = new RestStatsAnomalyDetectorAction(adStats, this.nodeFilter, settings);
         RestAnomalyDetectorJobAction anomalyDetectorJobAction = new RestAnomalyDetectorJobAction(settings, clusterService);
-        RestSearchAnomalyDetectorInfoAction searchAnomalyDetectorInfoAction = new RestSearchAnomalyDetectorInfoAction();
-        RestPreviewAnomalyDetectorAction previewAnomalyDetectorAction = new RestPreviewAnomalyDetectorAction();
-        RestDeleteAnomalyResultsAction deleteAnomalyResultsAction = new RestDeleteAnomalyResultsAction();
-        RestSearchTopAnomalyResultAction searchTopAnomalyResultAction = new RestSearchTopAnomalyResultAction();
+        RestSearchAnomalyDetectorInfoAction searchAnomalyDetectorInfoAction = new RestSearchAnomalyDetectorInfoAction(settings);
+        RestPreviewAnomalyDetectorAction previewAnomalyDetectorAction = new RestPreviewAnomalyDetectorAction(settings);
+        RestDeleteAnomalyResultsAction deleteAnomalyResultsAction = new RestDeleteAnomalyResultsAction(settings);
+        RestSearchTopAnomalyResultAction searchTopAnomalyResultAction = new RestSearchTopAnomalyResultAction(settings);
         RestValidateAnomalyDetectorAction validateAnomalyDetectorAction = new RestValidateAnomalyDetectorAction(settings, clusterService);
         RestAnomalyDetectorSuggestAction suggestAnomalyDetectorAction = new RestAnomalyDetectorSuggestAction(settings, clusterService);
+        org.opensearch.ad.rest.RestADHCImputeAction restADHCImputeAction = new org.opensearch.ad.rest.RestADHCImputeAction();
+        RestADStatsNodesAction restADStatsNodesAction = new RestADStatsNodesAction(adStats, this.nodeFilter, settings);
 
         // Forecast
         RestIndexForecasterAction restIndexForecasterAction = new RestIndexForecasterAction(settings, clusterService);
         RestForecasterJobAction restForecasterJobAction = new RestForecasterJobAction();
-        RestGetForecasterAction restGetForecasterAction = new RestGetForecasterAction();
-        RestDeleteForecasterAction deleteForecasterAction = new RestDeleteForecasterAction();
-        RestSearchForecasterAction searchForecasterAction = new RestSearchForecasterAction();
-        RestSearchForecasterInfoAction searchForecasterInfoAction = new RestSearchForecasterInfoAction();
-        RestSearchTopForecastResultAction searchTopForecastResultAction = new RestSearchTopForecastResultAction();
-        RestSearchForecastTasksAction searchForecastTasksAction = new RestSearchForecastTasksAction();
+        RestGetForecasterAction restGetForecasterAction = new RestGetForecasterAction(settings);
+        RestDeleteForecasterAction deleteForecasterAction = new RestDeleteForecasterAction(settings);
+        RestSearchForecasterAction searchForecasterAction = new RestSearchForecasterAction(settings);
+        RestSearchForecasterInfoAction searchForecasterInfoAction = new RestSearchForecasterInfoAction(settings);
+        RestSearchTopForecastResultAction searchTopForecastResultAction = new RestSearchTopForecastResultAction(settings);
+        RestSearchForecastTasksAction searchForecastTasksAction = new RestSearchForecastTasksAction(settings);
         RestStatsForecasterAction statsForecasterAction = new RestStatsForecasterAction(forecastStats, this.nodeFilter);
-        RestRunOnceForecasterAction runOnceForecasterAction = new RestRunOnceForecasterAction();
+        RestRunOnceForecasterAction runOnceForecasterAction = new RestRunOnceForecasterAction(settings);
         RestValidateForecasterAction validateForecasterAction = new RestValidateForecasterAction(settings, clusterService);
         RestForecasterSuggestAction suggestForecasterParamAction = new RestForecasterSuggestAction(settings, clusterService);
+
+        // Common timeseries handlers
+        org.opensearch.timeseries.rest.RestCronAction restCronAction = new org.opensearch.timeseries.rest.RestCronAction();
 
         ForecastJobProcessor forecastJobRunner = ForecastJobProcessor.getInstance();
         forecastJobRunner.setClient(client);
         forecastJobRunner.setThreadPool(threadPool);
         forecastJobRunner.registerSettings(settings);
-        forecastJobRunner.setIndexManagement(forecastIndices);
+        forecastJobRunner.setIndexManagement(forecastDataManagement);
         forecastJobRunner.setTaskManager(forecastTaskManager);
         forecastJobRunner.setNodeStateManager(stateManager);
         forecastJobRunner.setExecuteResultResponseRecorder(forecastResultResponseRecorder);
@@ -462,20 +624,27 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             .of(
                 // AD
                 restGetAnomalyDetectorAction,
+                restAnomalyDetectorEntityProfileAction,
+                restAnomalyDetectorNodeProfileAction,
+                restEntityADResultAction,
+                restADSingleStreamResultAction,
                 restIndexAnomalyDetectorAction,
                 searchAnomalyDetectorAction,
                 searchAnomalyResultAction,
                 searchADTasksAction,
                 deleteAnomalyDetectorAction,
+                deleteADModelAction,
                 executeAnomalyDetectorAction,
                 anomalyDetectorJobAction,
                 statsAnomalyDetectorAction,
+                restADStatsNodesAction,
                 searchAnomalyDetectorInfoAction,
                 previewAnomalyDetectorAction,
                 deleteAnomalyResultsAction,
                 searchTopAnomalyResultAction,
                 validateAnomalyDetectorAction,
                 suggestAnomalyDetectorAction,
+                restADHCImputeAction,
                 // Forecast
                 restIndexForecasterAction,
                 restForecasterJobAction,
@@ -488,13 +657,40 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 statsForecasterAction,
                 runOnceForecasterAction,
                 validateForecasterAction,
-                suggestForecasterParamAction
+                suggestForecasterParamAction,
+                // Common timeseries
+                restCronAction
             );
     }
 
     private static Void initGson() {
         gson = new GsonBuilder().serializeSpecialFloatingPointValues().create();
         return null;
+    }
+
+    GenericObjectPool<LinkedBuffer> createSerializeRCFBufferPool() {
+        GenericObjectPool<LinkedBuffer> pool = AccessController.doPrivileged(new PrivilegedAction<GenericObjectPool<LinkedBuffer>>() {
+            @Override
+            public GenericObjectPool<LinkedBuffer> run() {
+                return new GenericObjectPool<>(new BasePooledObjectFactory<LinkedBuffer>() {
+                    @Override
+                    public LinkedBuffer create() throws Exception {
+                        return LinkedBuffer.allocate(TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES);
+                    }
+
+                    @Override
+                    public PooledObject<LinkedBuffer> wrap(LinkedBuffer obj) {
+                        return new DefaultPooledObject<>(obj);
+                    }
+                });
+            }
+        });
+        pool.setMaxTotal(TimeSeriesSettings.MAX_TOTAL_RCF_SERIALIZATION_BUFFERS);
+        pool.setMaxIdle(TimeSeriesSettings.MAX_TOTAL_RCF_SERIALIZATION_BUFFERS);
+        pool.setMinIdle(0);
+        pool.setBlockWhenExhausted(false);
+        pool.setTimeBetweenEvictionRuns(TimeSeriesSettings.HOURLY_MAINTENANCE);
+        return pool;
     }
 
     @Override
@@ -518,9 +714,24 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
         this.pluginClient = new PluginClient(client);
         this.threadPool = threadPool;
         Settings settings = environment.settings();
+        this.pluginSettings = settings;
         this.clientUtil = new ClientUtil(client);
-        this.indexUtils = new IndexUtils(clusterService, indexNameExpressionResolver);
-        this.nodeFilter = new DiscoveryNodeFilterer(clusterService);
+        this.indexUtils = new IndexUtils(clusterService);
+        boolean multiTenancyEnabled = AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings)
+            || ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED.get(settings);
+        if (multiTenancyEnabled
+            && (ParseUtils.shouldUseResourceAuthz(ADCommonName.AD_RESOURCE_TYPE)
+                || ParseUtils.shouldUseResourceAuthz(ForecastCommonName.FORECAST_RESOURCE_TYPE))) {
+            // TODO: we don't support resource authz for multi-tenant as it requires security plugin
+            // to centralize the authN logic (e.g., verify access to resource). In a multi-tenant AD,
+            // there is no security plugin. To support that, we need to either to move some of the
+            // authN logic to AD plugin and make security plugin to support external
+            // access resource sharing calls from outside the cluster.
+            throw new IllegalStateException("Resource authz is not supported when multi-tenancy is enabled.");
+        }
+        this.runContext = multiTenancyEnabled ? new SdkRunContext() : new ThreadRunContext(threadPool.getThreadContext());
+        this.nodeFilter = getOrCreateDiscoveryNodeSelector(multiTenancyEnabled, clusterService, indexNameExpressionResolver);
+        this.indexOperations = multiTenancyEnabled ? new SDKIndexOperations(settings) : indexUtils;
         this.clusterService = clusterService;
         Imputer imputer = new LinearUniformImputer(true);
 
@@ -535,48 +746,59 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
 
         long heapSizeBytes = JvmInfo.jvmInfo().getMem().getHeapMax().getBytes();
 
-        serializeRCFBufferPool = AccessController.doPrivileged(new PrivilegedAction<GenericObjectPool<LinkedBuffer>>() {
-            @Override
-            public GenericObjectPool<LinkedBuffer> run() {
-                return new GenericObjectPool<>(new BasePooledObjectFactory<LinkedBuffer>() {
-                    @Override
-                    public LinkedBuffer create() throws Exception {
-                        return LinkedBuffer.allocate(TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES);
-                    }
+        serializeRCFBufferPool = createSerializeRCFBufferPool();
 
-                    @Override
-                    public PooledObject<LinkedBuffer> wrap(LinkedBuffer obj) {
-                        return new DefaultPooledObject<>(obj);
-                    }
-                });
-            }
-        });
-        serializeRCFBufferPool.setMaxTotal(TimeSeriesSettings.MAX_TOTAL_RCF_SERIALIZATION_BUFFERS);
-        serializeRCFBufferPool.setMaxIdle(TimeSeriesSettings.MAX_TOTAL_RCF_SERIALIZATION_BUFFERS);
-        serializeRCFBufferPool.setMinIdle(0);
-        serializeRCFBufferPool.setBlockWhenExhausted(false);
-        serializeRCFBufferPool.setTimeBetweenEvictionRuns(TimeSeriesSettings.HOURLY_MAINTENANCE);
+        java.util.List<String> nodeRoles = org.opensearch.timeseries.settings.TimeSeriesSettings.NODE_ROLE.get(settings);
+        eventBridgeHandler = null;
+        if (nodeRoles.contains(org.opensearch.timeseries.settings.TimeSeriesSettings.COORDINATOR_ROLE)) {
+            eventBridgeHandler = new ADEventBridgeHandler(settings, getClock());
+        }
 
-        stateManager = new NodeStateManager(
-            client,
-            xContentRegistry,
-            settings,
-            clientUtil,
-            getClock(),
-            TimeSeriesSettings.HOURLY_MAINTENANCE,
-            clusterService,
-            TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            TimeSeriesSettings.BACKOFF_MINUTES
-        );
+        SdkStateManager resourceStateManager = null;
+        if (multiTenancyEnabled) {
+            resourceStateManager = new SdkStateManager(
+                client,
+                xContentRegistry,
+                settings,
+                getClock(),
+                TimeSeriesSettings.HOURLY_MAINTENANCE,
+                TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+                TimeSeriesSettings.BACKOFF_MINUTES,
+                eventBridgeHandler
+            );
+            stateManager = resourceStateManager;
+        } else {
+            stateManager = new NodeStateManager(
+                client,
+                xContentRegistry,
+                settings,
+                clientUtil,
+                getClock(),
+                TimeSeriesSettings.HOURLY_MAINTENANCE,
+                clusterService,
+                TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
+                TimeSeriesSettings.BACKOFF_MINUTES,
+                eventBridgeHandler
+            );
+        }
         securityClientUtil = new SecurityClientUtil(stateManager, settings);
 
-        SearchFeatureDao searchFeatureDao = new SearchFeatureDao(
-            client,
+        dataAccess = createDataAccess(
+            multiTenancyEnabled,
             xContentRegistry,
-            securityClientUtil,
-            settings,
+            resourceStateManager,
+            indexNameExpressionResolver
+        );
+
+        SearchFeatureDao searchFeatureDao = new SearchFeatureDao(
+            xContentRegistry,
+            dataAccess,
             clusterService,
-            TimeSeriesSettings.NUM_SAMPLES_PER_TREE
+            TimeSeriesSettings.NUM_SAMPLES_PER_TREE,
+            getClock(),
+            AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW.get(settings),
+            AnomalyDetectorSettings.AD_PAGE_SIZE.get(settings),
+            AnomalyDetectorSettings.PREVIEW_TIMEOUT_IN_MILLIS
         );
 
         FeatureManager featureManager = new FeatureManager(
@@ -608,39 +830,81 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                     settings,
                     nodeFilter,
                     TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-                    xContentRegistry
+                    xContentRegistry,
+                    dataAccess
                 )
             )
             .get();
+
+        SDKDataManagement<ADIndex, AnomalyResult> adSdkConfigStore = new ADSdkDataManagement(
+            client,
+            xContentRegistry,
+            settings,
+            clusterService
+        );
+        this.adDataManagement = new ADDelegatingDataManagement(anomalyDetectionIndices, adSdkConfigStore, clusterService);
 
         double adModelMaxSizePercent = AnomalyDetectorSettings.AD_MODEL_MAX_SIZE_PERCENTAGE.get(settings);
 
         MemoryTracker adMemoryTracker = new MemoryTracker(jvmService, adModelMaxSizePercent, clusterService, circuitBreakerService);
 
-        ADCheckpointDao adCheckpoint = new ADCheckpointDao(
+        ThresholdedRandomCutForestMapper trcfMapper = new ThresholdedRandomCutForestMapper();
+        Schema<ThresholdedRandomCutForestState> trcfSchema = AccessController
+            .doPrivileged(
+                (PrivilegedAction<Schema<ThresholdedRandomCutForestState>>) () -> RuntimeSchema
+                    .getSchema(ThresholdedRandomCutForestState.class)
+            );
+
+        double anomalyRate = 1 - TimeSeriesSettings.THRESHOLD_MIN_PVALUE;
+
+        ADCheckpointDao indexCheckpointStore = new ADCheckpointDao(
             client,
             clientUtil,
             gson,
             rcfMapper,
             converter,
-            new ThresholdedRandomCutForestMapper(),
-            AccessController
-                .doPrivileged(
-                    (PrivilegedAction<Schema<ThresholdedRandomCutForestState>>) () -> RuntimeSchema
-                        .getSchema(ThresholdedRandomCutForestState.class)
-                ),
+            trcfMapper,
+            trcfSchema,
             HybridThresholdingModel.class,
-            anomalyDetectionIndices,
+            adDataManagement,
             TimeSeriesSettings.MAX_CHECKPOINT_BYTES,
             serializeRCFBufferPool,
             TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES,
-            1 - TimeSeriesSettings.THRESHOLD_MIN_PVALUE,
+            anomalyRate,
             getClock()
         );
 
+        ADS3CheckpointDao s3CheckpointStore = null;
+        if (AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings)) {
+            try {
+                s3CheckpointStore = new ADS3CheckpointDao(
+                    settings,
+                    TimeSeriesSettings.MAX_CHECKPOINT_BYTES,
+                    trcfSchema,
+                    trcfMapper,
+                    converter,
+                    gson,
+                    rcfMapper,
+                    HybridThresholdingModel.class,
+                    anomalyRate,
+                    getClock(),
+                    serializeRCFBufferPool,
+                    TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES,
+                    adDataManagement,
+                    indexOperations
+                );
+            } catch (Exception e) {
+                LOG.warn("Failed to initialise S3-backed checkpoint store; falling back to index-backed checkpoints.", e);
+            }
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug("S3 checkpoint store not configured; using index-backed checkpoints");
+        }
+
+        ADCheckpointStore adCheckpoint = new DelegatingADCheckpointStore(indexCheckpointStore, s3CheckpointStore, clusterService);
+
         ADCacheProvider adCacheProvider = new ADCacheProvider();
 
-        CheckPointMaintainRequestAdapter<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADPriorityCache> adAdapter =
+        CheckPointMaintainRequestAdapter<ThresholdedRandomCutForest, ADIndex, ADDelegatingDataManagement, ADCheckpointStore, ADPriorityCache> adAdapter =
             new CheckPointMaintainRequestAdapter<>(
                 adCheckpoint,
                 ADCommonName.CHECKPOINT_INDEX_NAME,
@@ -670,7 +934,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             ADCommonName.CHECKPOINT_INDEX_NAME,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             stateManager,
-            TimeSeriesSettings.HOURLY_MAINTENANCE
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
+            indexOperations
         );
 
         ADCheckpointMaintainWorker adCheckpointMaintainQueue = new ADCheckpointMaintainWorker(
@@ -708,12 +973,15 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             settings,
             AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             adCheckpointWriteQueue,
-            adCheckpointMaintainQueue
+            adCheckpointMaintainQueue,
+            stateManager
         );
 
         // cache provider allows us to break circular dependency among PriorityCache, CacheBuffer,
         // CheckPointMaintainRequestAdapter, and CheckpointMaintainWorker
         adCacheProvider.set(adPriorityCache);
+
+        int adResultMappingVersion = adDataManagement.getSchemaVersion(ADIndex.RESULT);
 
         ADColdStart adEntityColdStarter = new ADColdStart(
             getClock(),
@@ -730,7 +998,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             TimeSeriesSettings.MAX_COLD_START_ROUNDS,
             (int) (AD_COOLDOWN_MINUTES.get(settings).getMinutes()),
-            anomalyDetectionIndices.getSchemaVersion(ADIndex.RESULT)
+            adResultMappingVersion
         );
 
         ADModelManager adModelManager = new ADModelManager(
@@ -747,13 +1015,14 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             featureManager,
             adMemoryTracker,
             settings,
-            clusterService
+            clusterService,
+            stateManager
         );
 
         ADIndexMemoryPressureAwareResultHandler adIndexMemoryPressureAwareResultHandler = new ADIndexMemoryPressureAwareResultHandler(
             client,
-            anomalyDetectionIndices,
-            clusterService
+            adDataManagement,
+            nodeFilter
         );
 
         ADResultWriteWorker adResultWriteQueue = new ADResultWriteWorker(
@@ -777,27 +1046,31 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             TimeSeriesSettings.HOURLY_MAINTENANCE
         );
 
-        ADSaveResultStrategy adSaveResultStrategy = new ADSaveResultStrategy(
-            anomalyDetectionIndices.getSchemaVersion(ADIndex.RESULT),
-            adResultWriteQueue
-        );
+        ADSaveResultStrategy adSaveResultStrategy = new ADSaveResultStrategy(adResultMappingVersion, adResultWriteQueue);
 
-        ADDataMigrator adDataMigrator = new ADDataMigrator(client, clusterService, xContentRegistry, anomalyDetectionIndices);
-        HashRing hashRing = new HashRing(nodeFilter, getClock(), settings, client, clusterService, adDataMigrator, adModelManager);
+        ADDataMigrator adDataMigrator = new ADDataMigrator(
+            client,
+            clusterService,
+            xContentRegistry,
+            anomalyDetectionIndices,
+            adDataManagement,
+            stateManager
+        );
+        HashRing hashRing = new HashRing(nodeFilter, getClock(), settings, dataAccess, clusterService, adDataMigrator, adCacheProvider);
         ADTaskProfileRunner adTaskProfileRunner = new ADTaskProfileRunner(hashRing, client);
         ADTaskCacheManager adTaskCacheManager = new ADTaskCacheManager(settings, clusterService, adMemoryTracker);
-
         adTaskManager = new ADTaskManager(
             settings,
             clusterService,
             client,
             xContentRegistry,
-            anomalyDetectionIndices,
             nodeFilter,
             hashRing,
             adTaskCacheManager,
             threadPool,
             stateManager,
+            dataAccess,
+            adDataManagement,
             adTaskProfileRunner
         );
 
@@ -835,15 +1108,15 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             .put(StatNames.AD_HC_EXECUTE_FAIL_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()))
             .put(
                 StatNames.ANOMALY_RESULTS_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ADCommonName.ANOMALY_RESULT_INDEX_ALIAS))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ADCommonName.ANOMALY_RESULT_INDEX_ALIAS))
             )
             .put(
                 StatNames.AD_MODELS_CHECKPOINT_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ADCommonName.CHECKPOINT_INDEX_NAME))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ADCommonName.CHECKPOINT_INDEX_NAME))
             )
             .put(
                 StatNames.ANOMALY_DETECTION_STATE_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ADCommonName.DETECTION_STATE_INDEX))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ADCommonName.DETECTION_STATE_INDEX))
             )
             .put(StatNames.DETECTOR_COUNT.getName(), new TimeSeriesStat<>(true, new SettableSupplier()))
             .put(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName(), new TimeSeriesStat<>(true, new SettableSupplier()))
@@ -855,23 +1128,23 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             .put(StatNames.AD_MODEL_CORRUTPION_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()))
             .put(
                 StatNames.MODEL_INFORMATION.getName(),
-                new TimeSeriesStat<>(false, new ADModelsOnNodeSupplier(adModelManager, adCacheProvider, settings, clusterService))
+                new TimeSeriesStat<>(false, new ADModelsOnNodeSupplier(adCacheProvider, settings, clusterService))
             )
             .put(
                 StatNames.AD_CONFIG_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ADCommonName.CONFIG_INDEX))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ADCommonName.CONFIG_INDEX))
             )
             .put(
                 StatNames.FORECAST_CONFIG_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ForecastCommonName.CONFIG_INDEX))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ForecastCommonName.CONFIG_INDEX))
             )
             .put(
                 StatNames.JOB_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.JOB_INDEX))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, CommonName.JOB_INDEX))
             )
             .put(
                 StatNames.MODEL_COUNT.getName(),
-                new TimeSeriesStat<>(false, new ADModelsOnNodeCountSupplier(adModelManager, adCacheProvider))
+                new TimeSeriesStat<>(false, new ADModelsOnNodeCountSupplier(adCacheProvider))
             )
             .build();
 
@@ -911,7 +1184,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             adCacheProvider,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             adCheckpointWriteQueue,
-            adInferencer
+            adInferencer,
+            indexOperations
         );
 
         ADColdEntityWorker adColdEntityQueue = new ADColdEntityWorker(
@@ -935,34 +1209,31 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
 
         anomalyDetectorRunner = new AnomalyDetectorRunner(adModelManager, featureManager, AnomalyDetectorSettings.MAX_PREVIEW_RESULTS);
 
-        ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> anomalyResultBulkIndexHandler =
+        ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADDelegatingDataManagement> anomalyResultBulkIndexHandler =
             new ResultBulkIndexingHandler<>(
-                client,
+                dataAccess,
                 settings,
                 threadPool,
                 ANOMALY_RESULT_INDEX_ALIAS,
-                anomalyDetectionIndices,
-                this.clientUtil,
-                this.indexUtils,
-                clusterService,
+                adDataManagement,
+                nodeFilter,
                 AnomalyDetectorSettings.AD_BACKOFF_INITIAL_DELAY,
                 AnomalyDetectorSettings.AD_MAX_RETRY_FOR_BACKOFF
             );
 
-        ADSearchHandler adSearchHandler = new ADSearchHandler(settings, clusterService, client, pluginClient);
+        ADSearchHandler adSearchHandler = new ADSearchHandler(settings, clusterService, pluginClient, dataAccess, runContext);
 
-        ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> anomalyResultHandler = new ResultBulkIndexingHandler<>(
-            client,
-            settings,
-            threadPool,
-            ANOMALY_RESULT_INDEX_ALIAS,
-            anomalyDetectionIndices,
-            this.clientUtil,
-            this.indexUtils,
-            clusterService,
-            AnomalyDetectorSettings.AD_BACKOFF_INITIAL_DELAY,
-            AnomalyDetectorSettings.AD_MAX_RETRY_FOR_BACKOFF
-        );
+        ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADDelegatingDataManagement> anomalyResultHandler =
+            new ResultBulkIndexingHandler<>(
+                dataAccess,
+                settings,
+                threadPool,
+                ANOMALY_RESULT_INDEX_ALIAS,
+                adDataManagement,
+                nodeFilter,
+                AnomalyDetectorSettings.AD_BACKOFF_INITIAL_DELAY,
+                AnomalyDetectorSettings.AD_MAX_RETRY_FOR_BACKOFF
+            );
 
         // =====================
         // common components, need AD/forecasting components to initialize
@@ -973,40 +1244,62 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             threadPool,
             clusterService,
             client,
-            securityClientUtil,
             circuitBreakerService,
             featureManager,
             adTaskManager,
-            anomalyDetectionIndices,
             adStats,
             anomalyResultBulkIndexHandler,
             adTaskCacheManager,
             searchFeatureDao,
             hashRing,
-            adModelManager
+            adModelManager,
+            adResultMappingVersion,
+            dataAccess
         );
 
+        adNodeCommunicator = multiTenancyEnabled
+            ? new ADHttpNodeCommunicator(hashRing)
+            : new ADTransportNodeCommunicator(client, nodeFilter);
+
         adResultResponseRecorder = new ExecuteADResultResponseRecorder(
-            anomalyDetectionIndices,
             anomalyResultHandler,
             adTaskManager,
             nodeFilter,
             threadPool,
-            client,
+            adNodeCommunicator,
+            dataAccess,
             stateManager,
             getClock(),
-            TimeSeriesSettings.NUM_MIN_SAMPLES
+            adResultMappingVersion
         );
 
-        adIndexJobActionHandler = new ADIndexJobActionHandler(
-            client,
-            anomalyDetectionIndices,
-            xContentRegistry,
-            adTaskManager,
-            adResultResponseRecorder,
-            stateManager,
-            settings
-        );
+        // Use EventBridge for starting jobs on coordinator nodes; otherwise default indexing-based starter
+
+        if (nodeRoles.contains(org.opensearch.timeseries.settings.TimeSeriesSettings.COORDINATOR_ROLE)) {
+            adIndexJobActionHandler = new ADIndexJobActionHandler(
+                client,
+                adDataManagement,
+                xContentRegistry,
+                adTaskManager,
+                adResultResponseRecorder,
+                stateManager,
+                settings,
+                eventBridgeHandler::startJob,
+                eventBridgeHandler::stopJob,
+                runContext
+            );
+        } else {
+            adIndexJobActionHandler = new ADIndexJobActionHandler(
+                client,
+                adDataManagement,
+                xContentRegistry,
+                adTaskManager,
+                adResultResponseRecorder,
+                stateManager,
+                settings,
+                runContext
+            );
+        }
 
         // =====================
         // forecast components
@@ -1023,10 +1316,15 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                     settings,
                     nodeFilter,
                     ForecastSettings.FORECAST_MAX_UPDATE_RETRY_TIMES,
-                    xContentRegistry
+                    xContentRegistry,
+                    dataAccess
                 )
             )
             .get();
+
+        this.forecastDataManagement = new ForecastDelegatingDataManagement(forecastIndices, null, clusterService);
+
+        int forecastResultMappingVersion = forecastDataManagement.getSchemaVersion(ForecastIndex.RESULT);
 
         double forecastModelMaxSizePercent = ForecastSettings.FORECAST_MODEL_MAX_SIZE_PERCENTAGE.get(settings);
 
@@ -1044,7 +1342,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             TimeSeriesSettings.MAX_CHECKPOINT_BYTES,
             serializeRCFBufferPool,
             TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES,
-            forecastIndices,
+            forecastDataManagement,
             new RCFCasterMapper(),
             AccessController.doPrivileged((PrivilegedAction<Schema<RCFCasterState>>) () -> RuntimeSchema.getSchema(RCFCasterState.class)),
             getClock()
@@ -1052,8 +1350,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
 
         ForecastCacheProvider forecastCacheProvider = new ForecastCacheProvider();
 
-        CheckPointMaintainRequestAdapter<RCFCaster, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastPriorityCache> forecastAdapter =
-            new CheckPointMaintainRequestAdapter<RCFCaster, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastPriorityCache>(
+        CheckPointMaintainRequestAdapter<RCFCaster, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastPriorityCache> forecastAdapter =
+            new CheckPointMaintainRequestAdapter<RCFCaster, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastPriorityCache>(
                 forecastCheckpoint,
                 ForecastIndex.CHECKPOINT.getIndexName(),
                 ForecastSettings.FORECAST_CHECKPOINT_SAVING_FREQ,
@@ -1082,7 +1380,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             ForecastIndex.CHECKPOINT.getIndexName(),
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             stateManager,
-            TimeSeriesSettings.HOURLY_MAINTENANCE
+            TimeSeriesSettings.HOURLY_MAINTENANCE,
+            indexOperations
         );
 
         ForecastCheckpointMaintainWorker forecastCheckpointMaintainQueue = new ForecastCheckpointMaintainWorker(
@@ -1116,12 +1415,13 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             clusterService,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             threadPool,
-            FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             TimeSeriesSettings.MAINTENANCE_FREQ_CONSTANT,
             settings,
             ForecastSettings.FORECAST_CHECKPOINT_SAVING_FREQ,
             forecastCheckpointWriteQueue,
-            forecastCheckpointMaintainQueue
+            forecastCheckpointMaintainQueue,
+            stateManager
         );
 
         // cache provider allows us to break circular dependency among PriorityCache, CacheBuffer,
@@ -1143,7 +1443,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             -1, // no hard coded random seed
             -1, // interpolation is disabled so we don't need to specify the number of sampled points
             TimeSeriesSettings.MAX_COLD_START_ROUNDS,
-            forecastIndices.getSchemaVersion(ForecastIndex.RESULT)
+            forecastResultMappingVersion
         );
 
         ForecastModelManager forecastModelManager = new ForecastModelManager(
@@ -1154,11 +1454,12 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             TimeSeriesSettings.NUM_MIN_SAMPLES,
             forecastColdStarter,
             forecastMemoryTracker,
-            featureManager
+            featureManager,
+            stateManager
         );
 
         ForecastIndexMemoryPressureAwareResultHandler forecastIndexMemoryPressureAwareResultHandler =
-            new ForecastIndexMemoryPressureAwareResultHandler(client, forecastIndices, clusterService);
+            new ForecastIndexMemoryPressureAwareResultHandler(client, forecastDataManagement, nodeFilter);
 
         ForecastResultWriteWorker forecastResultWriteQueue = new ForecastResultWriteWorker(
             heapSizeBytes,
@@ -1182,20 +1483,26 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
         );
 
         ForecastSaveResultStrategy forecastSaveResultStrategy = new ForecastSaveResultStrategy(
-            forecastIndices.getSchemaVersion(ForecastIndex.RESULT),
+            forecastResultMappingVersion,
             forecastResultWriteQueue
         );
 
         TaskCacheManager forecastTaskCacheManager = new TaskCacheManager(settings, clusterService);
+        DataAccess forecastTaskSearcher = createDataAccess(
+            ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED.get(settings),
+            xContentRegistry,
+            resourceStateManager,
+            indexNameExpressionResolver
+        );
 
         forecastTaskManager = new ForecastTaskManager(
             forecastTaskCacheManager,
-            client,
             xContentRegistry,
-            forecastIndices,
             clusterService,
             settings,
             threadPool,
+            forecastTaskSearcher,
+            forecastDataManagement,
             stateManager
         );
 
@@ -1233,15 +1540,15 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             .put(StatNames.FORECAST_HC_EXECUTE_FAIL_COUNT.getName(), new TimeSeriesStat<>(false, new CounterSupplier()))
             .put(
                 StatNames.FORECAST_RESULTS_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ForecastIndex.RESULT.getIndexName()))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ForecastIndex.RESULT.getIndexName()))
             )
             .put(
                 StatNames.FORECAST_MODELS_CHECKPOINT_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ForecastIndex.CHECKPOINT.getIndexName()))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ForecastIndex.CHECKPOINT.getIndexName()))
             )
             .put(
                 StatNames.FORECAST_STATE_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ForecastIndex.STATE.getIndexName()))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ForecastIndex.STATE.getIndexName()))
             )
             .put(StatNames.FORECASTER_COUNT.getName(), new TimeSeriesStat<>(true, new SettableSupplier()))
             .put(StatNames.SINGLE_STREAM_FORECASTER_COUNT.getName(), new TimeSeriesStat<>(true, new SettableSupplier()))
@@ -1253,11 +1560,11 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             )
             .put(
                 StatNames.FORECAST_CONFIG_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, ForecastCommonName.CONFIG_INDEX))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, ForecastCommonName.CONFIG_INDEX))
             )
             .put(
                 StatNames.JOB_INDEX_STATUS.getName(),
-                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexUtils, CommonName.JOB_INDEX))
+                new TimeSeriesStat<>(true, new IndexStatusSupplier(indexOperations, CommonName.JOB_INDEX))
             )
             .put(StatNames.MODEL_COUNT.getName(), new TimeSeriesStat<>(false, new ForecastModelsOnNodeCountSupplier(forecastCacheProvider)))
             .build();
@@ -1298,7 +1605,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             forecastCacheProvider,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             forecastCheckpointWriteQueue,
-            forecastInferencer
+            forecastInferencer,
+            indexOperations
         );
 
         ForecastColdEntityWorker forecastColdEntityQueue = new ForecastColdEntityWorker(
@@ -1320,115 +1628,131 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             stateManager
         );
 
-        ResultBulkIndexingHandler<ForecastResult, ForecastIndex, ForecastIndexManagement> forecastResultHandler =
+        ResultBulkIndexingHandler<ForecastResult, ForecastIndex, ForecastDelegatingDataManagement> forecastResultHandler =
             new ResultBulkIndexingHandler<>(
-                client,
+                dataAccess,
                 settings,
                 threadPool,
                 ForecastIndex.RESULT.getIndexName(),
-                forecastIndices,
-                this.clientUtil,
-                this.indexUtils,
-                clusterService,
+                forecastDataManagement,
+                nodeFilter,
                 ForecastSettings.FORECAST_BACKOFF_INITIAL_DELAY,
                 ForecastSettings.FORECAST_MAX_RETRY_FOR_BACKOFF
             );
 
+        forecastNodeCommunicator = new ForecastTransportNodeCommunicator(client, nodeFilter);
+
         forecastResultResponseRecorder = new ExecuteForecastResultResponseRecorder(
-            forecastIndices,
             forecastResultHandler,
             forecastTaskManager,
             nodeFilter,
             threadPool,
-            client,
+            forecastNodeCommunicator,
+            dataAccess,
             stateManager,
             getClock(),
-            TimeSeriesSettings.NUM_MIN_SAMPLES
+            forecastResultMappingVersion
         );
 
-        ForecastSearchHandler forecastSearchHandler = new ForecastSearchHandler(settings, clusterService, client, pluginClient);
+        ForecastSearchHandler forecastSearchHandler = new ForecastSearchHandler(
+            settings,
+            clusterService,
+            pluginClient,
+            forecastTaskSearcher,
+            runContext
+        );
 
         forecastIndexJobActionHandler = new ForecastIndexJobActionHandler(
             client,
-            forecastIndices,
+            forecastDataManagement,
             xContentRegistry,
             forecastTaskManager,
             forecastResultResponseRecorder,
             stateManager,
-            settings
+            settings,
+            runContext
         );
 
-        // return objects used by Guice to inject dependencies for e.g.,
-        // transport action handler constructors
-        return ImmutableList
-            .of(
-                // common components
-                searchFeatureDao,
-                imputer,
-                gson,
-                jvmService,
-                hashRing,
-                featureManager,
-                stateManager,
-                new ClusterEventListener(clusterService, hashRing),
-                circuitBreakerService,
-                new ClusterManagerEventListener(
-                    clusterService,
-                    threadPool,
-                    client,
-                    getClock(),
-                    clientUtil,
+        List<Object> components = new ArrayList<>(
+            ImmutableList
+                .of(
+                    // return objects used by Guice to inject dependencies for e.g.,
+                    // transport action handler constructors
+                    // common components
+                    searchFeatureDao,
+                    imputer,
+                    gson,
+                    jvmService,
+                    hashRing,
+                    featureManager,
+                    stateManager,
+                    new ClusterEventListener(clusterService, hashRing),
+                    circuitBreakerService,
+                    new ClusterManagerTaskRegistry(
+                        clusterService,
+                        threadPool,
+                        client,
+                        getClock(),
+                        dataAccess,
+                        nodeFilter,
+                        settings,
+                        hashRing,
+                        stateManager,
+                        xContentRegistry,
+                        runContext,
+                        eventBridgeHandler
+                    ),
                     nodeFilter,
-                    AnomalyDetectorSettings.AD_CHECKPOINT_TTL,
-                    ForecastSettings.FORECAST_CHECKPOINT_TTL,
-                    settings
-                ),
-                nodeFilter,
-                // AD components
-                anomalyDetectionIndices,
-                anomalyDetectorRunner,
-                adModelManager,
-                adStats,
-                adIndexMemoryPressureAwareResultHandler,
-                adCheckpoint,
-                adCacheProvider,
-                adTaskManager,
-                adBatchTaskRunner,
-                adSearchHandler,
-                adColdstartQueue,
-                adResultWriteQueue,
-                adCheckpointReadQueue,
-                adCheckpointWriteQueue,
-                adColdEntityQueue,
-                adEntityColdStarter,
-                adTaskCacheManager,
-                adResultResponseRecorder,
-                adIndexJobActionHandler,
-                adSaveResultStrategy,
-                new ADTaskProfileRunner(hashRing, client),
-                adInferencer,
-                // forecast components
-                forecastIndices,
-                forecastStats,
-                forecastModelManager,
-                forecastIndexMemoryPressureAwareResultHandler,
-                forecastCheckpoint,
-                forecastCacheProvider,
-                forecastColdstartQueue,
-                forecastResultWriteQueue,
-                forecastCheckpointReadQueue,
-                forecastCheckpointWriteQueue,
-                forecastColdEntityQueue,
-                forecastColdStarter,
-                forecastTaskManager,
-                forecastSearchHandler,
-                forecastIndexJobActionHandler,
-                forecastTaskCacheManager,
-                forecastSaveResultStrategy,
-                new ForecastTaskProfileRunner(),
-                forecastInferencer,
-                pluginClient
-            );
+                    // AD components
+                    anomalyDetectionIndices,
+                    adDataManagement,
+                    anomalyDetectorRunner,
+                    adModelManager,
+                    adStats,
+                    adIndexMemoryPressureAwareResultHandler,
+                    adCheckpoint,
+                    adCacheProvider,
+                    adTaskManager,
+                    adBatchTaskRunner,
+                    adSearchHandler,
+                    adColdstartQueue,
+                    adResultWriteQueue,
+                    adCheckpointReadQueue,
+                    adCheckpointWriteQueue,
+                    adColdEntityQueue,
+                    adEntityColdStarter,
+                    adTaskCacheManager,
+                    adResultResponseRecorder,
+                    adIndexJobActionHandler,
+                    adSaveResultStrategy,
+                    new ADTaskProfileRunner(hashRing, client),
+                    adInferencer,
+                    // forecast components
+                    forecastIndices,
+                    forecastDataManagement,
+                    forecastStats,
+                    forecastModelManager,
+                    forecastIndexMemoryPressureAwareResultHandler,
+                    forecastCheckpoint,
+                    forecastCacheProvider,
+                    forecastColdstartQueue,
+                    forecastResultWriteQueue,
+                    forecastCheckpointReadQueue,
+                    forecastCheckpointWriteQueue,
+                    forecastColdEntityQueue,
+                    forecastColdStarter,
+                    forecastTaskManager,
+                    forecastSearchHandler,
+                    forecastIndexJobActionHandler,
+                    forecastTaskCacheManager,
+                    forecastSaveResultStrategy,
+                    new ForecastTaskProfileRunner(),
+                    forecastInferencer,
+                    pluginClient
+                )
+        );
+
+        return components;
     }
 
     /**
@@ -1442,35 +1766,17 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
 
     @Override
     public List<ExecutorBuilder<?>> getExecutorBuilders(Settings settings) {
-        return ImmutableList
+        List<ExecutorBuilderContributor> contributors = List
             .of(
-                new ScalingExecutorBuilder(
-                    AD_THREAD_POOL_NAME,
-                    1,
-                    // HCAD can be heavy after supporting 1 million entities.
-                    // Limit to use at most half of the processors.
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 2),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_THREAD_POOL_NAME
-                ),
-                new ScalingExecutorBuilder(
-                    AD_BATCH_TASK_THREAD_POOL_NAME,
-                    1,
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 8),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_BATCH_TASK_THREAD_POOL_NAME
-                ),
-                new ScalingExecutorBuilder(
-                    FORECAST_THREAD_POOL_NAME,
-                    1,
-                    // this pool is used by both real time and run once.
-                    // HCAD can be heavy after supporting 1 million entities.
-                    // Limit to use at most 3/4 of the processors.
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) * 3 / 4),
-                    TimeValue.timeValueMinutes(10),
-                    FORECAST_THREAD_POOL_PREFIX + FORECAST_THREAD_POOL_NAME
-                )
+                new CloudMapWatcherContributor(),
+                new SQSConsumerContributor(),
+                new ADCoordinatorContributor(),
+                new ADModelContributor(),
+                new ForecastModelContributor()
             );
+        List<ExecutorBuilder<?>> builders = new ArrayList<>();
+        contributors.forEach(c -> c.contribute(settings, builders));
+        return List.copyOf(builders);
     }
 
     @Override
@@ -1570,10 +1876,27 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW,
                 AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW,
                 AnomalyDetectorSettings.AD_PAGE_SIZE,
+                AnomalyDetectorSettings.AD_SQS_QUEUE_ARN,
+                AnomalyDetectorSettings.AD_SCHEDULER_ROLE_ARN,
                 // clean resource
                 AnomalyDetectorSettings.DELETE_AD_RESULT_WHEN_DELETE_DETECTOR,
                 // stats/profile API
                 AnomalyDetectorSettings.AD_MAX_MODEL_SIZE_PER_NODE,
+                // SQS settings
+                AnomalyDetectorSettings.SQS_QUEUE_URL,
+                AnomalyDetectorSettings.SQS_POLLING_INTERVAL,
+                AnomalyDetectorSettings.SQS_MAX_MESSAGES,
+                AnomalyDetectorSettings.SQS_VISIBILITY_TIMEOUT,
+                AnomalyDetectorSettings.SQS_WAIT_TIME,
+                AnomalyDetectorSettings.SQS_MAX_CONCURRENT_PROCESSORS,
+                // s3
+                AnomalyDetectorSettings.AD_S3_CHECKPOINT_BUCKET,
+                // multi-tenancy
+                AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED,
+                // remote metadata
+                AnomalyDetectorSettings.REMOTE_METADATA_ENDPOINT,
+                // 'es' or 'aoss' for ddb client
+                AnomalyDetectorSettings.REMOTE_METADATA_SERVICE_NAME,
                 // ======================================
                 // Forecast settings
                 // ======================================
@@ -1592,19 +1915,18 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 ForecastSettings.FORECAST_RESULT_HISTORY_ROLLOVER_PERIOD,
                 // resource usage control
                 ForecastSettings.FORECAST_MODEL_MAX_SIZE_PERCENTAGE,
-                // TODO: add validation code
-                // ForecastSettings.FORECAST_MAX_SINGLE_STREAM_FORECASTERS,
-                // ForecastSettings.FORECAST_MAX_HC_FORECASTERS,
                 ForecastSettings.FORECAST_INDEX_PRESSURE_SOFT_LIMIT,
                 ForecastSettings.FORECAST_INDEX_PRESSURE_HARD_LIMIT,
                 ForecastSettings.FORECAST_MAX_PRIMARY_SHARDS,
                 // restful apis
                 ForecastSettings.FORECAST_REQUEST_TIMEOUT,
                 // resource constraint
+                // added validation code in AbstractTimeSeriesActionHandler.onSearchTotalConfigResponse
                 ForecastSettings.MAX_SINGLE_STREAM_FORECASTERS,
                 ForecastSettings.MAX_HC_FORECASTERS,
                 // Security
                 ForecastSettings.FORECAST_FILTER_BY_BACKEND_ROLES,
+                ForecastSettings.FORECAST_MULTI_TENANCY_ENABLED,
                 // Historical
                 ForecastSettings.MAX_OLD_TASK_DOCS_PER_FORECASTER,
                 // rate limiting
@@ -1639,8 +1961,21 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
                 TimeSeriesSettings.BACKOFF_MINUTES,
                 TimeSeriesSettings.COOLDOWN_MINUTES,
+                TimeSeriesSettings.MAX_CONCURRENT_SDK_INDEX_MAPPING_UPDATES,
                 // tasks
-                TimeSeriesSettings.MAX_CACHED_DELETED_TASKS
+                TimeSeriesSettings.MAX_CACHED_DELETED_TASKS,
+                TimeSeriesSettings.OPENSEARCH_PORT,
+                // node role
+                TimeSeriesSettings.NODE_ROLE,
+                // cluster membership reader ttl
+                TimeSeriesSettings.CLUSTER_MEMBERSHIP_READER_TTL,
+                // cloud map ttl
+                TimeSeriesSettings.CLOUD_MAP_TTL,
+                // cloud map settings
+                TimeSeriesSettings.REGION,
+                TimeSeriesSettings.CLOUD_MAP_NAMESPACE,
+                TimeSeriesSettings.CLOUD_MAP_SERVICE,
+                TimeSeriesSettings.CLOUD_MAP_TABLE_NAME
             );
         return unmodifiableList(
             Stream
@@ -1675,6 +2010,12 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
      */
     @Override
     public List<ActionHandler<? extends ActionRequest, ? extends ActionResponse>> getActions() {
+        List<String> nodeRoles = TimeSeriesSettings.NODE_ROLE.get(pluginSettings);
+        boolean coordinatorNode = nodeRoles.contains(TimeSeriesSettings.COORDINATOR_ROLE);
+        Class<? extends HandledTransportAction<DeleteConfigRequest, DeleteResponse>> deleteAnomalyDetectorTransportClass = coordinatorNode
+            ? DeleteAnomalyDetectorMutliTenantTransportAction.class
+            : DeleteAnomalyDetectorTransportAction.class;
+
         return Arrays
             .asList(
                 // AD
@@ -1691,7 +2032,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 new ActionHandler<>(SearchAnomalyResultAction.INSTANCE, SearchAnomalyResultTransportAction.class),
                 new ActionHandler<>(SearchADTasksAction.INSTANCE, SearchADTasksTransportAction.class),
                 new ActionHandler<>(StatsAnomalyDetectorAction.INSTANCE, StatsAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(DeleteAnomalyDetectorAction.INSTANCE, DeleteAnomalyDetectorTransportAction.class),
+                new ActionHandler<>(DeleteAnomalyDetectorAction.INSTANCE, deleteAnomalyDetectorTransportClass),
                 new ActionHandler<>(GetAnomalyDetectorAction.INSTANCE, GetAnomalyDetectorTransportAction.class),
                 new ActionHandler<>(IndexAnomalyDetectorAction.INSTANCE, IndexAnomalyDetectorTransportAction.class),
                 new ActionHandler<>(AnomalyDetectorJobAction.INSTANCE, AnomalyDetectorJobTransportAction.class),
@@ -1742,7 +2083,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
         List<SystemIndexDescriptor> systemIndexDescriptors = new ArrayList<>();
         systemIndexDescriptors.add(new SystemIndexDescriptor(ADCommonName.CONFIG_INDEX, "Anomaly detection config index"));
         systemIndexDescriptors.add(new SystemIndexDescriptor(ForecastCommonName.CONFIG_INDEX, "Forecasting config index"));
-        systemIndexDescriptors.add(new SystemIndexDescriptor(ALL_AD_RESULTS_INDEX_PATTERN, "AD result index pattern"));
+        systemIndexDescriptors.add(new SystemIndexDescriptor(ADCommonName.ALL_AD_RESULTS_INDEX_PATTERN, "AD result index pattern"));
         systemIndexDescriptors.add(new SystemIndexDescriptor(CHECKPOINT_INDEX_NAME, "AD Checkpoints index"));
         systemIndexDescriptors.add(new SystemIndexDescriptor(DETECTION_STATE_INDEX, "AD State index"));
         systemIndexDescriptors.add(new SystemIndexDescriptor(FORECAST_CHECKPOINT_INDEX_NAME, "Forecast Checkpoints index"));
@@ -1772,6 +2113,37 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             XContentParserUtils.ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
             return Job.parse(parser);
         };
+    }
+
+    private DataAccess createDataAccess(
+        boolean multiTenancyEnabled,
+        NamedXContentRegistry xContentRegistry,
+        SdkStateManager resourceStateManager,
+        IndexNameExpressionResolver indexNameExpressionResolver
+    ) {
+        SdkClient sdkClient = null;
+        if (multiTenancyEnabled) {
+            try {
+                sdkClient = SdkClientProvider
+                    .buildSdkClient(
+                        client,
+                        xContentRegistry,
+                        ADCommonName.AD_THREAD_POOL_NAME,
+                        multiTenancyEnabled,
+                        pluginSettings,
+                        AnomalyDetectorSettings.REMOTE_METADATA_ENDPOINT,
+                        AnomalyDetectorSettings.REMOTE_METADATA_SERVICE_NAME,
+                        LOG
+                    );
+            } catch (Exception e) {
+                LOG.warn("Failed to initialize task searcher sdk client; falling back to transport client.", e);
+            }
+        }
+
+        if (sdkClient != null) {
+            return new SdkDataAccess(sdkClient, clusterService, pluginSettings, resourceStateManager);
+        }
+        return new DefaultDataAccess(client, clusterService, securityClientUtil, indexNameExpressionResolver);
     }
 
     @Override

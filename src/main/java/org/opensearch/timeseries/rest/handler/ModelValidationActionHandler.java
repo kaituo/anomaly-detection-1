@@ -36,6 +36,8 @@ import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.bucket.histogram.LongBounds;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.ValidationException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
@@ -48,8 +50,6 @@ import org.opensearch.timeseries.model.ValidationIssueType;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
 
 /**
  * <p>This class executes all validation checks that are not blocking on the 'model' level.
@@ -65,8 +65,7 @@ public class ModelValidationActionHandler {
     protected final ClusterService clusterService;
     protected final Logger logger = LogManager.getLogger(ModelValidationActionHandler.class);
     protected final TimeValue requestTimeout;
-    protected final Client client;
-    protected final SecurityClientUtil clientUtil;
+    protected final DataAccess dataAccess;
     protected final NamedXContentRegistry xContentRegistry;
     protected final ActionListener<ValidateConfigResponse> listener;
     protected final Clock clock;
@@ -85,8 +84,6 @@ public class ModelValidationActionHandler {
      * Constructor function.
      *
      * @param clusterService                  ClusterService
-     * @param client                          OS node client that executes actions on the local node
-     * @param clientUtil                      client util
      * @param listener                        OS channel used to construct bytes / builder based outputs, and send responses
      * @param config                          config instance
      * @param requestTimeout                  request time out configuration
@@ -101,8 +98,7 @@ public class ModelValidationActionHandler {
      */
     public ModelValidationActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         ActionListener<ValidateConfigResponse> listener,
         Config config,
         TimeValue requestTimeout,
@@ -116,8 +112,7 @@ public class ModelValidationActionHandler {
         ValidationIssueType intervalIssueType
     ) {
         this.clusterService = clusterService;
-        this.client = client;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
         this.listener = listener;
         this.config = config;
         this.requestTimeout = requestTimeout;
@@ -131,16 +126,7 @@ public class ModelValidationActionHandler {
         // calculate the bounds in a lazy manner
         this.timeRangeToSearchForConfiguredInterval = null;
         // validate window delay depends on detection of future date (which will set window delay to 0)
-        this.latestTimeRetriever = new LatestTimeRetriever(
-            config,
-            requestTimeout,
-            clientUtil,
-            client,
-            user,
-            context,
-            searchFeatureDao,
-            false
-        );
+        this.latestTimeRetriever = new LatestTimeRetriever(config, requestTimeout, dataAccess, user, context, searchFeatureDao, false);
         this.intervalIssueType = intervalIssueType;
         this.aggregationPrep = new AggregationPrep(searchFeatureDao, requestTimeout, config);
     }
@@ -183,8 +169,7 @@ public class ModelValidationActionHandler {
         new IntervalCalculation(
             config,
             requestTimeout,
-            client,
-            clientUtil,
+            dataAccess,
             user,
             context,
             clock,
@@ -243,15 +228,8 @@ public class ModelValidationActionHandler {
             .wrap(response -> processRawDataResults(response, latestTime), listener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
         // checkpoint
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                user,
-                client,
-                context,
-                searchResponseListener
-            );
+        dataAccess
+            .searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config.getTenantId()), context, searchResponseListener);
     }
 
     private void processRawDataResults(SearchResponse response, long latestTime) {
@@ -274,15 +252,8 @@ public class ModelValidationActionHandler {
             .wrap(response -> processDataFilterResults(response, latestTime), listener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
         // checkpoint
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                user,
-                client,
-                context,
-                searchResponseListener
-            );
+        dataAccess
+            .searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config.getTenantId()), context, searchResponseListener);
     }
 
     private void processDataFilterResults(SearchResponse response, long latestTime) {
@@ -332,15 +303,8 @@ public class ModelValidationActionHandler {
             .wrap(response -> processTopEntityResults(response, latestTime, topEntity), listener::onFailure);
         // using the original context in listener as user roles have no permissions for internal operations like fetching a
         // checkpoint
-        clientUtil
-            .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                searchRequest,
-                client::search,
-                user,
-                client,
-                context,
-                searchResponseListener
-            );
+        dataAccess
+            .searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config.getTenantId()), context, searchResponseListener);
     }
 
     private void processTopEntityResults(SearchResponse response, long latestTime, Map<String, Object> topEntity) {
@@ -425,15 +389,8 @@ public class ModelValidationActionHandler {
 
             // using the original context in listener as user roles have no permissions for internal operations like fetching a
             // checkpoint
-            clientUtil
-                .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
-                    searchRequest,
-                    client::search,
-                    user,
-                    client,
-                    context,
-                    searchResponseListener
-                );
+            dataAccess
+                .searchWithInjectedSecurity(searchRequest, user, TenantContext.user(config.getTenantId()), context, searchResponseListener);
         }
     }
 

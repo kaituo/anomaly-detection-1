@@ -6,6 +6,7 @@
 package org.opensearch.ad.rest.handler;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -36,10 +37,8 @@ import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.opensearch.ad.ADTaskProfileRunner;
 import org.opensearch.ad.ExecuteADResultResponseRecorder;
-import org.opensearch.ad.indices.ADIndex;
-import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.ad.model.AnomalyResult;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.task.ADTaskCacheManager;
 import org.opensearch.ad.task.ADTaskManager;
@@ -49,18 +48,20 @@ import org.opensearch.common.settings.ClusterSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
+import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.TestHelpers;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.ThreadRunContext;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.model.DateRange;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.transport.JobResponse;
-import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
-import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
@@ -68,18 +69,17 @@ import org.opensearch.transport.client.Client;
 import com.google.common.collect.ImmutableList;
 
 public class StartHistoricalTests extends AbstractTimeSeriesTest {
-    private static ADIndexManagement anomalyDetectionIndices;
+    private static ADDelegatingDataManagement anomalyDetectionIndices;
     private static NamedXContentRegistry xContentRegistry;
     private static DiscoveryNodeFilterer nodeFilter;
 
     private NodeStateManager nodeStateManager;
     private Client client;
-    private ThreadContext.StoredContext context;
+    private RunContext.RestorableContext context;
     private DateRange detectionDateRange;
     private TransportService transportService;
     private ADIndexJobActionHandler handler;
     private ADTaskManager adTaskManager;
-    private ResultBulkIndexingHandler<AnomalyResult, ADIndex, ADIndexManagement> anomalyResultHandler;
     private ADTaskCacheManager adTaskCacheManager;
     private HashRing hashRing;
     private ADTaskProfileRunner taskProfileRunner;
@@ -90,7 +90,7 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
     @BeforeClass
     public static void setOnce() throws IOException {
         setUpThreadPool(StartHistoricalTests.class.getSimpleName());
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
+        anomalyDetectionIndices = mock(ADDelegatingDataManagement.class);
         xContentRegistry = NamedXContentRegistry.EMPTY;
         when(anomalyDetectionIndices.doesJobIndexExist()).thenReturn(true);
         // make sure getAndExecuteOnLatestConfigLevelTask called in startConfig
@@ -123,7 +123,7 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
         nodestateSetting.add(MAX_RUNNING_ENTITIES_PER_DETECTOR_FOR_HISTORICAL_ANALYSIS);
 
         ClusterService clusterService = createClusterServiceForNode(threadPool, node1, nodestateSetting);
-        nodeStateManager = createNodeStateManager(client, mock(ClientUtil.class), threadPool, clusterService);
+        nodeStateManager = mock(NodeStateManager.class);
         Instant now = Instant.now();
         Instant startTime = now.minus(10, ChronoUnit.DAYS);
         Instant endTime = now.minus(1, ChronoUnit.DAYS);
@@ -135,26 +135,26 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
             .put(BATCH_TASK_PIECE_INTERVAL_SECONDS.getKey(), 1)
             .put(AD_REQUEST_TIMEOUT.getKey(), TimeValue.timeValueSeconds(10))
             .build();
-        ThreadContext threadContext = new ThreadContext(settings);
-        context = threadContext.stashContext();
+        context = () -> {};
         transportService = mock(TransportService.class);
 
-        anomalyDetectionIndices = mock(ADIndexManagement.class);
-        taskProfileRunner = new ADTaskProfileRunner(hashRing, client);
-
         hashRing = mock(HashRing.class);
+        taskProfileRunner = new ADTaskProfileRunner(hashRing, client);
+        adTaskCacheManager = mock(ADTaskCacheManager.class);
+        DataAccess taskSearcher = mock(DataAccess.class);
         adTaskManager = spy(
             new ADTaskManager(
                 settings,
                 clusterService,
                 client,
                 TestHelpers.xContentRegistry(),
-                anomalyDetectionIndices,
                 nodeFilter,
                 hashRing,
                 adTaskCacheManager,
                 threadPool,
                 nodeStateManager,
+                taskSearcher,
+                anomalyDetectionIndices,
                 taskProfileRunner
             )
         );
@@ -167,24 +167,12 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
             listener.onResponse(response);
 
             return null;
-        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), any(), eq(false), any(), any(), any());
-
-        anomalyResultHandler = mock(ResultBulkIndexingHandler.class);
-        adTaskCacheManager = mock(ADTaskCacheManager.class);
+        }).when(adTaskManager).getAndExecuteOnLatestConfigLevelTask(any(), anyString(), any(), eq(false), any(), any(), any());
 
         clock = mock(Clock.class);
 
-        ExecuteADResultResponseRecorder recorder = new ExecuteADResultResponseRecorder(
-            anomalyDetectionIndices,
-            anomalyResultHandler,
-            adTaskManager,
-            nodeFilter,
-            threadPool,
-            client,
-            nodeStateManager,
-            clock,
-            32
-        );
+        ExecuteADResultResponseRecorder recorder = mock(ExecuteADResultResponseRecorder.class);
+        RunContext runContext = new ThreadRunContext(threadPool.getThreadContext());
 
         handler = new ADIndexJobActionHandler(
             client,
@@ -193,7 +181,8 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
             adTaskManager,
             recorder,
             nodeStateManager,
-            Settings.EMPTY
+            Settings.EMPTY,
+            runContext
         );
 
         listener = spy(new ActionListener<JobResponse>() {
@@ -212,9 +201,9 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
             1,
             randomAlphaOfLength(5)
         );
-        setupGetDetector(detector, client);
+        mockGetConfig(detector);
 
-        handler.startConfig(detector.getId(), detectionDateRange, randomUser(), transportService, context, clock, listener);
+        handler.startConfig(detector.getId(), detector.getTenantId(), detectionDateRange, randomUser(), transportService, context, clock, listener);
         verify(listener, times(1)).onFailure(exceptionCaptor.capture());
     }
 
@@ -228,10 +217,19 @@ public class StartHistoricalTests extends AbstractTimeSeriesTest {
 
     public void testStartDetectorForHistoricalAnalysis() throws IOException {
         AnomalyDetector detector = randomDetector(ImmutableList.of(randomFeature(true)), randomAlphaOfLength(5), 1, randomAlphaOfLength(5));
-        setupGetDetector(detector, client);
+        mockGetConfig(detector);
         setupHashRingWithOwningNode();
 
-        handler.startConfig(detector.getId(), detectionDateRange, randomUser(), transportService, context, clock, listener);
+        handler.startConfig(detector.getId(), detector.getTenantId(), detectionDateRange, randomUser(), transportService, context, clock, listener);
         verify(adTaskManager, times(1)).forwardRequestToLeadNode(any(), any(), any());
+    }
+
+    @SuppressWarnings("unchecked")
+    private void mockGetConfig(AnomalyDetector detector) {
+        doAnswer(invocation -> {
+            Consumer<Optional<? extends Config>> function = invocation.getArgument(3);
+            function.accept(Optional.of(detector));
+            return null;
+        }).when(nodeStateManager).getConfig(eq(detector.getId()), eq(detector.getTenantId()), eq(AnalysisType.AD), any(), any());
     }
 }
