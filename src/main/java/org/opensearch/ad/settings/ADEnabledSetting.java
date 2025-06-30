@@ -42,6 +42,8 @@ public class ADEnabledSetting extends DynamicNumericSetting {
 
     public static final String DOOR_KEEPER_IN_CACHE_ENABLED = "plugins.anomaly_detection.door_keeper_in_cache.enabled";
 
+    public static final String AD_MICROSERVICE_ENABLED = "plugins.anomaly_detection.microservice.enabled";
+
     public static final Map<String, Setting<?>> settings = unmodifiableMap(new HashMap<String, Setting<?>>() {
         {
             Setting LegacyADEnabledSetting = Setting.boolSetting(LEGACY_OPENDISTRO_AD_ENABLED, true, NodeScope, Dynamic, Deprecated);
@@ -86,6 +88,11 @@ public class ADEnabledSetting extends DynamicNumericSetting {
              * keep those detectors from getting results.
              */
             put(DOOR_KEEPER_IN_CACHE_ENABLED, Setting.boolSetting(DOOR_KEEPER_IN_CACHE_ENABLED, false, NodeScope, Dynamic));
+
+            /**
+             * Whether AD microservice is enabled or not.
+             */
+            put(AD_MICROSERVICE_ENABLED, Setting.boolSetting(AD_MICROSERVICE_ENABLED, false, NodeScope, Dynamic));
         }
     });
 
@@ -130,5 +137,13 @@ public class ADEnabledSetting extends DynamicNumericSetting {
      */
     public static boolean isDoorKeeperInCacheEnabled() {
         return ADEnabledSetting.getInstance().getSettingValue(ADEnabledSetting.DOOR_KEEPER_IN_CACHE_ENABLED);
+    }
+
+    /**
+     * Whether AD microservice is enabled or not.
+     * @return whether AD microservice is enabled or not.
+     */
+    public static boolean isADMicroserviceEnabled() {
+        return ADEnabledSetting.getInstance().getSettingValue(ADEnabledSetting.AD_MICROSERVICE_ENABLED);
     }
 }

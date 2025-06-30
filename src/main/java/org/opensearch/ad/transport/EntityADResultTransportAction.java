@@ -20,6 +20,7 @@ import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.action.support.clustermanager.AcknowledgedResponse;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
@@ -42,7 +43,6 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.caching.CacheProvider;
 import org.opensearch.timeseries.common.exception.EndRunException;
@@ -117,9 +117,7 @@ public class EntityADResultTransportAction extends HandledTransportAction<Entity
     @Override
     protected void doExecute(Task task, EntityResultRequest request, ActionListener<AcknowledgedResponse> listener) {
         if (adCircuitBreakerService.isOpen()) {
-            threadPool
-                .executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)
-                .execute(() -> cache.get().releaseMemoryForOpenCircuitBreaker());
+            threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME).execute(() -> cache.get().releaseMemoryForOpenCircuitBreaker());
             listener.onFailure(new LimitExceededException(request.getConfigId(), CommonMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
             return;
         }
@@ -149,7 +147,7 @@ public class EntityADResultTransportAction extends HandledTransportAction<Entity
                 coldEntityQueue,
                 inferencer,
                 threadPool,
-                TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
+                ADCommonName.AD_THREAD_POOL_NAME
             );
 
             stateManager

@@ -13,13 +13,13 @@ package org.opensearch.ad.caching;
 
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_DEDICATED_CACHE_SIZE;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.AD_MODEL_MAX_SIZE_PERCENTAGE;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Optional;
 
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
@@ -74,7 +74,7 @@ public class ADPriorityCache extends
             clusterService,
             modelTtl,
             threadPool,
-            AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             maintenanceFreqConstant,
             settings,
             checkpointSavingFreq,

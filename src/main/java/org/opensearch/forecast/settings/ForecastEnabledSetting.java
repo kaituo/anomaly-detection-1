@@ -27,12 +27,19 @@ public class ForecastEnabledSetting extends DynamicNumericSetting {
      */
     public static final String FORECAST_ENABLED = "plugins.forecast.enabled";
 
+    public static final String FORECAST_MICROSERVICE_ENABLED = "plugins.forecast.microservice.enabled";
+
     public static final Map<String, Setting<?>> settings = unmodifiableMap(new HashMap<String, Setting<?>>() {
         {
             /**
              * forecast enable/disable setting
              */
             put(FORECAST_ENABLED, Setting.boolSetting(FORECAST_ENABLED, true, NodeScope, Dynamic));
+
+            /**
+             * forecast microservice enable/disable setting
+             */
+            put(FORECAST_MICROSERVICE_ENABLED, Setting.boolSetting(FORECAST_MICROSERVICE_ENABLED, false, NodeScope, Dynamic));
         }
     });
 
@@ -53,5 +60,9 @@ public class ForecastEnabledSetting extends DynamicNumericSetting {
      */
     public static boolean isForecastEnabled() {
         return ForecastEnabledSetting.getInstance().getSettingValue(ForecastEnabledSetting.FORECAST_ENABLED);
+    }
+
+    public static boolean isForecastMicroserviceEnabled() {
+        return ForecastEnabledSetting.getInstance().getSettingValue(ForecastEnabledSetting.FORECAST_MICROSERVICE_ENABLED);
     }
 }

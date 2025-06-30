@@ -671,4 +671,23 @@ public final class AnomalyDetectorSettings {
     // The reason we need a max is because user could give an arbitrarly large interval where we don't know even
     // with multiplying the interval down how many intervals will be tried.
     public static final int MAX_TIMES_DECREASING_INTERVAL = 10;
+
+    // ======================================
+    // microservice setting
+    // ======================================
+    /** This setting sets the service region */
+    public static final Setting<String> REGION = Setting
+        .simpleString("plugins.anomaly_detection.region", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** Cloud Map namespace (e.g., "prod") */
+    public static final Setting<String> CLOUD_MAP_NAMESPACE = Setting
+        .simpleString("plugins.anomaly_detection.cloud_map_namespace", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** Cloud Map service name (e.g., "metrics-worker") */
+    public static final Setting<String> CLOUD_MAP_SERVICE = Setting
+        .simpleString("plugins.anomaly_detection.cloud_map_service", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** DynamoDB table name (e.g., "TaskDispatch") */
+    public static final Setting<String> CLOUD_MAP_TABLE_NAME = Setting
+        .simpleString("plugins.anomaly_detection.cloud_map_table_name", Setting.Property.NodeScope, Setting.Property.Final);
 }

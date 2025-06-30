@@ -10,6 +10,7 @@ import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
@@ -28,7 +29,6 @@ import org.opensearch.jobscheduler.spi.LockModel;
 import org.opensearch.jobscheduler.spi.utils.LockService;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.JobProcessor;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Job;
@@ -56,7 +56,7 @@ public class ADJobProcessor extends
 
     private ADJobProcessor() {
         // Singleton class, use getJobRunnerInstance method instead of constructor
-        super(AnalysisType.AD, TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME, AnomalyResultAction.INSTANCE);
+        super(AnalysisType.AD, ADCommonName.AD_THREAD_POOL_NAME, AnomalyResultAction.INSTANCE);
     }
 
     public void registerSettings(Settings settings) {

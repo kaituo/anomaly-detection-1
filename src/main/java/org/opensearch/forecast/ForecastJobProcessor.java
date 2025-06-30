@@ -12,6 +12,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
@@ -27,7 +28,6 @@ import org.opensearch.jobscheduler.spi.LockModel;
 import org.opensearch.jobscheduler.spi.utils.LockService;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.JobProcessor;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Job;
@@ -56,7 +56,7 @@ public class ForecastJobProcessor extends
 
     private ForecastJobProcessor() {
         // Singleton class, use getJobRunnerInstance method instead of constructor
-        super(AnalysisType.FORECAST, TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME, ForecastResultAction.INSTANCE);
+        super(AnalysisType.FORECAST, ForecastCommonName.FORECAST_THREAD_POOL_NAME, ForecastResultAction.INSTANCE);
     }
 
     public void registerSettings(Settings settings) {

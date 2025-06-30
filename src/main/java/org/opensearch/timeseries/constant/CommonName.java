@@ -141,8 +141,29 @@ public class CommonName {
     public static String WARM_BOX_TYPE = "warm";
     // box type
     public static final String BOX_TYPE_KEY = "box_type";
+
     // ======================================
     // Format name
     // ======================================
     public static final String EPOCH_MILLIS_FORMAT = "epoch_millis";
+
+    // ======================================
+    // Setting
+    // ======================================
+    // setting defined in opensearch.yml
+    public static final String NODE_ROLE = "timeseries.node.roles";
+
+    public static final String COORDINATOR_ROLE = "coordinator";
+
+    public static final String MASTER_ROLE = "coordinator";
+
+    public static final String WORKER_ROLE = "worker";
+
+    public static final String SETTING_PREFIX = "plugins.timeseries.";
+
+    // ======================================
+    // Thread pool name
+    // ======================================
+    // common constants
+    public static final String CLOUD_MAP_WATCHER_THREAD_POOL_NAME = "cloud-map-watcher-threadpool";
 }

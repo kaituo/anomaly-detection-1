@@ -18,8 +18,6 @@ import static org.opensearch.forecast.model.ForecastTask.FORECASTER_ID_FIELD;
 import static org.opensearch.forecast.model.ForecastTaskType.REALTIME_TASK_TYPES;
 import static org.opensearch.forecast.settings.ForecastSettings.DELETE_FORECAST_RESULT_WHEN_DELETE_FORECASTER;
 import static org.opensearch.forecast.settings.ForecastSettings.MAX_OLD_TASK_DOCS_PER_FORECASTER;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_BATCH_TASK_THREAD_POOL_NAME;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME;
 import static org.opensearch.timeseries.model.TimeSeriesTask.TASK_ID_FIELD;
 
 import java.io.IOException;
@@ -43,6 +41,7 @@ import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.support.WriteRequest;
 import org.opensearch.action.update.UpdateRequest;
 import org.opensearch.action.update.UpdateResponse;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
@@ -52,6 +51,7 @@ import org.opensearch.core.common.Strings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastTask;
@@ -113,7 +113,7 @@ public class ForecastTaskManager extends
             settings,
             threadPool,
             ALL_FORECAST_RESULTS_INDEX_PATTERN,
-            FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             DELETE_FORECAST_RESULT_WHEN_DELETE_FORECASTER,
             TaskState.INACTIVE
         );
@@ -267,7 +267,7 @@ public class ForecastTaskManager extends
                     cleanChildTasksAndResultsOfDeletedTask();
                 }, e -> { logger.error("Failed to delete child tasks of task " + taskId, e); }));
             }, ex -> { logger.error("Failed to delete forecast results for task " + taskId, ex); }));
-        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), AD_BATCH_TASK_THREAD_POOL_NAME);
+        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME);
     }
 
     @Override

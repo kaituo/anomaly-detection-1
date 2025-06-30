@@ -28,7 +28,6 @@ import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_BATCH_TASK_
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_OLD_AD_TASK_DOCS_PER_DETECTOR;
 import static org.opensearch.ad.settings.AnomalyDetectorSettings.MAX_RUNNING_ENTITIES_PER_DETECTOR_FOR_HISTORICAL_ANALYSIS;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_BATCH_TASK_THREAD_POOL_NAME;
 import static org.opensearch.timeseries.model.TaskState.NOT_ENDED_STATES;
 import static org.opensearch.timeseries.model.TaskType.taskTypeToString;
 import static org.opensearch.timeseries.stats.InternalStatNames.AD_DETECTOR_ASSIGNED_BATCH_TASK_SLOT_COUNT;
@@ -65,6 +64,7 @@ import org.opensearch.action.index.IndexResponse;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.update.UpdateResponse;
 import org.opensearch.ad.ADTaskProfileRunner;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
@@ -195,7 +195,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
             settings,
             threadPool,
             ALL_AD_RESULTS_INDEX_PATTERN,
-            AD_BATCH_TASK_THREAD_POOL_NAME,
+            ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME,
             DELETE_AD_RESULT_WHEN_DELETE_DETECTOR,
             TaskState.STOPPED
         );
@@ -1210,7 +1210,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                 // Set task as FAILED if no finished entity task; otherwise set as FINISHED
                 TaskState hcDetectorTaskState = r == 0 ? TaskState.FAILED : TaskState.FINISHED;
                 // execute in AD batch task thread pool in case waiting for semaphore waste any shared OpenSearch thread pool
-                threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
+                threadPool.executor(ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
                     updateADHCDetectorTask(
                         detectorId,
                         taskId,
@@ -1231,7 +1231,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
             }, e -> {
                 logger.error("Failed to get finished entity tasks", e);
                 String errorMessage = ExceptionUtil.getErrorMessage(e);
-                threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
+                threadPool.executor(ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
                     updateADHCDetectorTask(
                         detectorId,
                         taskId,
@@ -1252,7 +1252,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                 });
             }));
         } else {
-            threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
+            threadPool.executor(ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
                 updateADHCDetectorTask(
                     detectorId,
                     taskId,
@@ -1614,7 +1614,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
                 detectorTaskProfile.setDetectorTaskSlots(1);
             }
         }
-        threadPool.executor(AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
+        threadPool.executor(ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME).execute(() -> {
             // Clean expired HC batch task run states as it may exists after HC historical analysis done if user cancel
             // before querying top entities done. We will clean it in hourly cron, check "maintainRunningHistoricalTasks"
             // method. Clean it up here when get task profile to release memory earlier.
@@ -1847,7 +1847,7 @@ public class ADTaskManager extends TaskManager<ADTaskCacheManager, ADTaskType, A
             }, transportService, ActionListener.wrap(r -> {
                 logger.debug("Reset historical task state done for task {}, detector {}", adTask.getTaskId(), adTask.getConfigId());
             }, e -> { logger.error("Failed to reset historical task state for task " + adTask.getTaskId(), e); }));
-        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), AD_BATCH_TASK_THREAD_POOL_NAME);
+        }, TimeValue.timeValueSeconds(DEFAULT_MAINTAIN_INTERVAL_IN_SECONDS), ADCommonName.AD_BATCH_TASK_THREAD_POOL_NAME);
     }
 
     @Override

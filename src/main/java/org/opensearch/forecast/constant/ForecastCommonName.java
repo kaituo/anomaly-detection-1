@@ -51,4 +51,8 @@ public class ForecastCommonName {
     // Historical forecasters
     // ======================================
     public static final String FORECAST_TASK = "forecast_task";
+
+    public static final String FORECAST_THREAD_POOL_NAME = "forecast-threadpool";
+
+    public static final String FORECAST_THREAD_POOL_PREFIX = "opensearch.forecast.";
 }

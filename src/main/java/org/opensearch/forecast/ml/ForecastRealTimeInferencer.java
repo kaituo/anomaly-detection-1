@@ -5,12 +5,11 @@
 
 package org.opensearch.forecast.ml;
 
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME;
-
 import java.time.Clock;
 
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
@@ -52,7 +51,7 @@ public class ForecastRealTimeInferencer extends
             resultWriteWorker,
             cache,
             threadPool,
-            FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             clock,
             manage
         );

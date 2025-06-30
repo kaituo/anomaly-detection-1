@@ -21,6 +21,7 @@ import org.opensearch.common.inject.Inject;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
@@ -41,7 +42,6 @@ import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.caching.CacheProvider;
 import org.opensearch.timeseries.common.exception.EndRunException;
@@ -118,7 +118,7 @@ public class EntityForecastResultTransportAction extends HandledTransportAction<
     protected void doExecute(Task task, EntityResultRequest request, ActionListener<AcknowledgedResponse> listener) {
         if (circuitBreakerService.isOpen()) {
             threadPool
-                .executor(TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME)
+                .executor(ForecastCommonName.FORECAST_THREAD_POOL_NAME)
                 .execute(() -> cache.get().releaseMemoryForOpenCircuitBreaker());
             listener.onFailure(new LimitExceededException(request.getConfigId(), CommonMessages.MEMORY_CIRCUIT_BROKEN_ERR_MSG, false));
             return;
@@ -149,7 +149,7 @@ public class EntityForecastResultTransportAction extends HandledTransportAction<
                 coldEntityQueue,
                 inferencer,
                 threadPool,
-                TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME
+                ForecastCommonName.FORECAST_THREAD_POOL_NAME
             );
 
             stateManager

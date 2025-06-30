@@ -296,4 +296,23 @@ public class TimeSeriesSettings {
     // Suggest setting
     // ======================================
     public static final float WINDOW_DELAY_RATIO = 1.2f;
+
+    // ======================================
+    // microservice setting
+    // ======================================
+    public static final Setting<TimeValue> CLOUD_MAP_TTL = Setting
+    .positiveTimeSetting(
+        "plugins.timeseries.cloud_map_ttl",
+        TimeValue.timeValueSeconds(30),
+        Setting.Property.NodeScope,
+        Setting.Property.Dynamic
+    );
+
+    public static final Setting<TimeValue> CLUSTER_MEMBERSHIP_READER_TTL = Setting
+    .positiveTimeSetting(
+        "plugins.timeseries.cluster_membership_reader_ttl",
+        TimeValue.timeValueSeconds(30),
+        Setting.Property.NodeScope,
+        Setting.Property.Dynamic
+    );
 }

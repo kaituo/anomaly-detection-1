@@ -5,12 +5,11 @@
 
 package org.opensearch.ad.ml;
 
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME;
-
 import java.time.Clock;
 
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
@@ -52,7 +51,7 @@ public class ADRealTimeInferencer extends
             resultWriteWorker,
             cache,
             threadPool,
-            AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             clock,
             stateManager
         );

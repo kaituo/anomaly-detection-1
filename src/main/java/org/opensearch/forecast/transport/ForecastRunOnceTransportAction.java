@@ -13,7 +13,6 @@ import static org.opensearch.forecast.settings.ForecastSettings.FORECAST_FILTER_
 import static org.opensearch.forecast.settings.ForecastSettings.MAX_FORECAST_FEATURES;
 import static org.opensearch.forecast.settings.ForecastSettings.MAX_HC_FORECASTERS;
 import static org.opensearch.forecast.settings.ForecastSettings.MAX_SINGLE_STREAM_FORECASTERS;
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME;
 import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
 import static org.opensearch.timeseries.util.ParseUtils.shouldUseResourceAuthz;
 import static org.opensearch.timeseries.util.ParseUtils.verifyResourceAccessAndProcessRequest;
@@ -64,7 +63,6 @@ import org.opensearch.tasks.Task;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.constant.CommonMessages;
@@ -265,7 +263,7 @@ public class ForecastRunOnceTransportAction extends HandledTransportAction<Forec
                 .schedule(
                     () -> checkIfRunOnceFinished(forecastID, taskId, waitTimes),
                     new TimeValue(POLL_FREQ, TimeUnit.SECONDS),
-                    FORECAST_THREAD_POOL_NAME
+                    ForecastCommonName.FORECAST_THREAD_POOL_NAME
                 );
             if (!Strings.isEmpty(exceptionMsg)) {
                 updateTaskError(forecastID, taskId, exceptionMsg);
@@ -363,7 +361,7 @@ public class ForecastRunOnceTransportAction extends HandledTransportAction<Forec
                     .schedule(
                         () -> checkIfRunOnceFinished(forecastID, r.getTaskId(), waitTimes),
                         new TimeValue(POLL_FREQ, TimeUnit.SECONDS),
-                        TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME
+                        ForecastCommonName.FORECAST_THREAD_POOL_NAME
                     );
                 listener.onResponse(r);
             }, e -> {
@@ -412,7 +410,7 @@ public class ForecastRunOnceTransportAction extends HandledTransportAction<Forec
                         .schedule(
                             () -> performSearchWithRetry(forecastID, taskId, request, attempt + 1, exceptionMsg),
                             TimeValue.timeValueMillis(delayMillis),
-                            FORECAST_THREAD_POOL_NAME
+                            ForecastCommonName.FORECAST_THREAD_POOL_NAME
                         );
                 } else {
                     // After MAX_RETRIES attempts, update the task as INIT_TEST_FAILED if there is no existing state.
@@ -444,7 +442,7 @@ public class ForecastRunOnceTransportAction extends HandledTransportAction<Forec
                     .schedule(
                         () -> performSearchWithRetry(forecastID, taskId, request, attempt + 1, ExceptionUtil.getErrorMessage(e)),
                         TimeValue.timeValueMillis(delayMillis),
-                        FORECAST_THREAD_POOL_NAME
+                        ForecastCommonName.FORECAST_THREAD_POOL_NAME
                     );
             } else {
                 updateTask(forecastID, taskId, TaskState.INIT_TEST_FAILED, ExceptionUtil.getErrorMessage(e));

@@ -90,6 +90,29 @@ plugins {
     id 'java-library'
     id 'org.gradle.test-retry' version '1.6.0'
     id "de.undercouch.download" version "5.6.0"
+    // important to use latest version 1.17
+    // lower versions of io.spring.dependency-management plugin is known to use
+    // the deprecated Gradle API LenientConfiguration.getArtifacts(Spec).
+    // With Gradle 8.10.2 this method logs a deprecation warning and fails the build.
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+// opensearch.build is needed to use the version catalog from OpenSearch’s gradle/libs.versions.toml
+apply plugin: 'opensearch.build'
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'opensearch.opensearchplugin'
+apply plugin: 'opensearch.testclusters'
+apply plugin: 'base'
+apply plugin: 'jacoco'
+apply plugin: 'eclipse'
+apply plugin: 'opensearch.pluginzip'
+apply plugin: 'opensearch.java-agent'
+
+dependencyManagement {
+    imports {
+        mavenBom("software.amazon.awssdk:bom:${versions.aws}")
+    }
 }
 
 tasks.withType(JavaCompile) {
@@ -190,17 +213,46 @@ dependencies {
     opensearchPlugin "org.opensearch.plugin:opensearch-job-scheduler:${opensearch_build}@zip"
     opensearchPlugin "org.opensearch.plugin:opensearch-security:${opensearch_build}@zip"
     testImplementation 'org.reflections:reflections:0.10.2'
-}
 
-apply plugin: 'java'
-apply plugin: 'idea'
-apply plugin: 'opensearch.opensearchplugin'
-apply plugin: 'opensearch.testclusters'
-apply plugin: 'base'
-apply plugin: 'jacoco'
-apply plugin: 'eclipse'
-apply plugin: 'opensearch.pluginzip'
-apply plugin: 'opensearch.java-agent'
+    // Use the AWS SDK BOM so individual modules don't need version numbers
+    implementation 'software.amazon.awssdk:servicediscovery'
+    implementation 'software.amazon.awssdk:dynamodb'
+    implementation 'software.amazon.awssdk:regions'
+    implementation 'software.amazon.awssdk:aws-core'
+    implementation 'software.amazon.awssdk:sdk-core'
+    implementation 'software.amazon.awssdk:url-connection-client'
+    implementation 'software.amazon.awssdk:auth'
+    implementation 'software.amazon.awssdk:http-auth-spi'
+    implementation 'software.amazon.awssdk:http-auth-aws'
+    implementation 'software.amazon.awssdk:http-auth'
+    implementation 'software.amazon.awssdk:utils'
+    implementation 'software.amazon.awssdk:http-client-spi'
+    implementation 'software.amazon.awssdk:identity-spi'
+    implementation 'software.amazon.awssdk:aws-json-protocol'
+    implementation 'software.amazon.awssdk:retries-spi'
+    implementation 'software.amazon.awssdk:retries'
+    implementation 'software.amazon.awssdk:profiles'
+    implementation 'software.amazon.awssdk:endpoints-spi'
+    implementation 'software.amazon.awssdk:json-utils'
+    implementation 'software.amazon.awssdk:third-party-jackson-core'
+    implementation 'software.amazon.awssdk:netty-nio-client'
+    implementation 'software.amazon.awssdk:metrics-spi'
+    implementation 'software.amazon.awssdk:protocol-core'
+    implementation 'software.amazon.awssdk:checksums'
+    implementation 'software.amazon.awssdk:checksums-spi'
+    implementation "io.netty:netty-transport:${versions.netty}"
+    implementation "io.netty:netty-buffer:${versions.netty}"
+    implementation "io.netty:netty-common:${versions.netty}"
+    implementation "io.netty:netty-resolver:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-classes-macos:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-native-macos:${versions.netty}"
+    implementation "io.netty:netty-handler:${versions.netty}"
+    implementation "io.netty:netty-codec-http2:${versions.netty}"
+    implementation "io.netty:netty-codec-http:${versions.netty}"
+    implementation "io.netty:netty-codec:${versions.netty}"
+    implementation "io.netty:netty-transport-native-unix-common:${versions.netty}"
+}
 
 ext {
     isSnapshot = "true" == System.getProperty("build.snapshot", "true")
@@ -469,6 +521,12 @@ testClusters.integTest {
     // Cluster shrink exception thrown if we try to set numberOfNodes to 1, so only apply if > 1
     if (_numNodes > 1) numberOfNodes = _numNodes
     configureClusterPlugins(delegate, jobSchedulerFile, securityPluginFile, securityEnabled)
+
+    // Tell Gradle to forward credentials to the forked OpenSearch node JVM:
+    // this allows us to set the env-vars using export before gradle is run
+    environment 'AWS_ACCESS_KEY_ID', System.getenv().getOrDefault('AWS_ACCESS_KEY_ID', 'integration_test_access_key')
+    environment 'AWS_SECRET_ACCESS_KEY', System.getenv().getOrDefault('AWS_SECRET_ACCESS_KEY', 'integration_test_secret_access_key')
+    environment 'AWS_SESSION_TOKEN', System.getenv().getOrDefault('AWS_SESSION_TOKEN', 'integration_test_session_token')
 }
 
 testClusters {

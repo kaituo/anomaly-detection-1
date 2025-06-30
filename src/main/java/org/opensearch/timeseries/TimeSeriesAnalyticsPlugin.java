@@ -49,6 +49,8 @@ import org.opensearch.ad.ExecuteADResultResponseRecorder;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.executor.ADCoordinatorContributor;
+import org.opensearch.ad.executor.ADModelContributor;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
@@ -156,6 +158,7 @@ import org.opensearch.ad.transport.ValidateAnomalyDetectorTransportAction;
 import org.opensearch.ad.transport.handler.ADIndexMemoryPressureAwareResultHandler;
 import org.opensearch.ad.transport.handler.ADSearchHandler;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
+import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -163,8 +166,6 @@ import org.opensearch.common.settings.IndexScopedSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.settings.SettingsFilter;
-import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.OpenSearchExecutors;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
@@ -178,6 +179,7 @@ import org.opensearch.forecast.ForecastTaskProfileRunner;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
 import org.opensearch.forecast.constant.ForecastCommonName;
+import org.opensearch.forecast.executor.ForecastModelContributor;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
@@ -274,21 +276,23 @@ import org.opensearch.rest.RestController;
 import org.opensearch.rest.RestHandler;
 import org.opensearch.script.ScriptService;
 import org.opensearch.threadpool.ExecutorBuilder;
-import org.opensearch.threadpool.ScalingExecutorBuilder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.cluster.ADDataMigrator;
 import org.opensearch.timeseries.cluster.ClusterEventListener;
-import org.opensearch.timeseries.cluster.ClusterManagerEventListener;
+import org.opensearch.timeseries.cluster.ClusterManagerTaskRegistry;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.executor.CloudMapWatcherContributor;
+import org.opensearch.timeseries.executor.ExecutorBuilderContributor;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.function.ThrowingSupplierWrapper;
 import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.ratelimit.CheckPointMaintainRequestAdapter;
+import org.opensearch.timeseries.settings.DynamicStringSetting;
 import org.opensearch.timeseries.settings.TimeSeriesEnabledSetting;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.stats.StatNames;
@@ -336,16 +340,9 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
     public static final String LEGACY_OPENDISTRO_AD_BASE_URI = LEGACY_AD_BASE + "/detectors";
     public static final String AD_BASE_URI = "/_plugins/_anomaly_detection";
     public static final String AD_BASE_DETECTORS_URI = AD_BASE_URI + "/detectors";
-    public static final String AD_THREAD_POOL_PREFIX = "opensearch.ad.";
-    public static final String AD_THREAD_POOL_NAME = "ad-threadpool";
-    public static final String AD_BATCH_TASK_THREAD_POOL_NAME = "ad-batch-task-threadpool";
-
     // forecasting constants
     public static final String FORECAST_BASE_URI = "/_plugins/_forecast";
     public static final String FORECAST_FORECASTERS_URI = FORECAST_BASE_URI + "/forecasters";
-    public static final String FORECAST_THREAD_POOL_PREFIX = "opensearch.forecast.";
-    public static final String FORECAST_THREAD_POOL_NAME = "forecast-threadpool";
-
     public static final String TIME_SERIES_JOB_TYPE = "opensearch_time_series_analytics";
 
     private static Gson gson;
@@ -575,6 +572,9 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
         );
 
         Random random = new Random(42);
+        DynamicStringSetting.getInstance().init(clusterService);
+
+        // List<Object> res = new ArrayList<>();
 
         // =====================
         // AD components
@@ -1099,7 +1099,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
             clusterService,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             threadPool,
-            FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             TimeSeriesSettings.MAINTENANCE_FREQ_CONSTANT,
             settings,
             ForecastSettings.FORECAST_CHECKPOINT_SAVING_FREQ,
@@ -1355,17 +1355,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
                 stateManager,
                 new ClusterEventListener(clusterService, hashRing),
                 circuitBreakerService,
-                new ClusterManagerEventListener(
-                    clusterService,
-                    threadPool,
-                    client,
-                    getClock(),
-                    clientUtil,
-                    nodeFilter,
-                    AnomalyDetectorSettings.AD_CHECKPOINT_TTL,
-                    ForecastSettings.FORECAST_CHECKPOINT_TTL,
-                    settings
-                ),
+                new ClusterManagerTaskRegistry(clusterService, threadPool, client, getClock(), clientUtil, nodeFilter, settings),
                 nodeFilter,
                 // AD components
                 anomalyDetectionIndices,
@@ -1424,35 +1414,11 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
 
     @Override
     public List<ExecutorBuilder<?>> getExecutorBuilders(Settings settings) {
-        return ImmutableList
-            .of(
-                new ScalingExecutorBuilder(
-                    AD_THREAD_POOL_NAME,
-                    1,
-                    // HCAD can be heavy after supporting 1 million entities.
-                    // Limit to use at most half of the processors.
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 2),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_THREAD_POOL_NAME
-                ),
-                new ScalingExecutorBuilder(
-                    AD_BATCH_TASK_THREAD_POOL_NAME,
-                    1,
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 8),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_BATCH_TASK_THREAD_POOL_NAME
-                ),
-                new ScalingExecutorBuilder(
-                    FORECAST_THREAD_POOL_NAME,
-                    1,
-                    // this pool is used by both real time and run once.
-                    // HCAD can be heavy after supporting 1 million entities.
-                    // Limit to use at most 3/4 of the processors.
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) * 3 / 4),
-                    TimeValue.timeValueMinutes(10),
-                    FORECAST_THREAD_POOL_PREFIX + FORECAST_THREAD_POOL_NAME
-                )
-            );
+        List<ExecutorBuilderContributor> contributors = List
+            .of(new CloudMapWatcherContributor(), new ADCoordinatorContributor(), new ADModelContributor(), new ForecastModelContributor());
+        List<ExecutorBuilder<?>> builders = new ArrayList<>();
+        contributors.forEach(c -> c.contribute(settings, builders));
+        return List.copyOf(builders);
     }
 
     @Override
@@ -1464,6 +1430,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
         List<Setting<?>> forecastNumericSetting = ForecastNumericSetting.getInstance().getSettings();
 
         List<Setting<?>> timeSeriesEnabledSetting = TimeSeriesEnabledSetting.getInstance().getSettings();
+        List<Setting<?>> dynamicStringSetting = DynamicStringSetting.getInstance().getSettings();
 
         List<Setting<?>> systemSetting = ImmutableList
             .of(
@@ -1552,6 +1519,11 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
                 AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW,
                 AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW,
                 AnomalyDetectorSettings.AD_PAGE_SIZE,
+                AnomalyDetectorSettings.REGION,
+                AnomalyDetectorSettings.CLOUD_MAP_NAMESPACE,
+                AnomalyDetectorSettings.CLOUD_MAP_SERVICE,
+                AnomalyDetectorSettings.CLOUD_MAP_TABLE_NAME,
+                TimeSeriesSettings.CLOUD_MAP_TTL,
                 // clean resource
                 AnomalyDetectorSettings.DELETE_AD_RESULT_WHEN_DELETE_DETECTOR,
                 // stats/profile API
@@ -1574,15 +1546,13 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
                 ForecastSettings.FORECAST_RESULT_HISTORY_ROLLOVER_PERIOD,
                 // resource usage control
                 ForecastSettings.FORECAST_MODEL_MAX_SIZE_PERCENTAGE,
-                // TODO: add validation code
-                // ForecastSettings.FORECAST_MAX_SINGLE_STREAM_FORECASTERS,
-                // ForecastSettings.FORECAST_MAX_HC_FORECASTERS,
                 ForecastSettings.FORECAST_INDEX_PRESSURE_SOFT_LIMIT,
                 ForecastSettings.FORECAST_INDEX_PRESSURE_HARD_LIMIT,
                 ForecastSettings.FORECAST_MAX_PRIMARY_SHARDS,
                 // restful apis
                 ForecastSettings.FORECAST_REQUEST_TIMEOUT,
                 // resource constraint
+                // added validation code in AbstractTimeSeriesActionHandler.onSearchTotalConfigResponse
                 ForecastSettings.MAX_SINGLE_STREAM_FORECASTERS,
                 ForecastSettings.MAX_HC_FORECASTERS,
                 // Security
@@ -1632,7 +1602,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
                     timeSeriesEnabledSetting.stream(),
                     systemSetting.stream(),
                     adNumericSetting.stream(),
-                    forecastNumericSetting.stream()
+                    forecastNumericSetting.stream(),
+                    dynamicStringSetting.stream()
                 )
                 .reduce(Stream::concat)
                 .orElseGet(Stream::empty)
@@ -1768,6 +1739,33 @@ public class TimeSeriesAnalyticsPlugin extends Plugin implements ActionPlugin, S
             } catch (Exception e) {
                 LOG.error("Failed to shut down object Pool", e);
             }
+        }
+    }
+
+    public static boolean isCoordinatingNode(DiscoveryNode node) {
+        Map<String, String> nodeAttributes = node.getAttributes();
+        try {
+            return nodeAttributes.get(CommonName.NODE_ROLE).contains(CommonName.COORDINATOR_ROLE);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    public static boolean isMasterNode(DiscoveryNode node) {
+        Map<String, String> nodeAttributes = node.getAttributes();
+        try {
+            return nodeAttributes.get(CommonName.NODE_ROLE).contains(CommonName.MASTER_ROLE);
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    public static boolean isWorkerNode(DiscoveryNode node) {
+        Map<String, String> nodeAttributes = node.getAttributes();
+        try {
+            return nodeAttributes.get(CommonName.NODE_ROLE).contains(CommonName.WORKER_ROLE);
+        } catch (NumberFormatException e) {
+            return false;
         }
     }
 }
