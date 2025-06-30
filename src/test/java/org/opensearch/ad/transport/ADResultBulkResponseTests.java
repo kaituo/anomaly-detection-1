@@ -27,10 +27,14 @@ public class ADResultBulkResponseTests extends OpenSearchTestCase {
         BytesStreamOutput output = new BytesStreamOutput();
         List<IndexRequest> retryRequests = new ArrayList<>();
         retryRequests.add(new IndexRequest("index").id("blah").source(Collections.singletonMap("foo", "bar")));
-        ResultBulkResponse response = new ResultBulkResponse(retryRequests);
+        List<IndexRequest> missingResultIndexRequests = new ArrayList<>();
+        missingResultIndexRequests.add(new IndexRequest("missing-index").id("missing").source(Collections.singletonMap("foo", "bar")));
+        ResultBulkResponse response = new ResultBulkResponse(retryRequests, missingResultIndexRequests);
         response.writeTo(output);
         StreamInput streamInput = output.bytes().streamInput();
         ResultBulkResponse readResponse = new ResultBulkResponse(streamInput);
         assertTrue(readResponse.hasFailures());
+        assertTrue(readResponse.hasRetryRequests());
+        assertTrue(readResponse.hasMissingResultIndexRequests());
     }
 }

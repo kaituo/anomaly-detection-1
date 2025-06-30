@@ -61,7 +61,10 @@ public class HourlyCronTests extends AbstractTimeSeriesTest {
         when(clusterService.state()).thenReturn(state);
         HashMap<String, String> ignoredAttributes = new HashMap<String, String>();
         ignoredAttributes.put(CommonName.BOX_TYPE_KEY, CommonName.WARM_BOX_TYPE);
-        DiscoveryNodeFilterer nodeFilter = new DiscoveryNodeFilterer(clusterService);
+        DiscoveryNodeFilterer nodeFilter = new DiscoveryNodeFilterer(
+            clusterService,
+            mock(org.opensearch.cluster.metadata.IndexNameExpressionResolver.class)
+        );
 
         Client client = mock(Client.class);
         doAnswer(invocation -> {

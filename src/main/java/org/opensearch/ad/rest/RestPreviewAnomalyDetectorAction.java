@@ -24,8 +24,11 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.PreviewAnomalyDetectorAction;
 import org.opensearch.ad.transport.PreviewAnomalyDetectorRequest;
+import org.opensearch.common.inject.Inject;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.core.common.Strings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.XContentParser;
@@ -36,6 +39,7 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.action.RestToXContentListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.util.RestHandlerUtils;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 
 import com.google.common.collect.ImmutableList;
 
@@ -45,7 +49,12 @@ public class RestPreviewAnomalyDetectorAction extends BaseRestHandler {
 
     private static final Logger logger = LogManager.getLogger(RestPreviewAnomalyDetectorAction.class);
 
-    public RestPreviewAnomalyDetectorAction() {}
+    private final Settings settings;
+
+    @Inject
+    public RestPreviewAnomalyDetectorAction(Settings settings) {
+        this.settings = settings;
+    }
 
     @Override
     public String getName() {
@@ -53,6 +62,7 @@ public class RestPreviewAnomalyDetectorAction extends BaseRestHandler {
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, org.opensearch.transport.client.node.NodeClient client)
         throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
@@ -62,17 +72,18 @@ public class RestPreviewAnomalyDetectorAction extends BaseRestHandler {
         AnomalyDetectorExecutionInput input = getConfigExecutionInput(request);
 
         return channel -> {
-            String rawPath = request.rawPath();
             String error = validateAdExecutionInput(input);
             if (StringUtils.isNotBlank(error)) {
                 channel.sendResponse(new BytesRestResponse(RestStatus.BAD_REQUEST, error));
                 return;
             }
+            String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
             PreviewAnomalyDetectorRequest previewRequest = new PreviewAnomalyDetectorRequest(
                 input.getDetector(),
                 input.getDetectorId(),
                 input.getPeriodStart(),
-                input.getPeriodEnd()
+                input.getPeriodEnd(),
+                tenantId
             );
             client.execute(PreviewAnomalyDetectorAction.INSTANCE, previewRequest, new RestToXContentListener<>(channel));
         };

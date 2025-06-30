@@ -25,6 +25,8 @@ import org.hamcrest.MatcherAssert;
 import org.junit.Before;
 import org.opensearch.action.admin.indices.alias.get.GetAliasesResponse;
 import org.opensearch.action.admin.indices.get.GetIndexResponse;
+import org.opensearch.action.index.IndexRequest;
+import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
@@ -34,6 +36,7 @@ import org.opensearch.plugins.Plugin;
 import org.opensearch.test.OpenSearchIntegTestCase;
 import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.function.ExecutorFunction;
 import org.opensearch.timeseries.indices.IndexManagementIntegTestCase;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
@@ -41,7 +44,7 @@ import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
 
 @OpenSearchIntegTestCase.ClusterScope(scope = OpenSearchIntegTestCase.Scope.TEST, numDataNodes = 0, numClientNodes = 0, supportsDedicatedMasters = false)
 public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<ForecastIndex, ForecastIndexManagement> {
-    private ForecastIndexManagement indices;
+    private TestForecastIndexManagement indices;
     private Settings settings;
     private DiscoveryNodeFilterer nodeFilter;
 
@@ -71,16 +74,18 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
         internalCluster().ensureAtLeastNumDataNodes(1);
         ensureStableCluster(1);
 
-        nodeFilter = new DiscoveryNodeFilterer(clusterService());
+        nodeFilter = new DiscoveryNodeFilterer(clusterService(), mock(IndexNameExpressionResolver.class));
 
-        indices = new ForecastIndexManagement(
+        DataAccess dataAccess = mock(DataAccess.class);
+        indices = new TestForecastIndexManagement(
             client(),
             clusterService(),
             client().threadPool(),
             settings,
             nodeFilter,
             TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-            NamedXContentRegistry.EMPTY
+            NamedXContentRegistry.EMPTY,
+            dataAccess
         );
     }
 
@@ -163,7 +168,8 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
                 indexName,
                 TestHelpers.createActionListener(response -> logger.info("Acknowledged: " + response.isAcknowledged()), failure -> {
                     throw new RuntimeException("should not recreate index");
-                })
+                }),
+                null
             );
         TestHelpers.waitForIndexCreationToComplete(client(), indexName);
         assertTrue((client().admin().indices().prepareExists(indexName).get().isExists()));
@@ -201,7 +207,7 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
             assertTrue(acknowledged);
         }, failure -> { throw new RuntimeException("should not recreate index"); }));
         TestHelpers.waitForIndexCreationToComplete(client(), ForecastIndex.RESULT.getIndexName());
-        client().index(indices.createDummyIndexRequest(ForecastIndex.RESULT.getIndexName())).actionGet();
+        client().index(indices.createDummyIndexRequestForTest(ForecastIndex.RESULT.getIndexName())).actionGet();
 
         GetAliasesResponse getAliasesResponse = admin().indices().prepareGetAliases(ForecastIndex.RESULT.getIndexName()).get();
         String oldIndex = getAliasesResponse.getAliases().keySet().iterator().next();
@@ -215,16 +221,18 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
             .put("plugins.forecast.request_timeout", TimeValue.timeValueSeconds(10))
             .build();
 
-        nodeFilter = new DiscoveryNodeFilterer(clusterService());
+        nodeFilter = new DiscoveryNodeFilterer(clusterService(), mock(IndexNameExpressionResolver.class));
 
-        indices = new ForecastIndexManagement(
+        DataAccess dataAccess = mock(DataAccess.class);
+        indices = new TestForecastIndexManagement(
             client(),
             clusterService(),
             client().threadPool(),
             settings,
             nodeFilter,
             TimeSeriesSettings.MAX_UPDATE_RETRY_TIMES,
-            NamedXContentRegistry.EMPTY
+            NamedXContentRegistry.EMPTY,
+            dataAccess
         );
         indices.rolloverAndDeleteHistoryIndex();
 
@@ -239,7 +247,7 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
         String currentPointedIndex = getAliasesResponse.getAliases().keySet().iterator().next();
         assertEquals(newIndex, currentPointedIndex);
 
-        client().index(indices.createDummyIndexRequest(ForecastIndex.RESULT.getIndexName())).actionGet();
+        client().index(indices.createDummyIndexRequestForTest(ForecastIndex.RESULT.getIndexName())).actionGet();
         // now we have two indices
         indices.rolloverAndDeleteHistoryIndex();
 
@@ -310,7 +318,7 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
             return null;
         }).when(function).execute();
 
-        indices.initCustomResultIndexAndExecute(resultIndex, function, listener);
+        indices.initCustomResultIndexAndExecute(resultIndex, function, listener, null);
         latch.await(20, TimeUnit.SECONDS);
         verify(listener, never()).onFailure(any(Exception.class));
     }
@@ -325,7 +333,8 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
                 indexName,
                 TestHelpers.createActionListener(response -> logger.info("Acknowledged: " + response.isAcknowledged()), failure -> {
                     throw new RuntimeException("should not recreate index");
-                })
+                }),
+                null
             );
         TestHelpers.waitForIndexCreationToComplete(client(), indexName);
         CountDownLatch latch = new CountDownLatch(1);
@@ -334,8 +343,28 @@ public class ForecastIndexManagementTests extends IndexManagementIntegTestCase<F
             return null;
         }).when(function).execute();
 
-        indices.initCustomResultIndexAndExecute(indexName, function, listener);
+        indices.initCustomResultIndexAndExecute(indexName, function, listener, null);
         latch.await(20, TimeUnit.SECONDS);
         verify(listener, never()).onFailure(any(Exception.class));
+    }
+
+    private static class TestForecastIndexManagement extends ForecastIndexManagement {
+        TestForecastIndexManagement(
+            org.opensearch.transport.client.Client client,
+            org.opensearch.cluster.service.ClusterService clusterService,
+            org.opensearch.threadpool.ThreadPool threadPool,
+            Settings settings,
+            org.opensearch.timeseries.util.DiscoveryNodeSelector nodeFilter,
+            int maxUpdateRunningTimes,
+            NamedXContentRegistry xContentRegistry,
+            DataAccess dataAccess
+        )
+            throws IOException {
+            super(client, clusterService, threadPool, settings, nodeFilter, maxUpdateRunningTimes, xContentRegistry, dataAccess);
+        }
+
+        IndexRequest createDummyIndexRequestForTest(String resultIndex) throws IOException {
+            return super.createDummyIndexRequest(resultIndex);
+        }
     }
 }

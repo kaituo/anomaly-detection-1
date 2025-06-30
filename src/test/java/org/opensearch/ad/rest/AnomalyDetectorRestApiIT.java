@@ -13,6 +13,7 @@ package org.opensearch.ad.rest;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.DUPLICATE_DETECTOR_MSG;
+import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG;
 import static org.opensearch.ad.rest.handler.AbstractAnomalyDetectorActionHandler.NO_DOCS_IN_USER_INDEX_MSG;
 
 import java.io.IOException;
@@ -40,6 +41,7 @@ import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorExecutionInput;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.client.Response;
 import org.opensearch.client.ResponseException;
 import org.opensearch.common.UUIDs;
@@ -180,6 +182,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             null,
             interval,
+            null,
             null
         );
 
@@ -216,7 +219,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
                     client(),
                     "POST",
                     TestHelpers.AD_BASE_DETECTORS_URI,
-                    ImmutableMap.of(),
+                    ImmutableMap.of("only_query_custom_result_index", "true"),
                     TestHelpers.toHttpEntity(detector),
                     null
                 )
@@ -260,7 +263,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
                 .makeRequest(
                     client(),
                     "POST",
-                    TestHelpers.AD_BASE_RESULT_URI + "/_search/" + expectedFlattenedIndex,
+                    "/" + expectedFlattenedIndex + "/_search",
                     ImmutableMap.of(),
                     new StringEntity("{\"query\":{\"match_all\":{}}}", ContentType.APPLICATION_JSON),
                     null
@@ -366,7 +369,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             .makeRequest(
                 client(),
                 "POST",
-                TestHelpers.AD_BASE_RESULT_URI + "/_search/" + expectedFlattenedIndex,
+                "/" + expectedFlattenedIndex + "/_search",
                 ImmutableMap.of(),
                 new StringEntity("{\"query\":{\"match_all\":{}}}", ContentType.APPLICATION_JSON),
                 null
@@ -444,6 +447,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             false,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
         Response updateResponse = TestHelpers
@@ -513,6 +517,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             true,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -654,6 +659,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
         if (isResourceSharingFeatureEnabled()) {
@@ -727,6 +733,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -815,6 +822,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector1.getLastBreakingUIChangeTime(),
             detector1.getFrequency(),
+            null,
             null
         );
 
@@ -867,6 +875,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             Instant.now(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -925,6 +934,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -1313,6 +1323,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             detector.getLastBreakingUIChangeTime(),
             detector.getFrequency(),
+            null,
             null
         );
 
@@ -1402,7 +1413,7 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
     }
 
     public void testStartAdJobWithNonexistingDetectorIndex() throws Exception {
-        String message = "no such index [.opendistro-anomaly-detectors]";
+        String message = CommonMessages.FAIL_TO_FIND_CONFIG_MSG;
         if (isResourceSharingFeatureEnabled()) {
             message = "no permissions for ";
         }
@@ -2096,6 +2107,67 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             messageMap.get("category_field").get("message")
         );
 
+    }
+
+    public void testValidateAnomalyDetectorHonorsDynamicMaxHCDetectorCountSetting() throws Exception {
+        String indexName = randomAlphaOfLength(10).toLowerCase(Locale.ROOT);
+        Map<String, String> categoryFieldsAndTypes = ImmutableMap.of("keyword-field", "keyword");
+        String testIndexData = "{\"keyword-field\": \"field-1\", \"timestamp\": 1}";
+
+        TestHelpers.createIndexWithHCADFields(client(), indexName, categoryFieldsAndTypes);
+        TestHelpers.ingestDataToIndex(client(), indexName, TestHelpers.toHttpEntity(testIndexData));
+
+        AnomalyDetector existingDetector = TestHelpers
+            .randomAnomalyDetectorUsingCategoryFields(
+                randomAlphaOfLength(10),
+                TIME_FIELD,
+                ImmutableList.of(indexName),
+                ImmutableList.of("keyword-field")
+            );
+        createAnomalyDetector(existingDetector, true, client());
+
+        AnomalyDetector detectorToValidate = TestHelpers
+            .randomAnomalyDetectorUsingCategoryFields(
+                randomAlphaOfLength(10),
+                TIME_FIELD,
+                ImmutableList.of(indexName),
+                ImmutableList.of("keyword-field")
+            );
+
+        String expectedErrorMessage = String.format(Locale.ROOT, EXCEEDED_MAX_HC_DETECTORS_PREFIX_MSG, 1);
+        try {
+            updateClusterSettings(AnomalyDetectorSettings.AD_MAX_HC_ANOMALY_DETECTORS.getKey(), 1);
+
+            ResponseException createException = expectThrows(
+                ResponseException.class,
+                () -> createAnomalyDetector(detectorToValidate, true, client())
+            );
+            assertThat(createException.getMessage(), containsString(expectedErrorMessage));
+
+            Response response = TestHelpers
+                .makeRequest(
+                    client(),
+                    "POST",
+                    TestHelpers.AD_BASE_DETECTORS_URI + "/_validate",
+                    ImmutableMap.of(),
+                    TestHelpers.toHttpEntity(detectorToValidate),
+                    null
+                );
+            Map<String, Object> responseMap = entityAsMap(response);
+            @SuppressWarnings("unchecked")
+            Map<String, Map<String, String>> messageMap = (Map<String, Map<String, String>>) XContentMapValues
+                .extractValue("detector", responseMap);
+
+            assertEquals("Validation returned detector issue response", RestStatus.OK, TestHelpers.restStatus(response));
+            assertNotNull("Expected detector validation issues after lowering the HC detector limit", messageMap);
+            assertNotNull(
+                "Expected general_settings validation issue after lowering the HC detector limit",
+                messageMap.get("general_settings")
+            );
+            assertEquals(expectedErrorMessage, messageMap.get("general_settings").get("message"));
+        } finally {
+            updateClusterSettings(AnomalyDetectorSettings.AD_MAX_HC_ANOMALY_DETECTORS.getKey(), 1000);
+        }
     }
 
     public void testSearchTopAnomalyResultsWithInvalidInputs() throws IOException {

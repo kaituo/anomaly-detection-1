@@ -18,17 +18,18 @@ import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.forecast.ExecuteForecastResultResponseRecorder;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
-import org.opensearch.forecast.transport.ForecastProfileAction;
 import org.opensearch.forecast.transport.ForecastResultAction;
 import org.opensearch.forecast.transport.ForecastResultRequest;
 import org.opensearch.forecast.transport.StopForecasterAction;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.rest.handler.IndexJobActionHandler;
 import org.opensearch.timeseries.task.TaskCacheManager;
@@ -37,22 +38,23 @@ import org.opensearch.timeseries.transport.ResultRequest;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: resultAction is local host call only (safe in multitenant); index/stopConfigAction are single-tenant only.")
 public class ForecastIndexJobActionHandler extends
-    IndexJobActionHandler<ForecastIndex, ForecastIndexManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult, ForecastProfileAction, ExecuteForecastResultResponseRecorder> {
+    IndexJobActionHandler<ForecastIndex, ForecastDelegatingDataManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult, ExecuteForecastResultResponseRecorder> {
 
     public ForecastIndexJobActionHandler(
         Client client,
-        ForecastIndexManagement indexManagement,
+        ForecastDelegatingDataManagement indexManagement,
         NamedXContentRegistry xContentRegistry,
         ForecastTaskManager adTaskManager,
         ExecuteForecastResultResponseRecorder recorder,
-        NodeStateManager nodeStateManager,
-        Settings settings
+        StateManager nodeStateManager,
+        Settings settings,
+        RunContext runContext
     ) {
         super(
             client,
             indexManagement,
-            xContentRegistry,
             adTaskManager,
             recorder,
             ForecastResultAction.INSTANCE,
@@ -60,14 +62,15 @@ public class ForecastIndexJobActionHandler extends
             ForecastIndex.STATE.getIndexName(),
             StopForecasterAction.INSTANCE,
             nodeStateManager,
+            runContext,
             settings,
             FORECAST_REQUEST_TIMEOUT
         );
     }
 
     @Override
-    protected ResultRequest createResultRequest(String configID, long start, long end) {
-        return new ForecastResultRequest(configID, start, end);
+    protected ResultRequest createResultRequest(String configID, long start, long end, String tenantId) {
+        return new ForecastResultRequest(configID, start, end, tenantId);
     }
 
     @Override
@@ -89,20 +92,21 @@ public class ForecastIndexJobActionHandler extends
     @Override
     public void stopConfig(
         String configId,
+        String tenantId,
         boolean historical,
         User user,
         TransportService transportService,
         ActionListener<JobResponse> listener
     ) {
         // make sure forecaster exists
-        nodeStateManager.getConfig(configId, AnalysisType.FORECAST, (config) -> {
+        nodeStateManager.getConfig(configId, tenantId, AnalysisType.FORECAST, (config) -> {
             if (!config.isPresent()) {
                 listener.onFailure(new OpenSearchStatusException(CommonMessages.FAIL_TO_FIND_CONFIG_MSG + configId, RestStatus.NOT_FOUND));
                 return;
             }
-            taskManager.getAndExecuteOnLatestConfigLevelTask(configId, ForecastTaskType.RUN_ONCE_TASK_TYPES, (task) -> {
+            taskManager.getAndExecuteOnLatestConfigLevelTask(configId, tenantId, ForecastTaskType.RUN_ONCE_TASK_TYPES, (task) -> {
                 // stop realtime forecaster job
-                stopJob(configId, transportService, listener);
+                stopJob(config.get(), transportService, listener);
             }, transportService, true, listener); // true means reset task state as inactive/stopped state
         }, listener);
     }

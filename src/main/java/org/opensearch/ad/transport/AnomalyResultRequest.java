@@ -37,8 +37,8 @@ public class AnomalyResultRequest extends ResultRequest {
         super(in);
     }
 
-    public AnomalyResultRequest(String adID, long start, long end) {
-        super(adID, ADIndex.CONFIG.getIndexName(), start, end);
+    public AnomalyResultRequest(String adID, long start, long end, String tenantId) {
+        super(adID, ADIndex.CONFIG.getIndexName(), start, end, tenantId);
     }
 
     @Override

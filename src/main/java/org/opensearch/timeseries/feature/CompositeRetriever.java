@@ -27,8 +27,6 @@ import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.action.support.IndicesOptions;
-import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
-import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
@@ -44,12 +42,12 @@ import org.opensearch.search.aggregations.bucket.composite.CompositeAggregationB
 import org.opensearch.search.aggregations.bucket.composite.TermsValuesSourceBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Entity;
 import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.util.ParseUtils;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
 
 /**
  *
@@ -68,16 +66,13 @@ public class CompositeRetriever extends AbstractRetriever {
     private final long dataEndEpoch;
     private final Config config;
     private final NamedXContentRegistry xContent;
-    private final Client client;
-    private final SecurityClientUtil clientUtil;
+    private final DataAccess dataAccess;
     private int totalResults;
     // we can process at most maxEntities entities
     private int maxEntities;
     private final int pageSize;
     private long expirationEpochMs;
     private Clock clock;
-    private IndexNameExpressionResolver indexNameExpressionResolver;
-    private ClusterService clusterService;
     private AnalysisType context;
 
     public CompositeRetriever(
@@ -85,30 +80,24 @@ public class CompositeRetriever extends AbstractRetriever {
         long dataEndEpoch,
         Config config,
         NamedXContentRegistry xContent,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         long expirationEpochMs,
         Clock clock,
         Settings settings,
         int maxEntitiesPerInterval,
         int pageSize,
-        IndexNameExpressionResolver indexNameExpressionResolver,
-        ClusterService clusterService,
         AnalysisType context
     ) {
         this.dataStartEpoch = dataStartEpoch;
         this.dataEndEpoch = dataEndEpoch;
         this.config = config;
         this.xContent = xContent;
-        this.client = client;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
         this.totalResults = 0;
         this.maxEntities = maxEntitiesPerInterval;
         this.pageSize = pageSize;
         this.expirationEpochMs = expirationEpochMs;
         this.clock = clock;
-        this.indexNameExpressionResolver = indexNameExpressionResolver;
-        this.clusterService = clusterService;
         this.context = context;
     }
 
@@ -118,14 +107,11 @@ public class CompositeRetriever extends AbstractRetriever {
         long dataEndEpoch,
         Config anomalyDetector,
         NamedXContentRegistry xContent,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         long expirationEpochMs,
         Settings settings,
         int maxEntitiesPerInterval,
         int pageSize,
-        IndexNameExpressionResolver indexNameExpressionResolver,
-        ClusterService clusterService,
         AnalysisType context
     ) {
         this(
@@ -133,15 +119,12 @@ public class CompositeRetriever extends AbstractRetriever {
             dataEndEpoch,
             anomalyDetector,
             xContent,
-            client,
-            clientUtil,
+            dataAccess,
             expirationEpochMs,
             Clock.systemUTC(),
             settings,
             maxEntitiesPerInterval,
             pageSize,
-            indexNameExpressionResolver,
-            clusterService,
             context
         );
     }
@@ -210,7 +193,11 @@ public class CompositeRetriever extends AbstractRetriever {
             final ActionListener<SearchResponse> searchResponseListener = new ActionListener<SearchResponse>() {
                 @Override
                 public void onResponse(SearchResponse response) {
-                    processResponse(response, () -> client.search(searchRequest, this), listener);
+                    processResponse(
+                        response,
+                        () -> dataAccess.search(searchRequest, TenantContext.user(config.getTenantId()), this),
+                        listener
+                    );
                 }
 
                 @Override
@@ -220,146 +207,177 @@ public class CompositeRetriever extends AbstractRetriever {
             };
             // using the original context in listener as user roles have no permissions for internal operations like fetching a
             // checkpoint
-            clientUtil
-                .<SearchRequest, SearchResponse>asyncRequestWithInjectedSecurity(
+            dataAccess
+                .searchWithInjectedSecurity(
                     searchRequest,
-                    client::search,
                     config.getId(),
-                    client,
+                    TenantContext.user(config.getTenantId()),
                     context,
                     searchResponseListener
                 );
         }
 
         private void processResponse(SearchResponse response, Runnable retry, ActionListener<Page> listener) {
-            try {
-                if (shouldRetryDueToEmptyPage(response)) {
-                    updateCompositeAfterKey(response, source);
-                    retry.run();
-                    return;
-                }
+            shouldRetryDueToEmptyPage(response, ActionListener.wrap(shouldRetry -> {
+                try {
+                    if (shouldRetry) {
+                        updateCompositeAfterKey(response, source, ActionListener.wrap(v -> retry.run(), listener::onFailure));
+                        return;
+                    }
 
-                Page page = analyzePage(response);
-                if (afterKey != null) {
-                    updateCompositeAfterKey(response, source);
+                    analyzePage(response, ActionListener.wrap(page -> {
+                        if (afterKey != null) {
+                            updateCompositeAfterKey(
+                                response,
+                                source,
+                                ActionListener.wrap(v -> listener.onResponse(page), listener::onFailure)
+                            );
+                        } else {
+                            listener.onResponse(page);
+                        }
+                    }, listener::onFailure));
+                } catch (Exception ex) {
+                    listener.onFailure(ex);
                 }
-                listener.onResponse(page);
-            } catch (Exception ex) {
-                listener.onFailure(ex);
-            }
+            }, listener::onFailure));
         }
 
         /**
+         * Analyzes the search response and returns a page containing aggregated results.
          *
          * @param response current response
-         * @return A page containing
+         * @param listener listener that receives the Page containing:
          *  ** the after key
          *  ** query source builder to next page if any
-         *  ** a map of composite keys to its values.  The values are arranged
-         *    according to the order of anomalyDetector.getEnabledFeatureIds().
+         *  ** a map of composite keys to its values, arranged according to anomalyDetector.getEnabledFeatureIds()
          */
-        private Page analyzePage(SearchResponse response) {
-            Optional<CompositeAggregation> compositeOptional = getComposite(response);
-
-            if (false == compositeOptional.isPresent()) {
-                throw new IllegalArgumentException(String.format(Locale.ROOT, "Empty resposne: %s", response));
-            }
-
-            CompositeAggregation composite = compositeOptional.get();
-            Map<Entity, double[]> results = new HashMap<>();
-            /*
-             *
-             * Example composite aggregation:
-             *
-             "aggregations": {
-                "my_buckets": {
-                    "after_key": {
-                        "service": "app_6",
-                        "host": "server_3"
-                    },
-                    "buckets": [
-                        {
-                            "key": {
-                                "service": "app_6",
-                                "host": "server_3"
-                            },
-                            "doc_count": 1,
-                            "the_max": {
-                                "value": -38.0
-                            },
-                            "the_min": {
-                                "value": -38.0
-                            }
-                        }
-                    ]
-               }
-             }
-             */
-            for (Bucket bucket : composite.getBuckets()) {
-                Optional<double[]> featureValues = parseBucket(bucket, config.getEnabledFeatureIds(), true);
-                // bucket.getKey() returns a map of categorical field like "host" and its value like "server_1"
-                if (featureValues.isPresent() && bucket.getKey() != null) {
-                    results.put(Entity.createEntityByReordering(bucket.getKey()), featureValues.get());
+        private void analyzePage(SearchResponse response, ActionListener<Page> listener) {
+            getComposite(response, ActionListener.wrap(compositeOptional -> {
+                if (false == compositeOptional.isPresent()) {
+                    listener.onFailure(new IllegalArgumentException(String.format(Locale.ROOT, "Empty resposne: %s", response)));
+                    return;
                 }
-            }
 
-            totalResults += results.size();
+                CompositeAggregation composite = compositeOptional.get();
+                Map<Entity, double[]> results = new HashMap<>();
+                /*
+                 *
+                 * Example composite aggregation:
+                 *
+                 "aggregations": {
+                    "my_buckets": {
+                        "after_key": {
+                            "service": "app_6",
+                            "host": "server_3"
+                        },
+                        "buckets": [
+                            {
+                                "key": {
+                                    "service": "app_6",
+                                    "host": "server_3"
+                                },
+                                "doc_count": 1,
+                                "the_max": {
+                                    "value": -38.0
+                                },
+                                "the_min": {
+                                    "value": -38.0
+                                }
+                            }
+                        ]
+                   }
+                 }
+                 */
+                for (Bucket bucket : composite.getBuckets()) {
+                    Optional<double[]> featureValues = parseBucket(bucket, config.getEnabledFeatureIds(), true);
+                    // bucket.getKey() returns a map of categorical field like "host" and its value like "server_1"
+                    if (featureValues.isPresent() && bucket.getKey() != null) {
+                        results.put(Entity.createEntityByReordering(bucket.getKey()), featureValues.get());
+                    }
+                }
 
-            afterKey = composite.afterKey();
-            return new Page(results);
+                totalResults += results.size();
+
+                afterKey = composite.afterKey();
+                listener.onResponse(new Page(results));
+            }, listener::onFailure));
         }
 
-        private void updateCompositeAfterKey(SearchResponse r, SearchSourceBuilder search) {
-            Optional<CompositeAggregation> composite = getComposite(r);
+        private void updateCompositeAfterKey(SearchResponse r, SearchSourceBuilder search, ActionListener<Void> listener) {
+            getComposite(r, ActionListener.wrap(composite -> {
+                if (false == composite.isPresent()) {
+                    listener.onFailure(new IllegalArgumentException(String.format(Locale.ROOT, "Empty resposne: %s", r)));
+                    return;
+                }
 
-            if (false == composite.isPresent()) {
-                throw new IllegalArgumentException(String.format(Locale.ROOT, "Empty resposne: %s", r));
-            }
-
-            updateSourceAfterKey(composite.get().afterKey(), search);
+                updateSourceAfterKey(composite.get().afterKey(), search);
+                listener.onResponse(null);
+            }, listener::onFailure));
         }
 
-        private boolean shouldRetryDueToEmptyPage(SearchResponse response) {
-            Optional<CompositeAggregation> composite = getComposite(response);
-            // if there are no buckets but a next page, go fetch it instead of sending an empty response to the client
-            if (false == composite.isPresent()) {
-                return false;
-            }
-            CompositeAggregation aggr = composite.get();
-            return aggr.getBuckets().isEmpty() && aggr.afterKey() != null && !aggr.afterKey().isEmpty();
+        private void shouldRetryDueToEmptyPage(SearchResponse response, ActionListener<Boolean> listener) {
+            getComposite(response, ActionListener.wrap(composite -> {
+                // if there are no buckets but a next page, go fetch it instead of sending an empty response to the client
+                if (false == composite.isPresent()) {
+                    listener.onResponse(false);
+                    return;
+                }
+                CompositeAggregation aggr = composite.get();
+                listener.onResponse(aggr.getBuckets().isEmpty() && aggr.afterKey() != null && !aggr.afterKey().isEmpty());
+            }, listener::onFailure));
         }
 
-        Optional<CompositeAggregation> getComposite(SearchResponse response) {
-            // When the source index is a regex like blah*, we will get empty response like
-            // the following even if no index starting with blah exists.
-            // {"took":0,"timed_out":false,"_shards":{"total":0,"successful":0,"skipped":0,"failed":0},"hits":{"max_score":0.0,"hits":[]}}
-            // Without regex, we will get IndexNotFoundException instead.
-            // {"error":{"root_cause":[{"type":"index_not_found_exception","reason":"no such
-            // index
-            // [blah]","index":"blah","resource.id":"blah","resource.type":"index_or_alias","index_uuid":"_na_"}],"type":"index_not_found_exception","reason":"no
-            // such index
-            // [blah]","index":"blah","resource.id":"blah","resource.type":"index_or_alias","index_uuid":"_na_"},"status":404}%
+        /**
+         * Gets the composite aggregation from the response, resolving index names asynchronously if needed.
+         *
+         * <p>When the source index is a regex like {@code blah*}, we will get an empty response even if no
+         * index starting with "blah" exists:
+         * <pre>
+         * {"took":0,"timed_out":false,"_shards":{"total":0,"successful":0,"skipped":0,"failed":0},
+         *  "hits":{"max_score":0.0,"hits":[]}}
+         * </pre>
+         *
+         * <p>Without regex, we will get an {@link IndexNotFoundException} instead:
+         * <pre>
+         * {"error":{"root_cause":[{"type":"index_not_found_exception","reason":"no such index [blah]",
+         *  "index":"blah","resource.id":"blah","resource.type":"index_or_alias","index_uuid":"_na_"}],
+         *  "type":"index_not_found_exception","reason":"no such index [blah]",...},"status":404}
+         * </pre>
+         *
+         * @param response the search response
+         * @param listener listener that receives the Optional CompositeAggregation
+         */
+        void getComposite(SearchResponse response, ActionListener<Optional<CompositeAggregation>> listener) {
             if (response == null || response.getAggregations() == null) {
                 List<String> sourceIndices = config.getIndices();
-                String[] concreteIndices = indexNameExpressionResolver
-                    .concreteIndexNames(clusterService.state(), IndicesOptions.lenientExpandOpen(), sourceIndices.toArray(new String[0]));
-                if (concreteIndices.length == 0) {
-                    throw new IndexNotFoundException(String.join(",", sourceIndices));
-                } else {
-                    return Optional.empty();
-                }
+                dataAccess
+                    .concreteIndexNames(
+                        IndicesOptions.lenientExpandOpen(),
+                        sourceIndices.toArray(new String[0]),
+                        TenantContext.user(config.getTenantId()),
+                        ActionListener.wrap(concreteIndices -> {
+                            if (concreteIndices.length == 0) {
+                                listener.onFailure(new IndexNotFoundException(String.join(",", sourceIndices)));
+                            } else {
+                                listener.onResponse(Optional.empty());
+                            }
+                        }, listener::onFailure)
+                    );
+                return;
             }
             Aggregation agg = response.getAggregations().get(AGG_NAME_COMP);
             if (agg == null) {
                 // when current interval has no data
-                return Optional.empty();
+                listener.onResponse(Optional.empty());
+                return;
             }
 
             if (agg instanceof CompositeAggregation) {
-                return Optional.of((CompositeAggregation) agg);
+                listener.onResponse(Optional.of((CompositeAggregation) agg));
+                return;
             }
 
-            throw new IllegalArgumentException(String.format(Locale.ROOT, "Not a composite response; {}", agg.getClass()));
+            listener.onFailure(new IllegalArgumentException(String.format(Locale.ROOT, "Not a composite response; {}", agg.getClass())));
         }
 
         /**

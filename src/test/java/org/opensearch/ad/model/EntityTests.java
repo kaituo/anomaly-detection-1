@@ -38,7 +38,7 @@ public class EntityTests extends AbstractTimeSeriesTest {
         String detectorId = "id";
         Entity entity = Entity.createEntityByReordering(Collections.emptyMap());
 
-        Optional<String> modelId = entity.getModelId(detectorId);
+        Optional<String> modelId = entity.getModelId(null, detectorId);
 
         assertTrue(!modelId.isPresent());
     }

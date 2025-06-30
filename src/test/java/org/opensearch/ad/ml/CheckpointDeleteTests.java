@@ -28,7 +28,7 @@ import org.junit.Before;
 import org.mockito.Mock;
 import org.opensearch.OpenSearchException;
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.indices.ADIndexManagement;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.IndexNotFoundException;
 import org.opensearch.index.reindex.BulkByScrollResponse;
@@ -66,7 +66,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
     private Client client;
     private ClientUtil clientUtil;
     private Gson gson;
-    private ADIndexManagement indexUtil;
+    private ADDelegatingDataManagement indexUtil;
     private String detectorId;
     private int maxCheckpointBytes;
     private GenericObjectPool<LinkedBuffer> objectPool;
@@ -91,7 +91,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
         client = mock(Client.class);
         clientUtil = mock(ClientUtil.class);
         gson = null;
-        indexUtil = mock(ADIndexManagement.class);
+        indexUtil = mock(ADDelegatingDataManagement.class);
         detectorId = "123";
         maxCheckpointBytes = 1_000_000;
 
@@ -162,7 +162,7 @@ public class CheckpointDeleteTests extends AbstractTimeSeriesTest {
             return null;
         }).when(client).execute(eq(DeleteByQueryAction.INSTANCE), any(), any());
 
-        checkpointDao.deleteModelCheckpointByConfigId(detectorId);
+        checkpointDao.deleteModelCheckpointByConfigId(null, detectorId);
     }
 
     public void testDeleteSingleNormal() throws Exception {

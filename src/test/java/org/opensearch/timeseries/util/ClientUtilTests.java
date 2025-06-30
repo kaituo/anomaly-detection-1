@@ -40,7 +40,7 @@ public class ClientUtilTests extends OpenSearchTestCase {
     @Override
     public void setUp() throws Exception {
         super.setUp();
-        asyncRequest = new AnomalyResultRequest("abc123", 100, 200);
+        asyncRequest = new AnomalyResultRequest("abc123", 100, 200, null);
 
         listener = new ActionListener<>() {
             @Override

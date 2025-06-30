@@ -41,6 +41,7 @@ public class ValidateConfigRequest extends ActionRequest {
     // added during refactoring for forecasting. It is fine we add a new field
     // since the request is handled by the same node.
     private final Integer maxCategoricalFields;
+    private final String tenantId;
 
     public ValidateConfigRequest(StreamInput in) throws IOException {
         super(in);
@@ -59,6 +60,29 @@ public class ValidateConfigRequest extends ActionRequest {
         maxFeatures = in.readInt();
         requestTimeout = in.readTimeValue();
         maxCategoricalFields = in.readInt();
+        tenantId = in.readOptionalString();
+    }
+
+    public ValidateConfigRequest(
+        AnalysisType context,
+        Config config,
+        String validationType,
+        Integer maxSingleStreamConfigs,
+        Integer maxHCConfigs,
+        Integer maxFeatures,
+        TimeValue requestTimeout,
+        Integer maxCategoricalFields,
+        String tenantId
+    ) {
+        this.context = context;
+        this.config = config;
+        this.validationType = validationType;
+        this.maxSingleStreamConfigs = maxSingleStreamConfigs;
+        this.maxHCConfigs = maxHCConfigs;
+        this.maxFeatures = maxFeatures;
+        this.requestTimeout = requestTimeout;
+        this.maxCategoricalFields = maxCategoricalFields;
+        this.tenantId = tenantId;
     }
 
     public ValidateConfigRequest(
@@ -71,14 +95,17 @@ public class ValidateConfigRequest extends ActionRequest {
         TimeValue requestTimeout,
         Integer maxCategoricalFields
     ) {
-        this.context = context;
-        this.config = config;
-        this.validationType = validationType;
-        this.maxSingleStreamConfigs = maxSingleStreamConfigs;
-        this.maxHCConfigs = maxHCConfigs;
-        this.maxFeatures = maxFeatures;
-        this.requestTimeout = requestTimeout;
-        this.maxCategoricalFields = maxCategoricalFields;
+        this(
+            context,
+            config,
+            validationType,
+            maxSingleStreamConfigs,
+            maxHCConfigs,
+            maxFeatures,
+            requestTimeout,
+            maxCategoricalFields,
+            null
+        );
     }
 
     @Override
@@ -92,6 +119,7 @@ public class ValidateConfigRequest extends ActionRequest {
         out.writeInt(maxFeatures);
         out.writeTimeValue(requestTimeout);
         out.writeInt(maxCategoricalFields);
+        out.writeOptionalString(tenantId);
     }
 
     @Override
@@ -125,6 +153,10 @@ public class ValidateConfigRequest extends ActionRequest {
 
     public Integer getMaxCategoricalFields() {
         return maxCategoricalFields;
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 
     public static ValidateConfigRequest fromActionRequest(

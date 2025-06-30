@@ -12,22 +12,22 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
 import org.opensearch.forecast.model.ForecastTask;
 import org.opensearch.forecast.model.ForecastTaskType;
 import org.opensearch.forecast.rest.handler.ForecastIndexJobActionHandler;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.settings.ForecastSettings;
 import org.opensearch.forecast.task.ForecastTaskManager;
-import org.opensearch.forecast.transport.ForecastProfileAction;
 import org.opensearch.forecast.transport.ForecastResultAction;
 import org.opensearch.forecast.transport.ForecastResultRequest;
 import org.opensearch.jobscheduler.spi.LockModel;
 import org.opensearch.jobscheduler.spi.utils.LockService;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.JobProcessor;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.client.DataPlaneClientFactory;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.Job;
@@ -35,7 +35,7 @@ import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.ResultRequest;
 
 public class ForecastJobProcessor extends
-    JobProcessor<ForecastIndex, ForecastIndexManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult, ForecastProfileAction, ExecuteForecastResultResponseRecorder, ForecastIndexJobActionHandler> {
+    JobProcessor<ForecastIndex, ForecastDelegatingDataManagement, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastResult, ExecuteForecastResultResponseRecorder, ForecastIndexJobActionHandler> {
 
     private static final Logger log = LogManager.getLogger(ForecastJobProcessor.class);
 
@@ -56,7 +56,7 @@ public class ForecastJobProcessor extends
 
     private ForecastJobProcessor() {
         // Singleton class, use getJobRunnerInstance method instead of constructor
-        super(AnalysisType.FORECAST, TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME, ForecastResultAction.INSTANCE);
+        super(AnalysisType.FORECAST, ForecastCommonName.FORECAST_THREAD_POOL_NAME, ForecastResultAction.INSTANCE);
     }
 
     public void registerSettings(Settings settings) {
@@ -64,8 +64,8 @@ public class ForecastJobProcessor extends
     }
 
     @Override
-    protected ResultRequest createResultRequest(String configId, long start, long end) {
-        return new ForecastResultRequest(configId, start, end);
+    protected ResultRequest createResultRequest(String configId, long start, long end, String tenantId) {
+        return new ForecastResultRequest(configId, start, end, tenantId);
     }
 
     @Override
@@ -81,21 +81,50 @@ public class ForecastJobProcessor extends
         ExecuteForecastResultResponseRecorder recorder,
         Config detector
     ) {
-        ActionListener<Boolean> listener = ActionListener.wrap(r -> { log.debug("Result index is valid"); }, e -> {
+        DataPlaneClientFactory dataPlaneClientFactory = getCurrentDataPlaneClientFactory();
+        ActionListener<Boolean> listener = ActionListener.wrap(r -> runWithDataPlaneClientFactory(dataPlaneClientFactory, () -> {
+            log.debug("Result index is valid");
+        }), e -> runWithDataPlaneClientFactory(dataPlaneClientFactory, () -> {
             Exception exception = new EndRunException(configId, e.getMessage(), false);
             handleException(jobParameter, lockService, lock, executionStartTime, executionEndTime, exception, recorder, detector);
-        });
+        }));
         String resultIndex = jobParameter.getCustomResultIndexOrAlias();
         if (resultIndex == null) {
             indexManagement.validateDefaultResultIndexForBackendJob(configId, user, roles, () -> {
-                listener.onResponse(true);
-                runJob(jobParameter, lockService, lock, executionStartTime, executionEndTime, configId, user, roles, recorder, detector);
+                runWithDataPlaneClientFactory(dataPlaneClientFactory, () -> {
+                    listener.onResponse(true);
+                    runJob(
+                        jobParameter,
+                        lockService,
+                        lock,
+                        executionStartTime,
+                        executionEndTime,
+                        configId,
+                        user,
+                        roles,
+                        recorder,
+                        detector
+                    );
+                });
             }, listener);
         } else {
             indexManagement.validateCustomIndexForBackendJob(resultIndex, configId, user, roles, () -> {
-                listener.onResponse(true);
-                runJob(jobParameter, lockService, lock, executionStartTime, executionEndTime, configId, user, roles, recorder, detector);
-            }, listener);
+                runWithDataPlaneClientFactory(dataPlaneClientFactory, () -> {
+                    listener.onResponse(true);
+                    runJob(
+                        jobParameter,
+                        lockService,
+                        lock,
+                        executionStartTime,
+                        executionEndTime,
+                        configId,
+                        user,
+                        roles,
+                        recorder,
+                        detector
+                    );
+                });
+            }, listener, detector.getTenantId());
         }
     }
 }

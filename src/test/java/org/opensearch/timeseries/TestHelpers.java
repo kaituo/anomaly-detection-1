@@ -169,6 +169,7 @@ public class TestHelpers {
 
     public static final String LEGACY_OPENDISTRO_AD_BASE_DETECTORS_URI = "/_opendistro/_anomaly_detection/detectors";
     public static final String AD_BASE_DETECTORS_URI = "/_plugins/_anomaly_detection/detectors";
+    public static final String AD_BASE_INTERNAL_DETECTORS_URI = "/_plugins/_anomaly_detection/_internal/detectors";
     public static final String AD_BASE_RESULT_URI = AD_BASE_DETECTORS_URI + "/results";
     public static final String AD_BASE_PREVIEW_URI = AD_BASE_DETECTORS_URI + "/%s/_preview";
     public static final String AD_BASE_STATS_URI = "/_plugins/_anomaly_detection/stats";
@@ -494,6 +495,7 @@ public class TestHelpers {
             null,
             lastUpdateTime,
             new IntervalTimeConfiguration(detectionIntervalInMinutes, ChronoUnit.MINUTES),
+            null,
             null
         );
     }
@@ -552,6 +554,7 @@ public class TestHelpers {
             null,
             Instant.now(),
             new IntervalTimeConfiguration(detectionIntervalInMinutes, ChronoUnit.MINUTES),
+            null,
             null
         );
     }
@@ -622,6 +625,7 @@ public class TestHelpers {
             null,
             Instant.now(),
             interval,
+            null,
             null
         );
     }
@@ -667,6 +671,7 @@ public class TestHelpers {
             null,
             Instant.now(),
             interval,
+            null,
             null
         );
     }
@@ -705,6 +710,7 @@ public class TestHelpers {
             true,
             Instant.now(),
             interval,
+            null,
             null
         );
     }
@@ -742,6 +748,7 @@ public class TestHelpers {
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             interval,
+            null,
             null
         );
     }
@@ -785,6 +792,7 @@ public class TestHelpers {
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             interval,
+            null,
             null
         );
     }
@@ -972,7 +980,8 @@ public class TestHelpers {
                 null,
                 lastUpdateTime,
                 detectionInterval,
-                autoCreated
+                autoCreated,
+                null
             );
         }
     }
@@ -1012,6 +1021,7 @@ public class TestHelpers {
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             interval,
+            null,
             null
         );
     }
@@ -1216,6 +1226,7 @@ public class TestHelpers {
             pastValues,
             expectedValuesList,
             randomDoubleBetween(1.1, 10.0, true),
+            null,
             null
         );
     }
@@ -1299,6 +1310,7 @@ public class TestHelpers {
             pastValues,
             expectedValuesList,
             randomDoubleBetween(1.1, 10.0, true),
+            null,
             null
         );
     }
@@ -1318,6 +1330,7 @@ public class TestHelpers {
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             60L,
             randomUser(),
+            null,
             null,
             AnalysisType.AD
         );
@@ -1406,7 +1419,7 @@ public class TestHelpers {
 
     public static CreateIndexResponse createIndex(AdminClient adminClient, String indexName, String indexMapping) {
         CreateIndexRequest request = new CreateIndexRequest(indexName).mapping(indexMapping);
-        return adminClient.indices().create(request).actionGet(10_000);
+        return adminClient.indices().create(request).actionGet(30_000);
     }
 
     public static void createIndex(RestClient client, String indexName, HttpEntity data) throws IOException {
@@ -2007,6 +2020,7 @@ public class TestHelpers {
         Integer customResultIndexTTL;
         Boolean flattenResultIndexMapping;
         Integer seasonality;
+        String tenantId;
 
         ForecasterBuilder() throws IOException {
             forecasterId = randomAlphaOfLength(10);
@@ -2034,6 +2048,7 @@ public class TestHelpers {
             flattenResultIndexMapping = null;
             // Forecaster.invalidShingleSizeRange requires shingle to be at least 4. So seasonality has to be at least 8.
             seasonality = randomIntBetween(8, 128);
+            tenantId = null;
         }
 
         public static ForecasterBuilder newInstance() throws IOException {
@@ -2160,6 +2175,11 @@ public class TestHelpers {
             return this;
         }
 
+        public ForecasterBuilder setTenantId(String tenantId) {
+            this.tenantId = tenantId;
+            return this;
+        }
+
         public Forecaster build() {
             return new Forecaster(
                 forecasterId,
@@ -2191,7 +2211,8 @@ public class TestHelpers {
                 flattenResultIndexMapping,
                 lastUpdateTime,
                 forecastInterval,
-                null
+                null,
+                tenantId
             );
         }
     }
@@ -2231,6 +2252,7 @@ public class TestHelpers {
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             interval,
+            null,
             null
         );
     }
@@ -2336,6 +2358,7 @@ public class TestHelpers {
         private Instant forecastDataStartTime = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         private Instant forecastDataEndTime = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         private Integer horizonIndex = randomIntBetween(1, 10);
+        private String tenantId = randomAlphaOfLength(5);
 
         public ForecastResultBuilder() {
 
@@ -2365,7 +2388,8 @@ public class TestHelpers {
                 upperBound,
                 forecastDataStartTime,
                 forecastDataEndTime,
-                horizonIndex
+                horizonIndex,
+                tenantId
             );
         }
     }
@@ -2380,6 +2404,7 @@ public class TestHelpers {
         private Instant lastUpdateTime = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         private Long lockDurationSeconds = 60L;
         private User user = randomUser();
+        private String tenantId = null;
         private String resultIndex = null;
         private AnalysisType analysisType = AnalysisType.AD;
 
@@ -2436,6 +2461,11 @@ public class TestHelpers {
             return this;
         }
 
+        public JobBuilder tenantId(String tenantId) {
+            this.tenantId = tenantId;
+            return this;
+        }
+
         public JobBuilder resultIndex(String resultIndex) {
             this.resultIndex = resultIndex;
             return this;
@@ -2457,6 +2487,7 @@ public class TestHelpers {
                 lastUpdateTime,
                 lockDurationSeconds,
                 user,
+                tenantId,
                 resultIndex,
                 analysisType
             );
@@ -2493,6 +2524,7 @@ public class TestHelpers {
         Instant forecastDataStartTime = dataEndTime.plusSeconds(random.nextInt(3600));
         Instant forecastDataEndTime = forecastDataStartTime.plusSeconds(random.nextInt(3600));
         Integer horizonIndex = random.nextInt(100);
+        String tenantId = randomAlphaOfLength(10);
 
         return new ForecastResult(
             forecasterId,
@@ -2513,7 +2545,8 @@ public class TestHelpers {
             upperBound,
             forecastDataStartTime,
             forecastDataEndTime,
-            horizonIndex
+            horizonIndex,
+            tenantId
         );
     }
 }

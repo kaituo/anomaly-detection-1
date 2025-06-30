@@ -30,18 +30,18 @@ import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.NodeStateManager;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.IndexableResult;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.transport.ResultBulkRequest;
 import org.opensearch.timeseries.transport.ResultBulkResponse;
 import org.opensearch.timeseries.transport.handler.IndexMemoryPressureAwareResultHandler;
 import org.opensearch.timeseries.util.ExceptionUtil;
 
-public abstract class ResultWriteWorker<ResultType extends IndexableResult, ResultWriteRequestType extends ResultWriteRequest<ResultType>, BatchRequestType extends ResultBulkRequest<ResultType, ResultWriteRequestType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, ResultHandlerType extends IndexMemoryPressureAwareResultHandler<ResultType, ResultWriteRequestType, BatchRequestType, ResultBulkResponse, IndexType, IndexManagementType>>
+public abstract class ResultWriteWorker<ResultType extends IndexableResult, ResultWriteRequestType extends ResultWriteRequest<ResultType>, BatchRequestType extends ResultBulkRequest<ResultType, ResultWriteRequestType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, ResultHandlerType extends IndexMemoryPressureAwareResultHandler<ResultType, ResultWriteRequestType, BatchRequestType, ResultBulkResponse, IndexType, DataManagementType>>
     extends BatchWorker<ResultWriteRequestType, BatchRequestType, ResultBulkResponse> {
     private static final Logger LOG = LogManager.getLogger(ResultWriteWorker.class);
     protected final ResultHandlerType resultHandler;
@@ -68,7 +68,7 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
         Duration executionTtl,
         Setting<Integer> batchSizeSetting,
         Duration stateTtl,
-        NodeStateManager timeSeriesNodeStateManager,
+        StateManager timeSeriesNodeStateManager,
         ResultHandlerType resultHandler,
         NamedXContentRegistry xContentRegistry,
         CheckedFunction<XContentParser, ? extends ResultType, IOException> resultParser,
@@ -108,22 +108,40 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
             listener.onResponse(null);
             return;
         }
-        resultHandler.flush(request, listener);
+        LOG.info("Result write worker flushing tenant [{}] with [{}] result requests", request.getTenantId(), request.numberOfActions());
+        resultHandler.flush(request, request.getTenantId(), listener);
     }
 
     @Override
     protected ActionListener<ResultBulkResponse> getResponseListener(List<ResultWriteRequestType> toProcess, BatchRequestType bulkRequest) {
         return ActionListener.wrap(adResultBulkResponse -> {
-            if (adResultBulkResponse == null || false == adResultBulkResponse.getRetryRequests().isPresent()) {
+            int retryRequests = requestCount(adResultBulkResponse == null ? Optional.empty() : adResultBulkResponse.getRetryRequests());
+            int missingResultIndexRequests = requestCount(
+                adResultBulkResponse == null ? Optional.empty() : adResultBulkResponse.getMissingResultIndexRequests()
+            );
+            LOG
+                .info(
+                    "Result write worker completed tenant [{}], requests [{}], retryRequests [{}], missingResultIndexRequests [{}]",
+                    bulkRequest.getTenantId(),
+                    toProcess.size(),
+                    retryRequests,
+                    missingResultIndexRequests
+                );
+            if (retryRequests == 0 && missingResultIndexRequests == 0) {
                 // all successful
                 return;
             }
 
-            enqueueRetryRequestIteration(adResultBulkResponse.getRetryRequests().get(), 0);
+            adResultBulkResponse.getRetryRequests().ifPresent(requests -> enqueueRetryRequestIteration(requests, 0));
+            adResultBulkResponse
+                .getMissingResultIndexRequests()
+                .ifPresent(requests -> recreateMissingCustomResultIndexAndRetryIteration(requests, 0));
         }, exception -> {
             if (ExceptionUtil.isRetryAble(exception)) {
                 // retry all of them
                 super.putAll(toProcess);
+            } else if (ExceptionUtil.isIndexNotFound(exception)) {
+                recreateCustomResultIndicesAndRetryRequests(toProcess, 0);
             } else if (ExceptionUtil.isOverloaded(exception)) {
                 LOG.error("too many get model checkpoint requests or shard not avialble");
                 setCoolDownStart();
@@ -134,6 +152,10 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
             }
             LOG.error("Fail to save results", exception);
         });
+    }
+
+    private int requestCount(Optional<List<IndexRequest>> requests) {
+        return requests.map(List::size).orElse(0);
     }
 
     private void enqueueRetryRequestIteration(List<IndexRequest> requestToRetry, int index) {
@@ -150,7 +172,7 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
         ResultType result = resultToRetry.get();
         String id = result.getConfigId();
         // not sure if we should cache or not. Don't cache to be safe.
-        nodeStateManager.getConfig(id, context, false, onGetConfig(requestToRetry, index, id, result));
+        nodeStateManager.getConfig(id, result.getTenantId(), context, false, onGetConfig(requestToRetry, index, id, result));
     }
 
     protected Optional<ResultType> getResult(DocWriteRequest<?> request) {
@@ -193,17 +215,7 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
             }
 
             Config config = configOptional.get();
-            super.put(
-                createResultWriteRequest(
-                    // expire based on execute start time
-                    resultToRetry.getExecutionStartTime().toEpochMilli() + config.getInferredFrequencyInMilliseconds(),
-                    id,
-                    resultToRetry.isHighPriority() ? RequestPriority.HIGH : RequestPriority.MEDIUM,
-                    resultToRetry,
-                    config.getCustomResultIndexOrAlias(),
-                    config.getFlattenResultIndexAlias()
-                )
-            );
+            requeueResult(resultToRetry, config);
 
             enqueueRetryRequestIteration(requestToRetry, index + 1);
 
@@ -211,6 +223,89 @@ public abstract class ResultWriteWorker<ResultType extends IndexableResult, Resu
             LOG.error(new ParameterizedMessage("fail to get config [{}]", id), exception);
             enqueueRetryRequestIteration(requestToRetry, index + 1);
         });
+    }
+
+    private void recreateMissingCustomResultIndexAndRetryIteration(List<IndexRequest> requestToRetry, int index) {
+        if (index >= requestToRetry.size()) {
+            return;
+        }
+        IndexRequest currentRequest = requestToRetry.get(index);
+        Optional<ResultType> resultToRetry = getResult(currentRequest);
+        if (false == resultToRetry.isPresent()) {
+            recreateMissingCustomResultIndexAndRetryIteration(requestToRetry, index + 1);
+            return;
+        }
+
+        ResultType result = resultToRetry.get();
+        String id = result.getConfigId();
+        nodeStateManager.getConfig(id, result.getTenantId(), context, false, ActionListener.wrap(configOptional -> {
+            if (false == configOptional.isPresent()) {
+                LOG.warn(new ParameterizedMessage("Config [{}] is not available.", id));
+                recreateMissingCustomResultIndexAndRetryIteration(requestToRetry, index + 1);
+                return;
+            }
+
+            Config config = configOptional.get();
+            String customResultIndex = config.getCustomResultIndexOrAlias();
+            if (customResultIndex == null || false == customResultIndex.equals(currentRequest.index())) {
+                LOG
+                    .warn(
+                        "Skip recreating custom result index for config [{}]. Failed index [{}], configured custom result index [{}]",
+                        id,
+                        currentRequest.index(),
+                        customResultIndex
+                    );
+                recreateMissingCustomResultIndexAndRetryIteration(requestToRetry, index + 1);
+                return;
+            }
+
+            String tenantId = result.getTenantId() == null ? config.getTenantId() : result.getTenantId();
+            resultHandler.initCustomResultIndexForRetry(customResultIndex, tenantId, ActionListener.wrap(r -> {
+                requeueResult(result, config);
+                recreateMissingCustomResultIndexAndRetryIteration(requestToRetry, index + 1);
+            }, exception -> {
+                LOG.error(new ParameterizedMessage("Fail to recreate custom result index [{}]", customResultIndex), exception);
+                nodeStateManager.setException(id, exception);
+                recreateMissingCustomResultIndexAndRetryIteration(requestToRetry, index + 1);
+            }));
+        }, exception -> {
+            LOG.error(new ParameterizedMessage("fail to get config [{}]", id), exception);
+            recreateMissingCustomResultIndexAndRetryIteration(requestToRetry, index + 1);
+        }));
+    }
+
+    private void recreateCustomResultIndicesAndRetryRequests(List<ResultWriteRequestType> requestsToRetry, int index) {
+        if (index >= requestsToRetry.size()) {
+            return;
+        }
+        ResultWriteRequestType request = requestsToRetry.get(index);
+        String customResultIndex = request.getResultIndex();
+        if (customResultIndex == null) {
+            recreateCustomResultIndicesAndRetryRequests(requestsToRetry, index + 1);
+            return;
+        }
+        resultHandler.initCustomResultIndexForRetry(customResultIndex, request.getTenantId(), ActionListener.wrap(r -> {
+            super.put(request);
+            recreateCustomResultIndicesAndRetryRequests(requestsToRetry, index + 1);
+        }, exception -> {
+            LOG.error(new ParameterizedMessage("Fail to recreate custom result index [{}]", customResultIndex), exception);
+            nodeStateManager.setException(request.getConfigId(), exception);
+            recreateCustomResultIndicesAndRetryRequests(requestsToRetry, index + 1);
+        }));
+    }
+
+    private void requeueResult(ResultType result, Config config) {
+        super.put(
+            createResultWriteRequest(
+                // expire based on execute start time
+                result.getExecutionStartTime().toEpochMilli() + config.getInferredFrequencyInMilliseconds(),
+                result.getConfigId(),
+                result.isHighPriority() ? RequestPriority.HIGH : RequestPriority.MEDIUM,
+                result,
+                config.getCustomResultIndexOrAlias(),
+                config.getFlattenResultIndexAlias()
+            )
+        );
     }
 
     protected abstract ResultWriteRequestType createResultWriteRequest(

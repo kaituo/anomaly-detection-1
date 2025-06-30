@@ -11,13 +11,20 @@
 
 package org.opensearch.ad.transport;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.ActionFilters;
+import org.opensearch.ad.client.ADNodeCommunicator;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyDetectorType;
+import org.opensearch.ad.rest.handler.store.ADDelegatingDataManagement;
 import org.opensearch.ad.stats.ADStats;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
@@ -26,55 +33,60 @@ import org.opensearch.search.aggregations.AggregationBuilders;
 import org.opensearch.search.aggregations.bucket.terms.StringTerms;
 import org.opensearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.stats.StatNames;
 import org.opensearch.timeseries.transport.BaseStatsTransportAction;
+import org.opensearch.timeseries.transport.StatsNodeResponse;
+import org.opensearch.timeseries.transport.StatsNodesResponse;
 import org.opensearch.timeseries.transport.StatsRequest;
 import org.opensearch.timeseries.transport.StatsResponse;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class StatsAnomalyDetectorTransportAction extends BaseStatsTransportAction {
     public static final String DETECTOR_TYPE_AGG = "detector_type_agg";
+    private final ADDelegatingDataManagement adDataManagement;
+    private final ADNodeCommunicator nodeCommunicator;
 
     @Inject
     public StatsAnomalyDetectorTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
-        Client client,
         ADStats adStats,
-        ClusterService clusterService
-
+        ClusterService clusterService,
+        ADDelegatingDataManagement adDataManagement,
+        DataAccess dataAccess,
+        RunContext runContext,
+        ADNodeCommunicator nodeCommunicator
     ) {
-        super(transportService, actionFilters, client, adStats, clusterService, StatsAnomalyDetectorAction.NAME);
+        super(transportService, actionFilters, adStats, clusterService, StatsAnomalyDetectorAction.NAME, dataAccess, runContext);
+        this.adDataManagement = adDataManagement;
+        this.nodeCommunicator = nodeCommunicator;
     }
 
     /**
      * Make async request to get the number of detectors in AnomalyDetector.ANOMALY_DETECTORS_INDEX if necessary
      * and, onResponse, gather the cluster statistics
      *
-     * @param client Client
      * @param listener MultiResponsesDelegateActionListener to be used once both requests complete
      * @param adStatsRequest Request containing stats to be retrieved
      */
     @Override
-    protected void getClusterStats(
-        Client client,
-        MultiResponsesDelegateActionListener<StatsResponse> listener,
-        StatsRequest adStatsRequest
-    ) {
+    protected void getClusterStats(MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest adStatsRequest) {
         StatsResponse adStatsResponse = new StatsResponse();
         if ((adStatsRequest.getStatsToBeRetrieved().contains(StatNames.DETECTOR_COUNT.getName())
             || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.SINGLE_STREAM_DETECTOR_COUNT.getName())
             || adStatsRequest.getStatsToBeRetrieved().contains(StatNames.HC_DETECTOR_COUNT.getName()))
-            && clusterService.state().getRoutingTable().hasIndex(ADCommonName.CONFIG_INDEX)) {
+            && adDataManagement.doesConfigIndexExist()) {
 
             TermsAggregationBuilder termsAgg = AggregationBuilders.terms(DETECTOR_TYPE_AGG).field(AnomalyDetector.DETECTOR_TYPE_FIELD);
             SearchRequest request = new SearchRequest()
                 .indices(ADCommonName.CONFIG_INDEX)
                 .source(new SearchSourceBuilder().aggregation(termsAgg).size(0).trackTotalHits(true));
 
-            client.search(request, ActionListener.wrap(r -> {
+            dataAccess.search(request, TenantContext.systemWide(), ActionListener.wrap(r -> {
                 StringTerms aggregation = r.getAggregations().get(DETECTOR_TYPE_AGG);
                 List<StringTerms.Bucket> buckets = aggregation.getBuckets();
                 long totalDetectors = r.getHits().getTotalHits().value();
@@ -114,16 +126,54 @@ public class StatsAnomalyDetectorTransportAction extends BaseStatsTransportActio
      * Make async request to get the Anomaly Detection statistics from each node and, onResponse, set the
      * ADStatsNodesResponse field of ADStatsResponse
      *
-     * @param client Client
      * @param listener MultiResponsesDelegateActionListener to be used once both requests complete
      * @param adStatsRequest Request containing stats to be retrieved
      */
     @Override
-    protected void getNodeStats(Client client, MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest adStatsRequest) {
-        client.execute(ADStatsNodesAction.INSTANCE, adStatsRequest, ActionListener.wrap(adStatsResponse -> {
+    protected void getNodeStats(MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest adStatsRequest) {
+        nodeCommunicator.stat(adStatsRequest, ActionListener.wrap(adStatsResponse -> {
             StatsResponse restADStatsResponse = new StatsResponse();
-            restADStatsResponse.setStatsNodesResponse(adStatsResponse);
+            restADStatsResponse.setStatsNodesResponse(mergeLocalNodeStats(adStatsRequest, adStatsResponse));
             listener.onResponse(restADStatsResponse);
         }, listener::onFailure));
+    }
+
+    private StatsNodesResponse mergeLocalNodeStats(StatsRequest request, StatsNodesResponse remoteStatsResponse) {
+        Map<String, Object> localNodeStats = getNodeStatsMap(request);
+        if (localNodeStats.isEmpty() || !shouldIncludeLocalNode(request) || localNodeAlreadyPresent(remoteStatsResponse)) {
+            return remoteStatsResponse;
+        }
+
+        List<StatsNodeResponse> mergedResponses = new ArrayList<>(remoteStatsResponse.getNodes());
+        mergedResponses.add(new StatsNodeResponse(clusterService.localNode(), localNodeStats));
+        return new StatsNodesResponse(remoteStatsResponse.getClusterName(), mergedResponses, remoteStatsResponse.failures());
+    }
+
+    private boolean shouldIncludeLocalNode(StatsRequest request) {
+        if (clusterService.localNode() == null) {
+            return false;
+        }
+
+        String[] requestedNodeIds = request.nodesIds();
+        if (requestedNodeIds == null || requestedNodeIds.length == 0) {
+            return true;
+        }
+
+        Set<String> requestedNodes = new HashSet<>(Arrays.asList(requestedNodeIds));
+        return requestedNodes.contains("_all")
+            || requestedNodes.contains(clusterService.localNode().getId())
+            || requestedNodes.contains(clusterService.localNode().getName());
+    }
+
+    private boolean localNodeAlreadyPresent(StatsNodesResponse statsResponse) {
+        if (clusterService.localNode() == null) {
+            return true;
+        }
+
+        return statsResponse
+            .getNodes()
+            .stream()
+            .map(StatsNodeResponse::getNode)
+            .anyMatch(node -> node != null && clusterService.localNode().getId().equals(node.getId()));
     }
 }

@@ -20,37 +20,39 @@ import java.util.Set;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.opensearch.action.search.SearchRequest;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.index.query.BoolQueryBuilder;
 import org.opensearch.index.query.QueryBuilder;
 import org.opensearch.index.query.QueryBuilders;
 import org.opensearch.index.reindex.BulkByScrollResponse;
-import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.DeleteByQueryRequest;
 import org.opensearch.search.builder.SearchSourceBuilder;
 import org.opensearch.security.spi.resources.client.ResourceSharingClient;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.annotation.SuppressForbidden;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.resources.ResourceSharingClientAccessor;
 import org.opensearch.timeseries.util.ParseUtils;
-import org.opensearch.timeseries.util.PluginClient;
 import org.opensearch.transport.TransportService;
 import org.opensearch.transport.client.Client;
 
+@SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: Only meant to be used in single-tenant.")
 public class DeleteAnomalyResultsTransportAction extends HandledTransportAction<DeleteByQueryRequest, BulkByScrollResponse> {
 
     private final Client client;
-    private final PluginClient pluginClient;
+    private final DataAccess dataAccess;
     private volatile Boolean filterEnabled;
     private final boolean shouldUseResourceAuthz;
     private static final Logger logger = LogManager.getLogger(DeleteAnomalyResultsTransportAction.class);
+    private final RunContext runContext;
 
     @Inject
     public DeleteAnomalyResultsTransportAction(
@@ -59,12 +61,14 @@ public class DeleteAnomalyResultsTransportAction extends HandledTransportAction<
         Settings settings,
         ClusterService clusterService,
         Client client,
-        PluginClient pluginClient
+        DataAccess dataAccess,
+        RunContext runContext
     ) {
         super(DeleteAnomalyResultsAction.NAME, transportService, actionFilters, DeleteByQueryRequest::new);
         this.client = client;
-        this.pluginClient = pluginClient;
-        this.shouldUseResourceAuthz = ParseUtils.shouldUseResourceAuthz(AD_RESOURCE_TYPE);
+        this.dataAccess = dataAccess;
+        this.runContext = runContext;
+        this.shouldUseResourceAuthz = ParseUtils.shouldUseResourceAuthz();
         filterEnabled = AD_FILTER_BY_BACKEND_ROLES.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_FILTER_BY_BACKEND_ROLES, it -> filterEnabled = it);
     }
@@ -72,53 +76,62 @@ public class DeleteAnomalyResultsTransportAction extends HandledTransportAction<
     @Override
     protected void doExecute(Task task, DeleteByQueryRequest request, ActionListener<BulkByScrollResponse> actionListener) {
         ActionListener<BulkByScrollResponse> listener = wrapRestActionListener(actionListener, FAIL_TO_DELETE_AD_RESULT);
-        delete(request, listener);
-    }
-
-    public void delete(DeleteByQueryRequest request, ActionListener<BulkByScrollResponse> listener) {
-        User user = ParseUtils.getUserContext(client);
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
-            validateRole(request, user, listener);
-        } catch (Exception e) {
-            logger.error(e);
-            listener.onFailure(e);
+        // We used the SearchRequest preference field to convey a tenant id if any
+        String tenantId = null;
+        if (request.getSearchRequest().preference() != null) {
+            tenantId = request.getSearchRequest().preference();
+            request.getSearchRequest().preference(null);
         }
+
+        delete(request, tenantId, listener);
     }
 
-    private void validateRole(DeleteByQueryRequest request, User user, ActionListener<BulkByScrollResponse> listener) {
+    public void delete(DeleteByQueryRequest request, String tenantId, ActionListener<BulkByScrollResponse> listener) {
+        User user = runContext.getUser();
+        runContext.runWithSystemAuth(() -> validateRole(request, user, tenantId, listener), exception -> {
+            logger.error(exception);
+            listener.onFailure(exception);
+        });
+    }
+
+    private void validateRole(DeleteByQueryRequest request, User user, String tenantId, ActionListener<BulkByScrollResponse> listener) {
         if (user == null || (!filterEnabled && !shouldUseResourceAuthz)) {
             // Case 1: user == null when 1. Security is disabled. 2. When user is super-admin
             // Case 2: If Security is enabled and filter is disabled and resource-sharing is also disabled, proceed with search.
-            client.execute(DeleteByQueryAction.INSTANCE, request, listener);
+            dataAccess.deleteByQuery(request, TenantContext.user(tenantId), listener);
         } else {
             try {
                 // Security is enabled and resource sharing access control is enabled
                 if (shouldUseResourceAuthz) {
-                    addAccessibleConfigsFilterAndDelete(request.getSearchRequest(), listener);
+                    addAccessibleConfigsFilterAndDelete(request, tenantId, listener);
                     return;
                 }
                 // Security is enabled and backend role filter is enabled
                 if (filterEnabled) {
                     ParseUtils.addUserBackendRolesFilter(user, request.getSearchRequest().source());
                 }
-                client.execute(DeleteByQueryAction.INSTANCE, request, listener);
+                dataAccess.deleteByQuery(request, TenantContext.user(tenantId), listener);
             } catch (Exception e) {
                 listener.onFailure(e);
             }
         }
     }
 
-    private void addAccessibleConfigsFilterAndDelete(SearchRequest request, ActionListener<BulkByScrollResponse> listener) {
+    private void addAccessibleConfigsFilterAndDelete(
+        DeleteByQueryRequest request,
+        String tenantId,
+        ActionListener<BulkByScrollResponse> listener
+    ) {
         logger.debug("Filtering result by accessible resources");
         ResourceSharingClient resourceSharingClient = ResourceSharingClientAccessor.getInstance().getResourceSharingClient();
-        SearchSourceBuilder searchSourceBuilder = request.source();
+        SearchSourceBuilder searchSourceBuilder = request.getSearchRequest().source();
         resourceSharingClient.getAccessibleResourceIds(AD_RESOURCE_TYPE, ActionListener.wrap(configIds -> {
             searchSourceBuilder.query(mergeWithAccessFilter(searchSourceBuilder.query(), configIds));
-            client.execute(DeleteByQueryAction.INSTANCE, request, listener);
+            dataAccess.deleteByQuery(request, TenantContext.user(tenantId), listener);
         }, failure -> {
             // do nothing to the source or return empty set?
             searchSourceBuilder.query(QueryBuilders.boolQuery().mustNot(QueryBuilders.matchAllQuery()));
-            client.execute(DeleteByQueryAction.INSTANCE, request, listener);
+            dataAccess.deleteByQuery(request, TenantContext.user(tenantId), listener);
         }));
     }
 

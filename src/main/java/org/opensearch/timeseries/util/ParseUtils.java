@@ -36,15 +36,11 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.search.join.ScoreMode;
 import org.opensearch.OpenSearchStatusException;
-import org.opensearch.action.get.GetRequest;
-import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.search.SearchResponse;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
-import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.xcontent.LoggingDeprecationHandler;
 import org.opensearch.common.xcontent.XContentType;
-import org.opensearch.commons.ConfigConstants;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
@@ -72,6 +68,8 @@ import org.opensearch.search.aggregations.bucket.histogram.DateHistogramInterval
 import org.opensearch.search.aggregations.bucket.range.DateRangeAggregationBuilder;
 import org.opensearch.search.aggregations.metrics.Max;
 import org.opensearch.search.builder.SearchSourceBuilder;
+import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.constant.CommonName;
@@ -81,7 +79,7 @@ import org.opensearch.timeseries.model.Feature;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.resources.ResourceSharingClientAccessor;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 
 import com.google.common.collect.ImmutableList;
 
@@ -472,20 +470,6 @@ public final class ParseUtils {
     }
 
     /**
-     * Generates a user string formed by the username, backend roles, roles and requested tenants separated by '|'
-     * (e.g., john||own_index,testrole|__user__, no backend role so you see two verticle line after john.).
-     * This is the user string format used internally in the OPENSEARCH_SECURITY_USER_INFO_THREAD_CONTEXT and may be
-     * parsed using User.parse(string).
-     * @param client Client containing user info. A public API request will fill in the user info in the thread context.
-     * @return parsed user object
-     */
-    public static User getUserContext(Client client) {
-        String userStr = client.threadPool().getThreadContext().getTransient(ConfigConstants.OPENSEARCH_SECURITY_USER_INFO_THREAD_CONTEXT);
-        logger.debug("Filtering result by " + userStr);
-        return User.parse(userStr);
-    }
-
-    /**
      * run the given function based on given user
      * @param <GetConfigResponseType> Config response type. Can be either GetAnomalyDetectorResponse or GetForecasterResponse
      * @param requestedUser requested user
@@ -493,8 +477,6 @@ public final class ParseUtils {
      * @param filterByEnabled filter by backend is enabled
      * @param listener listener. We didn't provide the generic type of listener and therefore can return anything using the listener.
      * @param function Function to execute
-     * @param client Client to OS.
-     * @param clusterService Cluster service of OS.
      * @param xContentRegistry Used to deserialize the get config response.
      * @param configTypeClass the class of the ConfigType, used by the ConfigFactory to parse the correct type of Config
      */
@@ -504,9 +486,10 @@ public final class ParseUtils {
         boolean filterByEnabled,
         ActionListener listener,
         Consumer<ConfigType> function,
-        Client client,
-        ClusterService clusterService,
         NamedXContentRegistry xContentRegistry,
+        StateManager stateManager,
+        DelegatingDataManagement<?> dataManagement,
+        String tenantId,
         Class<ConfigType> configTypeClass
     ) {
         try {
@@ -520,9 +503,9 @@ public final class ParseUtils {
                     configId,
                     listener,
                     function,
-                    client,
-                    clusterService,
-                    xContentRegistry,
+                    stateManager,
+                    dataManagement,
+                    tenantId,
                     filterByEnabled,
                     configTypeClass
                 );
@@ -533,122 +516,60 @@ public final class ParseUtils {
     }
 
     /**
-     * If filterByEnabled is true, get config and check if the user has permissions to access the config,
-     * then execute function; otherwise, get config and execute function
+     * If filterByEnabled is true, get config via state manager and check if the user has permissions to access the config,
+     * then execute function; otherwise, get config and execute function.
      * @param requestUser user from request
      * @param configId config id
      * @param listener action listener
      * @param function consumer function
-     * @param client client
-     * @param clusterService cluster service
-     * @param xContentRegistry XContent registry
+     * @param stateManager state manager to fetch config
+     * @param dataManagement delegating data management to check index existence
+     * @param tenantId tenant id when multi-tenancy is enabled; may be null otherwise
      * @param filterByBackendRole filter by backend role or not
      * @param configTypeClass the class of the ConfigType, used by the ConfigFactory to parse the correct type of Config
      */
+    @SuppressWarnings("unchecked")
     public static <ConfigType extends Config, GetConfigResponseType extends ActionResponse> void getConfig(
         User requestUser,
         String configId,
         ActionListener<GetConfigResponseType> listener,
         Consumer<ConfigType> function,
-        Client client,
-        ClusterService clusterService,
-        NamedXContentRegistry xContentRegistry,
+        StateManager stateManager,
+        DelegatingDataManagement<?> dataManagement,
+        String tenantId,
         boolean filterByBackendRole,
         Class<ConfigType> configTypeClass
     ) {
+        AnalysisType context = configTypeClass == AnomalyDetector.class ? AnalysisType.AD : AnalysisType.FORECAST;
         String configIndexName = configTypeClass == AnomalyDetector.class ? ADCommonName.CONFIG_INDEX : ForecastCommonName.CONFIG_INDEX;
-        if (clusterService.state().metadata().indices().containsKey(configIndexName)) {
-            GetRequest request = new GetRequest(configIndexName).id(configId);
-            client
-                .get(
-                    request,
-                    ActionListener
-                        .wrap(
-                            response -> onGetConfigResponse(
-                                response,
-                                requestUser,
-                                configId,
-                                listener,
-                                function,
-                                xContentRegistry,
-                                filterByBackendRole,
-                                configTypeClass
-                            ),
-                            exception -> {
-                                logger.error("Failed to get config: " + configId, exception);
-                                listener.onFailure(exception);
-                            }
-                        )
-                );
-        } else {
+        if (dataManagement != null && !dataManagement.doesConfigIndexExist()) {
             listener.onFailure(new IndexNotFoundException(configIndexName));
+            return;
         }
-    }
-
-    /**
-     * Processes a GetResponse by leveraging the factory method Config.parseConfig to
-     * appropriately parse the specified type of Config. The execution of the provided
-     * consumer function depends on the state of the 'filterByBackendRole' setting:
-     *
-     * - If 'filterByBackendRole' is disabled, the consumer function will be invoked
-     *   irrespective of the user's permissions.
-     *
-     * - If 'filterByBackendRole' is enabled, the consumer function will only be invoked
-     *   provided the user holds the requisite permissions.
-     *
-     * @param <ConfigType> The type of Config to be processed in this method, which extends from the Config base type.
-     * @param <GetConfigResponseType> The type of ActionResponse to be used, which extends from the ActionResponse base type.
-     * @param response The GetResponse from the getConfig request. This contains the information about the config that is to be processed.
-     * @param requestUser The User from the request. This user's permissions will be checked to ensure they have access to the config.
-     * @param configId The ID of the config. This is used for logging and error messages.
-     * @param listener The ActionListener to call if an error occurs. Any errors that occur during the processing of the config will be passed to this listener.
-     * @param function The Consumer function to apply to the ConfigType. If the user has permission to access the config, this function will be applied.
-     * @param xContentRegistry The XContentRegistry used to create the XContentParser. This is used to parse the response into a ConfigType.
-     * @param filterByBackendRole A boolean indicating whether to filter by backend role. If true, the user's backend roles will be checked to ensure they have access to the config.
-     * @param configTypeClass The class of the ConfigType, used by the ConfigFactory to parse the correct type of Config.
-     */
-    public static <ConfigType extends Config, GetConfigResponseType extends ActionResponse> void onGetConfigResponse(
-        GetResponse response,
-        User requestUser,
-        String configId,
-        ActionListener<GetConfigResponseType> listener,
-        Consumer<ConfigType> function,
-        NamedXContentRegistry xContentRegistry,
-        boolean filterByBackendRole,
-        Class<ConfigType> configTypeClass
-    ) {
-        if (response.isExists()) {
-            try (
-                XContentParser parser = RestHandlerUtils.createXContentParserFromRegistry(xContentRegistry, response.getSourceAsBytesRef())
-            ) {
-                ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                @SuppressWarnings("unchecked")
-                ConfigType config = (ConfigType) Config.parseConfig(configTypeClass, parser);
-
+        stateManager.getConfig(configId, tenantId, context, false, ActionListener.wrap(configOptional -> {
+            if (configOptional.isPresent()) {
+                ConfigType config = (ConfigType) configOptional.get();
                 User resourceUser = config.getUser();
-
-                // if resource sharing feature is available, request will be auto-evaluated, hence skip evaluation here
                 String resourceType = getResourceTypeFromClassName(configTypeClass.getSimpleName());
-                if (shouldUseResourceAuthz(resourceType)
+
+                if (shouldUseResourceAuthz()
                     || !filterByBackendRole
                     || checkUserPermissions(requestUser, resourceUser, configId)
                     || isAdmin(requestUser)) {
                     function.accept(config);
                 } else {
-                    logger.debug("User: " + requestUser.getName() + " does not have permissions to access config: " + configId);
                     listener
                         .onFailure(
                             new OpenSearchStatusException(CommonMessages.NO_PERMISSION_TO_ACCESS_CONFIG + configId, RestStatus.FORBIDDEN)
                         );
                 }
-
-            } catch (Exception e) {
-                logger.error("Fail to parse user out of config", e);
-                listener.onFailure(new OpenSearchStatusException(CommonMessages.FAIL_TO_GET_USER_INFO + configId, RestStatus.BAD_REQUEST));
+            } else {
+                listener.onFailure(new OpenSearchStatusException(FAIL_TO_FIND_CONFIG_MSG + configId, RestStatus.NOT_FOUND));
             }
-        } else {
-            listener.onFailure(new OpenSearchStatusException(FAIL_TO_FIND_CONFIG_MSG + configId, RestStatus.NOT_FOUND));
-        }
+        }, exception -> {
+            logger.error("Failed to get config: " + configId, exception);
+            listener.onFailure(exception);
+        }));
     }
 
     /**
@@ -709,12 +630,10 @@ public final class ParseUtils {
 
     /**
      * Checks whether to utilize new ResourceAuthz
-     * @param resourceType for which to decide whether to use resource authz
      * @return true if the resource-sharing feature is enabled, false otherwise.
      */
-    public static boolean shouldUseResourceAuthz(String resourceType) {
-        var client = ResourceSharingClientAccessor.getInstance().getResourceSharingClient();
-        return client != null && client.isFeatureEnabledForType(resourceType);
+    public static boolean shouldUseResourceAuthz() {
+        return ResourceSharingClientAccessor.getInstance().getResourceSharingClient() != null;
     }
 
     /**
@@ -725,7 +644,7 @@ public final class ParseUtils {
      */
     public static void verifyResourceAccessAndProcessRequest(String resourceType, Runnable onSuccess, Runnable fallbackOn501) {
         // Resource access will be auto-evaluated
-        if (shouldUseResourceAuthz(resourceType)) {
+        if (shouldUseResourceAuthz()) {
             onSuccess.run();
         } else {
             fallbackOn501.run();

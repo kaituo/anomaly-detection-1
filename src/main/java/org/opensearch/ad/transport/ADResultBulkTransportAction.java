@@ -31,16 +31,14 @@ import org.opensearch.common.inject.Inject;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.index.IndexingPressure;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.transport.ResultBulkTransportAction;
 import org.opensearch.timeseries.util.RestHandlerUtils;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public class ADResultBulkTransportAction extends ResultBulkTransportAction<AnomalyResult, ADResultWriteRequest, ADResultBulkRequest> {
 
     private static final Logger LOG = LogManager.getLogger(ADResultBulkTransportAction.class);
-    private final ClusterService clusterService;
-    private final Client client;
 
     @Inject
     public ADResultBulkTransportAction(
@@ -48,8 +46,8 @@ public class ADResultBulkTransportAction extends ResultBulkTransportAction<Anoma
         ActionFilters actionFilters,
         IndexingPressure indexingPressure,
         Settings settings,
-        ClusterService clusterService,
-        Client client
+        DataAccess dataAccess,
+        ClusterService clusterService
     ) {
         super(
             ADResultBulkAction.NAME,
@@ -57,14 +55,12 @@ public class ADResultBulkTransportAction extends ResultBulkTransportAction<Anoma
             actionFilters,
             indexingPressure,
             settings,
-            client,
+            dataAccess,
             AD_INDEX_PRESSURE_SOFT_LIMIT.get(settings),
             AD_INDEX_PRESSURE_HARD_LIMIT.get(settings),
             ADCommonName.ANOMALY_RESULT_INDEX_ALIAS,
             ADResultBulkRequest::new
         );
-        this.clusterService = clusterService;
-        this.client = client;
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_INDEX_PRESSURE_SOFT_LIMIT, it -> softLimit = it);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(AD_INDEX_PRESSURE_HARD_LIMIT, it -> hardLimit = it);
     }

@@ -15,19 +15,17 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.forecast.model.Forecaster;
 import org.opensearch.timeseries.AnalysisType;
+import org.opensearch.timeseries.client.DataAccess;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.model.ValidationIssueType;
 import org.opensearch.timeseries.rest.handler.ModelValidationActionHandler;
 import org.opensearch.timeseries.transport.ValidateConfigResponse;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
 
 public class ForecastModelValidationActionHandler extends ModelValidationActionHandler {
 
     public ForecastModelValidationActionHandler(
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
         ActionListener<ValidateConfigResponse> listener,
         Forecaster config,
         TimeValue requestTimeout,
@@ -40,8 +38,7 @@ public class ForecastModelValidationActionHandler extends ModelValidationActionH
     ) {
         super(
             clusterService,
-            client,
-            clientUtil,
+            dataAccess,
             listener,
             config,
             requestTimeout,

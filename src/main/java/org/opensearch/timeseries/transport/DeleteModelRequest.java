@@ -32,9 +32,14 @@ import org.opensearch.timeseries.constant.CommonName;
  */
 public class DeleteModelRequest extends BaseNodesRequest<DeleteModelRequest> implements ToXContentObject {
     private String configID;
+    private String tenantId;
 
     public String getAdID() {
         return configID;
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 
     public DeleteModelRequest() {
@@ -44,6 +49,7 @@ public class DeleteModelRequest extends BaseNodesRequest<DeleteModelRequest> imp
     public DeleteModelRequest(StreamInput in) throws IOException {
         super(in);
         this.configID = in.readString();
+        this.tenantId = in.readOptionalString();
     }
 
     public DeleteModelRequest(String adID, DiscoveryNode... nodes) {
@@ -51,10 +57,17 @@ public class DeleteModelRequest extends BaseNodesRequest<DeleteModelRequest> imp
         this.configID = adID;
     }
 
+    public DeleteModelRequest(String adID, String tenantId, DiscoveryNode... nodes) {
+        super(nodes);
+        this.configID = adID;
+        this.tenantId = tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeString(configID);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

@@ -3,10 +3,48 @@
  *  SPDX-License-Identifier: Apache-2.0
  */
 
+import java.net.ServerSocket
+
 apply plugin: 'jacoco'
 
 jacoco {
     toolVersion = "0.8.13"
+}
+
+def jacocoDir = project.layout.buildDirectory.get().file("jacoco").asFile.absolutePath
+def jmxServiceUrl = { int port -> "service:jmx:rmi:///jndi/rmi://127.0.0.1:${port}/jmxrmi" }
+def allocatedJmxPorts = [] as Set
+def allocateFreeJmxPort = {
+    while (true) {
+        def socket = new ServerSocket(0)
+        try {
+            def port = socket.localPort
+            if (allocatedJmxPorts.add(port)) {
+                return port
+            }
+        } finally {
+            socket.close()
+        }
+    }
+}
+def configureRestTaskCoverage = { task, clusterConfigs ->
+    task.jacoco {
+        jmx = true
+    }
+
+    task.systemProperty 'jacoco.dir', jacocoDir
+    task.systemProperty 'jacoco.exec.file', task.jacoco.destinationFile.absolutePath
+    task.systemProperty 'jmx.serviceUrl', clusterConfigs.collect { config -> jmxServiceUrl(config.port) }.join(',')
+
+    clusterConfigs.each { config ->
+        config.cluster.jvmArgs " ${task.jacoco.getAsJvmArg()}"
+        config.cluster.systemProperty 'com.sun.management.jmxremote', "true"
+        config.cluster.systemProperty 'com.sun.management.jmxremote.authenticate', "false"
+        config.cluster.systemProperty 'com.sun.management.jmxremote.port', "${config.port}"
+        config.cluster.systemProperty 'com.sun.management.jmxremote.rmi.port', "${config.port}"
+        config.cluster.systemProperty 'com.sun.management.jmxremote.ssl', "false"
+        config.cluster.systemProperty 'java.rmi.server.hostname', "127.0.0.1"
+    }
 }
 
 /**
@@ -19,31 +57,21 @@ jacoco {
  *  cluster is stopped and dump it to a file. Luckily our current security policy seems to allow this. This will also probably
  *  break if there are multiple nodes in the integTestCluster. But for now... it sorta works.
  */
-integTest {
-    jacoco {
-        jmx = true
-    }
-
-    systemProperty 'jacoco.dir', project.layout.buildDirectory.get().file("jacoco").asFile.absolutePath
-    systemProperty 'jmx.serviceUrl', "service:jmx:rmi:///jndi/rmi://127.0.0.1:7777/jmxrmi"
-}
+configureRestTaskCoverage(integTest, [[cluster: testClusters.integTest, port: allocateFreeJmxPort()]])
+configureRestTaskCoverage(
+    dualNodeMultiTenantIntegTest,
+    [
+        [cluster: testClusters.multiTenantCoordinatorCluster, port: allocateFreeJmxPort()],
+        [cluster: testClusters.multiTenantModelCluster, port: allocateFreeJmxPort()],
+    ]
+)
 
 jacocoTestReport {
-    dependsOn integTest, test
-    executionData.from = [integTest.jacoco.destinationFile, test.jacoco.destinationFile]
+    dependsOn integTest, test, dualNodeMultiTenantIntegTest
+    executionData.from = [integTest.jacoco.destinationFile, test.jacoco.destinationFile, dualNodeMultiTenantIntegTest.jacoco.destinationFile]
     reports {
         html.getRequired().set(true) // human readable
         csv.getRequired().set(true)
         xml.getRequired().set(true) // for coverlay
     }
-}
-
-testClusters.integTest {
-    jvmArgs " ${integTest.jacoco.getAsJvmArg()}"
-
-    systemProperty 'com.sun.management.jmxremote', "true"
-    systemProperty 'com.sun.management.jmxremote.authenticate', "false"
-    systemProperty 'com.sun.management.jmxremote.port', "7777"
-    systemProperty 'com.sun.management.jmxremote.ssl', "false"
-    systemProperty 'java.rmi.server.hostname', "127.0.0.1"
 }

@@ -12,6 +12,7 @@
 package org.opensearch.ad.model;
 
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -85,6 +86,9 @@ public class ADTask extends TimeSeriesTask {
             }
             this.parentTaskId = input.readOptionalString();
             this.estimatedMinutesLeft = input.readOptionalInt();
+            if (input.available() > 0) {
+                this.tenantId = input.readOptionalString();
+            }
         }
     }
 
@@ -134,6 +138,7 @@ public class ADTask extends TimeSeriesTask {
         }
         out.writeOptionalString(parentTaskId);
         out.writeOptionalInt(estimatedMinutesLeft);
+        out.writeOptionalString(tenantId);
     }
 
     public static Builder builder() {
@@ -186,6 +191,7 @@ public class ADTask extends TimeSeriesTask {
             adTask.parentTaskId = this.parentTaskId;
             adTask.estimatedMinutesLeft = this.estimatedMinutesLeft;
             adTask.user = this.user;
+            adTask.tenantId = this.tenantId != null ? this.tenantId : this.detector == null ? null : this.detector.getTenantId();
 
             return adTask;
         }
@@ -236,6 +242,7 @@ public class ADTask extends TimeSeriesTask {
         String parentTaskId = null;
         Integer estimatedMinutesLeft = null;
         User user = null;
+        String tenantId = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -312,6 +319,9 @@ public class ADTask extends TimeSeriesTask {
                 case TimeSeriesTask.USER_FIELD:
                     user = User.parse(parser);
                     break;
+                case TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -348,8 +358,12 @@ public class ADTask extends TimeSeriesTask {
                 detector.getFlattenResultIndexMapping(),
                 detector.getLastBreakingUIChangeTime(),
                 detector.getFrequency(),
-                detector.getAutoCreated()
+                detector.getAutoCreated(),
+                detector.getTenantId()
             );
+        if (anomalyDetector != null) {
+            anomalyDetector.setApplicationId(detector.getApplicationId());
+        }
         return new Builder()
             .taskId(parsedTaskId)
             .lastUpdateTime(lastUpdateTime)
@@ -374,6 +388,7 @@ public class ADTask extends TimeSeriesTask {
             .parentTaskId(parentTaskId)
             .estimatedMinutesLeft(estimatedMinutesLeft)
             .user(user)
+            .tenantId(tenantId)
             .build();
     }
 
@@ -411,5 +426,10 @@ public class ADTask extends TimeSeriesTask {
 
     public void setDetectionDateRange(DateRange detectionDateRange) {
         this.detectionDateRange = detectionDateRange;
+    }
+
+    @Override
+    public String getTenantId() {
+        return detector != null && detector.getTenantId() != null ? detector.getTenantId() : tenantId;
     }
 }

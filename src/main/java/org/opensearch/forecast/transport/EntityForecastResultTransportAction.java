@@ -14,8 +14,8 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.common.inject.Inject;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
-import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
 import org.opensearch.forecast.ml.ForecastColdStart;
 import org.opensearch.forecast.ml.ForecastModelManager;
@@ -30,10 +30,10 @@ import org.opensearch.forecast.ratelimit.ForecastColdEntityWorker;
 import org.opensearch.forecast.ratelimit.ForecastColdStartWorker;
 import org.opensearch.forecast.ratelimit.ForecastResultWriteWorker;
 import org.opensearch.forecast.ratelimit.ForecastSaveResultStrategy;
+import org.opensearch.forecast.rest.handler.store.ForecastDelegatingDataManagement;
 import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
-import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.AbstractEntityResultTransportAction;
@@ -61,7 +61,7 @@ import com.amazon.randomcutforest.parkservices.RCFCaster;
  * training and inference are connected by serial juxtaposition to limit resource usage.
  */
 public class EntityForecastResultTransportAction extends
-    AbstractEntityResultTransportAction<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastIndexManagement, ForecastCheckpointDao, ForecastCheckpointWriteWorker, ForecastColdStart, ForecastModelManager, ForecastPriorityCache, ForecastSaveResultStrategy, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastColdStartWorker, ForecastRealTimeInferencer, ForecastCheckpointReadWorker, ForecastColdEntityWorker> {
+    AbstractEntityResultTransportAction<RCFCaster, ForecastResult, RCFCasterResult, ForecastIndex, ForecastDelegatingDataManagement, ForecastCheckpointDao, ForecastColdStart, ForecastModelManager, ForecastPriorityCache, ForecastSaveResultStrategy, TaskCacheManager, ForecastTaskType, ForecastTask, ForecastTaskManager, ForecastCheckpointWriteWorker, ForecastColdStartWorker, ForecastRealTimeInferencer, ForecastCheckpointReadWorker, ForecastColdEntityWorker> {
 
     @Inject
     public EntityForecastResultTransportAction(
@@ -69,8 +69,7 @@ public class EntityForecastResultTransportAction extends
         TransportService transportService,
         CircuitBreakerService adCircuitBreakerService,
         ForecastCacheProvider entityCache,
-        NodeStateManager stateManager,
-        ForecastIndexManagement indexUtil,
+        StateManager stateManager,
         ForecastResultWriteWorker resultWriteQueue,
         ForecastCheckpointReadWorker checkpointReadQueue,
         ForecastColdEntityWorker coldEntityQueue,
@@ -85,7 +84,7 @@ public class EntityForecastResultTransportAction extends
             entityCache,
             stateManager,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             checkpointReadQueue,
             coldEntityQueue,
             inferencer

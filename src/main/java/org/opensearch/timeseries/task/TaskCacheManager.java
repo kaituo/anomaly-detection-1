@@ -13,6 +13,7 @@ import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.ad.task.ADTaskManager;
@@ -37,15 +38,15 @@ public class TaskCacheManager {
      * <p>Node: coordinating node</p>
      * Check {@link ForecastTaskManager#cleanChildTasksAndResultsOfDeletedTask()}
      */
-    private Queue<String> deletedTasks;
+    private Queue<Pair<String, String>> deletedTasks;
 
     protected volatile Integer maxCachedDeletedTask;
     /**
-     * This field is to cache deleted detector IDs. Hourly cron will poll this queue
+     * This field is to cache deleted config IDs and tenant IDs. Hourly cron will poll this queue
      * and clean AD results. Check {@link ADTaskManager#cleanResultOfDeletedConfig}
      * <p>Node: any data node servers delete detector request</p>
      */
-    protected Queue<String> deletedConfigs;
+    protected Queue<Pair<String, String>> deletedConfigs;
 
     public TaskCacheManager(Settings settings, ClusterService clusterService) {
         this.realtimeTaskCaches = new ConcurrentHashMap<>();
@@ -67,10 +68,11 @@ public class TaskCacheManager {
     /**
      * Add deleted task's id to deleted tasks queue.
      * @param taskId task id
+     * @param tenantId tenant id
      */
-    public void addDeletedTask(String taskId) {
+    public void addDeletedTask(String taskId, String tenantId) {
         if (deletedTasks.size() < maxCachedDeletedTask) {
-            deletedTasks.add(taskId);
+            deletedTasks.add(Pair.of(taskId, tenantId));
         }
     }
 
@@ -84,9 +86,9 @@ public class TaskCacheManager {
 
     /**
      * Poll one deleted task.
-     * @return task id
+     * @return pair of task id and tenant id
      */
-    public String pollDeletedTask() {
+    public Pair<String, String> pollDeletedTask() {
         return this.deletedTasks.poll();
     }
 
@@ -204,17 +206,17 @@ public class TaskCacheManager {
      * Add deleted config's id to deleted config queue.
      * @param configId config id
      */
-    public void addDeletedConfig(String configId) {
+    public void addDeletedConfig(String configId, String tenantId) {
         if (deletedConfigs.size() < maxCachedDeletedTask) {
-            deletedConfigs.add(configId);
+            deletedConfigs.add(Pair.of(configId, tenantId));
         }
     }
 
     /**
      * Poll one deleted config.
-     * @return config id
+     * @return pair of config id and tenant id
      */
-    public String pollDeletedConfig() {
+    public Pair<String, String> pollDeletedConfig() {
         return this.deletedConfigs.poll();
     }
 }

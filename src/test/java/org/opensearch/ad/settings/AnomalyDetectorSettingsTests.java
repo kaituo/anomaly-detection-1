@@ -125,6 +125,51 @@ public class AnomalyDetectorSettingsTests extends OpenSearchTestCase {
         );
     }
 
+    public void testConfigDocumentStoreFactorySettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.CONFIG_DOCUMENT_STORE_FACTORY_CLASS));
+    }
+
+    public void testCheckpointStoreFactorySettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.CHECKPOINT_STORE_FACTORY_CLASS));
+    }
+
+    public void testDataSourceEndpointResolverFactorySettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.DATA_SOURCE_ENDPOINT_RESOLVER_FACTORY_CLASS));
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.API_DATA_SOURCE_ENDPOINT_RESOLVER_FACTORY_CLASS));
+        assertTrue(plugin.getSettings().contains(TimeSeriesSettings.DATA_PLANE_ENDPOINT));
+        assertTrue(plugin.getSettings().contains(TimeSeriesSettings.API_DATA_PLANE_ENDPOINT));
+    }
+
+    public void testSqsAccountProviderSettingsReturned() {
+        assertTrue(plugin.getSettings().contains(TimeSeriesSettings.SQS_ACCOUNT_PROVIDER_TYPE));
+        assertTrue(plugin.getSettings().contains(TimeSeriesSettings.SQS_ACCOUNT_IDS));
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.SQS_ACCOUNT_RECONCILE_INTERVAL));
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.SQS_EXTRA_QUEUE_NAMES));
+    }
+
+    public void testEventBridgeCellIdHeaderSettingReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.EVENT_BRIDGE_CELL_ID_HEADER_NAME));
+    }
+
+    public void testEventBridgeRoleSettingsReturned() {
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.EVENT_BRIDGE_SCHEDULE_MANAGEMENT_ROLE_NAME));
+        assertTrue(plugin.getSettings().contains(AnomalyDetectorSettings.EVENT_BRIDGE_SQS_DELIVERY_ROLE_NAME));
+    }
+
+    public void testTimeSeriesStageSettingReturned() {
+        assertTrue(plugin.getSettings().contains(TimeSeriesSettings.STAGE));
+    }
+
+    public void testTimeSeriesDomainSettingReturned() {
+        assertTrue(plugin.getSettings().contains(TimeSeriesSettings.DOMAIN));
+    }
+
+    public void testTimeSeriesDomainSettingGetValue() {
+        Settings settings = Settings.builder().put(TimeSeriesSettings.DOMAIN.getKey(), " beta ").build();
+        assertEquals("beta", TimeSeriesSettings.DOMAIN.get(settings));
+        assertEquals("", TimeSeriesSettings.DOMAIN.get(Settings.EMPTY));
+    }
+
     public void testAllLegacyOpenDistroSettingsFallback() {
         assertEquals(
             AnomalyDetectorSettings.AD_MAX_SINGLE_ENTITY_ANOMALY_DETECTORS.get(Settings.EMPTY),
@@ -223,7 +268,7 @@ public class AnomalyDetectorSettingsTests extends OpenSearchTestCase {
 
         settings = Settings.builder().put("plugins.anomaly_detection.max_multi_entity_anomaly_detectors", 98).build();
         assertEquals(AnomalyDetectorSettings.AD_MAX_HC_ANOMALY_DETECTORS.get(settings), Integer.valueOf(98));
-        assertEquals(LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS.get(settings), Integer.valueOf(10));
+        assertEquals(LegacyOpenDistroAnomalyDetectorSettings.MAX_MULTI_ENTITY_ANOMALY_DETECTORS.get(settings), Integer.valueOf(1000));
 
         settings = Settings.builder().put("plugins.anomaly_detection.max_anomaly_features", 7).build();
         assertEquals(AnomalyDetectorSettings.MAX_ANOMALY_FEATURES.get(settings), Integer.valueOf(7));

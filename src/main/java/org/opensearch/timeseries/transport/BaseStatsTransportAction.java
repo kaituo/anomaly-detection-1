@@ -17,57 +17,56 @@ import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.cluster.service.ClusterService;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.stats.Stats;
 import org.opensearch.timeseries.util.MultiResponsesDelegateActionListener;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 public abstract class BaseStatsTransportAction extends HandledTransportAction<StatsRequest, StatsTimeSeriesResponse> {
     public final Logger logger = LogManager.getLogger(BaseStatsTransportAction.class);
 
-    protected final Client client;
     protected final Stats stats;
     protected final ClusterService clusterService;
+    protected final DataAccess dataAccess;
+    private final RunContext runContext;
 
     public BaseStatsTransportAction(
         TransportService transportService,
         ActionFilters actionFilters,
-        Client client,
         Stats stats,
         ClusterService clusterService,
-        String statsAction
-
+        String statsAction,
+        DataAccess dataAccess,
+        RunContext runContext
     ) {
         super(statsAction, transportService, actionFilters, StatsRequest::new);
-        this.client = client;
         this.stats = stats;
         this.clusterService = clusterService;
+        this.dataAccess = dataAccess;
+        this.runContext = runContext;
     }
 
     @Override
     protected void doExecute(Task task, StatsRequest request, ActionListener<StatsTimeSeriesResponse> actionListener) {
         ActionListener<StatsTimeSeriesResponse> listener = wrapRestActionListener(actionListener, CommonMessages.FAIL_TO_GET_STATS);
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
-            getStats(client, listener, request);
-        } catch (Exception e) {
-            logger.error(e);
-            listener.onFailure(e);
-        }
+        runContext.runWithSystemAuth(() -> getStats(listener, request), exception -> {
+            logger.error(exception);
+            listener.onFailure(exception);
+        });
     }
 
     /**
      * Make the 2 requests to get the node and cluster statistics
      *
-     * @param client Client
      * @param listener Listener to send response
      * @param statsRequest Request containing stats to be retrieved
      */
-    public void getStats(Client client, ActionListener<StatsTimeSeriesResponse> listener, StatsRequest statsRequest) {
+    public void getStats(ActionListener<StatsTimeSeriesResponse> listener, StatsRequest statsRequest) {
         // Use MultiResponsesDelegateActionListener to execute 2 async requests and create the response once they finish
         MultiResponsesDelegateActionListener<StatsResponse> delegateListener = new MultiResponsesDelegateActionListener<>(
             getRestStatsListener(listener),
@@ -76,8 +75,8 @@ public abstract class BaseStatsTransportAction extends HandledTransportAction<St
             false
         );
 
-        getClusterStats(client, delegateListener, statsRequest);
-        getNodeStats(client, delegateListener, statsRequest);
+        getClusterStats(delegateListener, statsRequest);
+        getNodeStats(delegateListener, statsRequest);
     }
 
     /**
@@ -112,15 +111,19 @@ public abstract class BaseStatsTransportAction extends HandledTransportAction<St
         return clusterStats;
     }
 
-    protected abstract void getClusterStats(
-        Client client,
-        MultiResponsesDelegateActionListener<StatsResponse> listener,
-        StatsRequest adStatsRequest
-    );
+    protected Map<String, Object> getNodeStatsMap(StatsRequest statsRequest) {
+        Map<String, Object> nodeStats = new HashMap<>();
+        Set<String> statsToBeRetrieved = statsRequest.getStatsToBeRetrieved();
+        stats
+            .getNodeStats()
+            .entrySet()
+            .stream()
+            .filter(s -> statsToBeRetrieved.contains(s.getKey()))
+            .forEach(s -> nodeStats.put(s.getKey(), s.getValue().getValue()));
+        return nodeStats;
+    }
 
-    protected abstract void getNodeStats(
-        Client client,
-        MultiResponsesDelegateActionListener<StatsResponse> listener,
-        StatsRequest adStatsRequest
-    );
+    protected abstract void getClusterStats(MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest adStatsRequest);
+
+    protected abstract void getNodeStats(MultiResponsesDelegateActionListener<StatsResponse> listener, StatsRequest adStatsRequest);
 }

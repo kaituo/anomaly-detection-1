@@ -23,9 +23,7 @@ import org.opensearch.ResourceAlreadyExistsException;
 import org.opensearch.action.admin.indices.create.CreateIndexResponse;
 import org.opensearch.action.bulk.BackoffPolicy;
 import org.opensearch.action.index.IndexRequest;
-import org.opensearch.action.index.IndexResponse;
 import org.opensearch.cluster.block.ClusterBlockLevel;
-import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
@@ -33,68 +31,59 @@ import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.concurrency.OpenSearchRejectedExecutionException;
 import org.opensearch.core.xcontent.XContentBuilder;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.TenantContext;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.IndexableResult;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.util.BulkUtil;
-import org.opensearch.timeseries.util.ClientUtil;
-import org.opensearch.timeseries.util.IndexUtils;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
 import org.opensearch.timeseries.util.RestHandlerUtils;
-import org.opensearch.transport.client.Client;
 
-public class ResultIndexingHandler<ResultType extends IndexableResult, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>> {
+public class ResultIndexingHandler<ResultType extends IndexableResult, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>> {
     private static final Logger LOG = LogManager.getLogger(ResultIndexingHandler.class);
     public static final String FAIL_TO_SAVE_ERR_MSG = "Fail to save %s: ";
     public static final String SUCCESS_SAVING_MSG = "Succeed in saving %s";
     public static final String CANNOT_SAVE_ERR_MSG = "Cannot save %s due to write block.";
     public static final String RETRY_SAVING_ERR_MSG = "Retry in saving %s: ";
 
-    protected final Client client;
-
+    protected final DataAccess dataAccess;
     protected final ThreadPool threadPool;
     protected final BackoffPolicy savingBackoffPolicy;
     protected final String defaultResultIndexName;
-    protected final IndexManagementType timeSeriesIndices;
+    protected final DataManagementType dataManagement;
     // whether save to a specific doc id or not. False by default.
     protected boolean fixedDoc;
-    protected final ClientUtil clientUtil;
-    protected final IndexUtils indexUtils;
-    protected final ClusterService clusterService;
+    protected final DiscoveryNodeSelector discoveryNodeSelector;
 
     /**
      * Abstract class for index operation.
      *
-     * @param client client to OpenSearch query
+     * @param dataAccess data access abstraction (transport or SDK)
      * @param settings accessor for node settings.
      * @param threadPool used to invoke specific threadpool to execute
      * @param indexName name of index to save to
-     * @param timeSeriesIndices anomaly detection indices
-     * @param clientUtil client wrapper
-     * @param indexUtils Index util classes
-     * @param clusterService accessor to ES cluster service
+     * @param dataManagement anomaly detection indices
+     * @param discoveryNodeSelector node selector for cluster operations
      */
     public ResultIndexingHandler(
-        Client client,
+        DataAccess dataAccess,
         Settings settings,
         ThreadPool threadPool,
         String indexName,
-        IndexManagementType timeSeriesIndices,
-        ClientUtil clientUtil,
-        IndexUtils indexUtils,
-        ClusterService clusterService,
+        DataManagementType dataManagement,
+        DiscoveryNodeSelector discoveryNodeSelector,
         Setting<TimeValue> backOffDelaySetting,
         Setting<Integer> maxRetrySetting
     ) {
-        this.client = client;
+        this.dataAccess = dataAccess;
         this.threadPool = threadPool;
         this.savingBackoffPolicy = BackoffPolicy.exponentialBackoff(backOffDelaySetting.get(settings), maxRetrySetting.get(settings));
         this.defaultResultIndexName = indexName;
-        this.timeSeriesIndices = timeSeriesIndices;
+        this.dataManagement = dataManagement;
         this.fixedDoc = false;
-        this.clientUtil = clientUtil;
-        this.indexUtils = indexUtils;
-        this.clusterService = clusterService;
+        this.discoveryNodeSelector = discoveryNodeSelector;
     }
 
     /**
@@ -114,17 +103,35 @@ public class ResultIndexingHandler<ResultType extends IndexableResult, IndexType
      * @param toSave Result to save
      * @param configId config id
      * @param indexOrAliasName custom index or alias name
+     * @param tenantId the tenant id for endpoint resolution; must not be {@code null}
+     *                 when indexOrAliasName is not null (custom result index)
      */
-    public void index(ResultType toSave, String configId, String indexOrAliasName) {
+    public void index(ResultType toSave, String configId, String indexOrAliasName, String tenantId) {
         if (indexOrAliasName != null) {
-            if (indexUtils.checkIndicesBlocked(clusterService.state(), ClusterBlockLevel.WRITE, indexOrAliasName)) {
-                LOG.warn(String.format(Locale.ROOT, CANNOT_SAVE_ERR_MSG, configId));
-                return;
-            }
-            // We create custom result index when creating a detector. Custom result index can be rolled over and thus we may need to
-            // create a new one.
-            if (!timeSeriesIndices.doesIndexExist(indexOrAliasName) && !timeSeriesIndices.doesAliasExist(indexOrAliasName)) {
-                timeSeriesIndices.initCustomResultIndexDirectly(indexOrAliasName, ActionListener.wrap(response -> {
+            indexToCustomIndex(toSave, configId, indexOrAliasName, tenantId);
+        } else {
+            indexToDefaultIndex(toSave, configId);
+        }
+    }
+
+    private void indexToCustomIndex(ResultType toSave, String configId, String indexOrAliasName, String tenantId) {
+        discoveryNodeSelector
+            .hasIndicesBlock(tenantId, ClusterBlockLevel.WRITE, new String[] { indexOrAliasName }, ActionListener.wrap(hasBlock -> {
+                if (hasBlock) {
+                    LOG.warn(String.format(Locale.ROOT, CANNOT_SAVE_ERR_MSG, configId));
+                    return;
+                }
+                proceedWithCustomIndex(toSave, configId, indexOrAliasName);
+            }, e -> { LOG.error(String.format(Locale.ROOT, "Failed to check indices block for %s", indexOrAliasName), e); }));
+    }
+
+    private void proceedWithCustomIndex(ResultType toSave, String configId, String indexOrAliasName) {
+        String tenantId = toSave.getTenantId();
+        // We create custom result index when creating a detector. Custom result index can be rolled over and thus we may need to
+        // create a new one.
+        dataManagement.doesResultIndexOrAliasExists(indexOrAliasName, ActionListener.wrap(exists -> {
+            if (exists == false) {
+                dataManagement.initCustomResultIndexDirectly(indexOrAliasName, ActionListener.wrap(response -> {
                     if (response.isAcknowledged()) {
                         save(toSave, configId, indexOrAliasName);
                     } else {
@@ -145,41 +152,47 @@ public class ResultIndexingHandler<ResultType extends IndexableResult, IndexType
                     } else {
                         LOG.error(String.format(Locale.ROOT, "cannot create result index %s", indexOrAliasName), exception);
                     }
-                }));
-            } else {
-                timeSeriesIndices.validateResultIndexMapping(indexOrAliasName, ActionListener.wrap(valid -> {
-                    if (!valid) {
-                        LOG.error("wrong index mapping of custom result index");
-                    } else {
-                        save(toSave, configId, indexOrAliasName);
-                    }
-                }, exception -> { LOG.error(String.format(Locale.ROOT, "cannot validate result index %s", indexOrAliasName), exception); })
-                );
-            }
-        } else {
-            if (indexUtils.checkIndicesBlocked(clusterService.state(), ClusterBlockLevel.WRITE, this.defaultResultIndexName)) {
-                LOG.warn(String.format(Locale.ROOT, CANNOT_SAVE_ERR_MSG, configId));
+                }), tenantId);
                 return;
             }
-            if (!timeSeriesIndices.doesDefaultResultIndexExist()) {
-                timeSeriesIndices
-                    .initDefaultResultIndexDirectly(
-                        ActionListener.wrap(initResponse -> onCreateIndexResponse(initResponse, toSave, configId), exception -> {
-                            if (ExceptionsHelper.unwrapCause(exception) instanceof ResourceAlreadyExistsException) {
-                                // It is possible the index has been created while we sending the create request
-                                save(toSave, configId);
-                            } else {
-                                LOG
-                                    .error(
-                                        String.format(Locale.ROOT, "Unexpected error creating index %s", defaultResultIndexName),
-                                        exception
-                                    );
-                            }
-                        })
-                    );
-            } else {
-                save(toSave, configId);
-            }
+            dataManagement.validateResultIndexMapping(indexOrAliasName, ActionListener.wrap(valid -> {
+                if (!valid) {
+                    LOG.error("wrong index mapping of custom result index");
+                } else {
+                    save(toSave, configId, indexOrAliasName);
+                }
+            }, exception -> { LOG.error(String.format(Locale.ROOT, "cannot validate result index %s", indexOrAliasName), exception); }),
+                tenantId
+            );
+        }, exception -> { LOG.error(String.format(Locale.ROOT, "cannot check result index %s", indexOrAliasName), exception); }), tenantId);
+    }
+
+    private void indexToDefaultIndex(ResultType toSave, String configId) {
+        discoveryNodeSelector
+            .hasIndicesBlock(null, ClusterBlockLevel.WRITE, new String[] { this.defaultResultIndexName }, ActionListener.wrap(hasBlock -> {
+                if (hasBlock) {
+                    LOG.warn(String.format(Locale.ROOT, CANNOT_SAVE_ERR_MSG, configId));
+                    return;
+                }
+                proceedWithDefaultIndex(toSave, configId);
+            }, e -> { LOG.error(String.format(Locale.ROOT, "Failed to check indices block for %s", defaultResultIndexName), e); }));
+    }
+
+    private void proceedWithDefaultIndex(ResultType toSave, String configId) {
+        if (!dataManagement.doesDefaultResultIndexExist()) {
+            dataManagement
+                .initDefaultResultIndexDirectly(
+                    ActionListener.wrap(initResponse -> onCreateIndexResponse(initResponse, toSave, configId), exception -> {
+                        if (ExceptionsHelper.unwrapCause(exception) instanceof ResourceAlreadyExistsException) {
+                            // It is possible the index has been created while we sending the create request
+                            save(toSave, configId);
+                        } else {
+                            LOG.error(String.format(Locale.ROOT, "Unexpected error creating index %s", defaultResultIndexName), exception);
+                        }
+                    })
+                );
+        } else {
+            save(toSave, configId);
         }
     }
 
@@ -209,29 +222,17 @@ public class ResultIndexingHandler<ResultType extends IndexableResult, IndexType
                 indexRequest.id(detectorId);
             }
 
-            saveIteration(indexRequest, detectorId, savingBackoffPolicy.iterator());
+            saveIteration(indexRequest, detectorId, savingBackoffPolicy.iterator(), toSave.getTenantId());
         } catch (Exception e) {
             LOG.error(String.format(Locale.ROOT, "Failed to save %s", indexName), e);
             throw new TimeSeriesException(detectorId, String.format(Locale.ROOT, "Cannot save %s", indexName));
         }
     }
 
-    void saveIteration(IndexRequest indexRequest, String configId, Iterator<TimeValue> backoff) {
-        clientUtil.<IndexRequest, IndexResponse>asyncRequest(indexRequest, client::index, ActionListener.<IndexResponse>wrap(response -> {
+    void saveIteration(IndexRequest indexRequest, String configId, Iterator<TimeValue> backoff, String tenantId) {
+        dataAccess.index(indexRequest, TenantContext.user(tenantId), ActionListener.wrap(response -> {
             LOG.debug(String.format(Locale.ROOT, SUCCESS_SAVING_MSG, configId));
         }, exception -> {
-            // OpenSearch has a thread pool and a queue for write per node. A thread
-            // pool will have N number of workers ready to handle the requests. When a
-            // request comes and if a worker is free , this is handled by the worker. Now by
-            // default the number of workers is equal to the number of cores on that CPU.
-            // When the workers are full and there are more write requests, the request
-            // will go to queue. The size of queue is also limited. If by default size is,
-            // say, 200 and if there happens more parallel requests than this, then those
-            // requests would be rejected as you can see OpenSearchRejectedExecutionException.
-            // So OpenSearchRejectedExecutionException is the way that OpenSearch tells us that
-            // it cannot keep up with the current indexing rate.
-            // When it happens, we should pause indexing a bit before trying again, ideally
-            // with randomized exponential backoff.
             Throwable cause = ExceptionsHelper.unwrapCause(exception);
             if (!(cause instanceof OpenSearchRejectedExecutionException) || !backoff.hasNext()) {
                 LOG.error(String.format(Locale.ROOT, FAIL_TO_SAVE_ERR_MSG, configId), cause);
@@ -240,7 +241,7 @@ public class ResultIndexingHandler<ResultType extends IndexableResult, IndexType
                 LOG.warn(String.format(Locale.ROOT, RETRY_SAVING_ERR_MSG, configId), cause);
                 threadPool
                     .schedule(
-                        () -> saveIteration(BulkUtil.cloneIndexRequest(indexRequest), configId, backoff),
+                        () -> saveIteration(BulkUtil.cloneIndexRequest(indexRequest), configId, backoff, tenantId),
                         nextDelay,
                         ThreadPool.Names.SAME
                     );

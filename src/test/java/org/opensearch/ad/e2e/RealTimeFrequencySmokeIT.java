@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Logger;
 import org.opensearch.ad.AbstractADSyntheticDataTest;
+import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.client.Request;
 import org.opensearch.client.Response;
 import org.opensearch.client.RestClient;
 import org.opensearch.core.rest.RestStatus;
@@ -23,7 +25,6 @@ import org.opensearch.timeseries.TestHelpers;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.gson.JsonObject;
 
 /**
@@ -69,7 +70,7 @@ public class RealTimeFrequencySmokeIT extends AbstractADSyntheticDataTest {
             DATA_SIZE
         ).data;
 
-        ingestUniformSingleFeatureData(-1, data, DATASET, CATEGORY_FIELD);
+        ingestData(data);
 
         // Extract the first and last data item's timestamps as begin and end variables
         String firstTimestampStr = data.get(0).get("timestamp").getAsString();
@@ -99,13 +100,15 @@ public class RealTimeFrequencySmokeIT extends AbstractADSyntheticDataTest {
                     + " \"detection_interval\": { \"period\": { \"interval\": %d, \"unit\": \"MINUTES\" } },"
                     + " \"window_delay\": { \"period\": { \"interval\": %d, \"unit\": \"MINUTES\" } },"
                     + " \"frequency\": { \"period\": { \"interval\": %d, \"unit\": \"MINUTES\" } },"
+                    + " %s"
                     + " \"schema_version\": 2"
                     + " }",
-                DATASET,
+                datasetName(),
                 CATEGORY_FIELD,
                 INTERVAL_MINUTES,
                 windowDelayMinutes,
-                FREQUENCY_MINUTES
+                FREQUENCY_MINUTES,
+                customResultIndexField()
             );
 
         String detectorId = createDetector(client, detectorJson);
@@ -168,17 +171,42 @@ public class RealTimeFrequencySmokeIT extends AbstractADSyntheticDataTest {
         return Instant.ofEpochMilli(Long.parseLong(timestampStr));
     }
 
+    protected RestClient ingestClient() throws IOException {
+        return client();
+    }
+
+    protected String datasetName() {
+        return DATASET;
+    }
+
+    protected String customResultIndexField() {
+        String tenantId = tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            return "";
+        }
+        String resultIndex = ADCommonName.CUSTOM_RESULT_INDEX_PREFIX + randomAlphaOfLength(10).toLowerCase(Locale.ROOT);
+        return String.format(Locale.ROOT, "\"result_index\": \"%s\",", resultIndex);
+    }
+
+    protected void ingestData(List<JsonObject> data) throws Exception {
+        String mapping = String
+            .format(
+                Locale.ROOT,
+                "{ \"mappings\": { \"properties\": { \"timestamp\": { \"type\":"
+                    + "\"date\""
+                    + "},"
+                    + " \"data\": { \"type\": \"double\" },"
+                    + "\"%s\": { \"type\": \"keyword\"} } } }",
+                CATEGORY_FIELD
+            );
+
+        bulkIndexData(data, datasetName(), ingestClient(), mapping, data.size());
+    }
+
     @SuppressWarnings("unchecked")
     private int getLocalAdExecuteRequestCount(RestClient client) throws IOException {
-        Response statsResponse = TestHelpers
-            .makeRequest(
-                client,
-                "GET",
-                TimeSeriesAnalyticsPlugin.LEGACY_AD_BASE + "/_local/stats/ad_execute_request_count",
-                ImmutableMap.of(),
-                "",
-                null
-            );
+        Request request = tenantAwareRequest("GET", TimeSeriesAnalyticsPlugin.AD_BASE_URI + "/stats/ad_execute_request_count");
+        Response statsResponse = client.performRequest(request);
 
         assertEquals("Get stats failed", RestStatus.OK, TestHelpers.restStatus(statsResponse));
 

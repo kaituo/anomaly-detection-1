@@ -12,36 +12,31 @@
 package org.opensearch.ad;
 
 import org.opensearch.ad.constant.ADCommonName;
-import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
 import org.opensearch.ad.settings.ADNumericSetting;
-import org.opensearch.ad.transport.ADEntityProfileAction;
-import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.EntityProfileRunner;
-import org.opensearch.timeseries.util.SecurityClientUtil;
-import org.opensearch.transport.client.Client;
+import org.opensearch.timeseries.StateManager;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
 
-public class ADEntityProfileRunner extends EntityProfileRunner<ADEntityProfileAction> {
+public class ADEntityProfileRunner extends EntityProfileRunner {
 
     public ADEntityProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
-        NamedXContentRegistry xContentRegistry,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager stateManager,
         long requiredSamples
     ) {
         super(
-            client,
-            clientUtil,
-            xContentRegistry,
+            nodeCommunicator,
+            dataAccess,
+            stateManager,
             requiredSamples,
-            AnomalyDetector::parse,
             ADNumericSetting.maxCategoricalFields(),
             AnalysisType.AD,
-            ADEntityProfileAction.INSTANCE,
             ADCommonName.ANOMALY_RESULT_INDEX_ALIAS,
-            AnomalyResult.DETECTOR_ID_FIELD,
-            ADCommonName.CONFIG_INDEX
+            AnomalyResult.DETECTOR_ID_FIELD
         );
     }
 }

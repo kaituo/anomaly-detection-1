@@ -234,6 +234,7 @@ public class AnomalyResultTransportActionTests extends ADIntegTestCase {
             null,
             Instant.now(),
             interval,
+            null,
             null
         );
     }
@@ -272,12 +273,13 @@ public class AnomalyResultTransportActionTests extends ADIntegTestCase {
             null,
             Instant.now(),
             interval,
+            null,
             null
         );
     }
 
     private void assertErrorMessage(String adId, String errorMessage) {
-        AnomalyResultRequest resultRequest = new AnomalyResultRequest(adId, start, end);
+        AnomalyResultRequest resultRequest = new AnomalyResultRequest(adId, start, end, null);
         try {
             Thread.sleep(1000); // sleep some time to build AD version hash ring
         } catch (InterruptedException e) {

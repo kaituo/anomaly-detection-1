@@ -33,7 +33,7 @@ public class ADStatsITTests extends OpenSearchIntegTestCase {
     }
 
     public void testNormalADStats() throws ExecutionException, InterruptedException {
-        StatsRequest adStatsRequest = new StatsRequest(new String[0]);
+        StatsRequest adStatsRequest = new StatsRequest(null, new String[0]);
 
         StatsNodesResponse response = client().execute(ADStatsNodesAction.INSTANCE, adStatsRequest).get();
         assertTrue("getting stats failed", !response.hasFailures());

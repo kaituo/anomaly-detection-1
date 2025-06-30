@@ -212,7 +212,8 @@ public class AnomalyResult extends IndexableResult {
         Optional<Entity> entity,
         User user,
         Integer schemaVersion,
-        String modelId
+        String modelId,
+        String tenantId
     ) {
         this(
             detectorId,
@@ -235,7 +236,8 @@ public class AnomalyResult extends IndexableResult {
             null,
             null,
             null,
-            null
+            null,
+            tenantId
         );
     }
 
@@ -260,7 +262,8 @@ public class AnomalyResult extends IndexableResult {
         List<DataByFeatureId> pastValues,
         List<ExpectedValueList> expectedValuesList,
         Double threshold,
-        List<FeatureImputed> featureImputed
+        List<FeatureImputed> featureImputed,
+        String tenantId
     ) {
         super(
             configId,
@@ -273,7 +276,8 @@ public class AnomalyResult extends IndexableResult {
             entity,
             user,
             schemaVersion,
-            taskId
+            taskId,
+            tenantId
         );
         this.confidence = confidence;
         this.anomalyScore = anomalyScore;
@@ -341,7 +345,8 @@ public class AnomalyResult extends IndexableResult {
         Double threshold,
         double[] currentData,
         boolean[] featureImputed,
-        List<Rule> rules
+        List<Rule> rules,
+        String tenantId
     ) {
         List<DataByFeatureId> convertedRelevantAttribution = null;
         List<DataByFeatureId> convertedPastValuesList = null;
@@ -493,7 +498,8 @@ public class AnomalyResult extends IndexableResult {
             convertedPastValuesList,
             convertedExpectedValues,
             threshold,
-            featureImputedList
+            featureImputedList,
+            tenantId
         );
     }
 
@@ -713,6 +719,7 @@ public class AnomalyResult extends IndexableResult {
         List<ExpectedValueList> expectedValues = new ArrayList<>();
         Double threshold = null;
         List<FeatureImputed> featureImputed = null;
+        String tenantId = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -799,6 +806,9 @@ public class AnomalyResult extends IndexableResult {
                         featureImputed.add(FeatureImputed.parse(parser));
                     }
                     break;
+                case CommonName.TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -826,7 +836,8 @@ public class AnomalyResult extends IndexableResult {
             pastValues,
             expectedValues,
             threshold,
-            featureImputed
+            featureImputed,
+            tenantId
         );
     }
 
@@ -1010,6 +1021,7 @@ public class AnomalyResult extends IndexableResult {
             Optional.empty(),
             null,
             CommonValue.NO_SCHEMA_VERSION,
+            null,
             null
         );
     }

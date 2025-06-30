@@ -6,9 +6,14 @@
 package org.opensearch.timeseries.settings;
 
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.function.Function;
 
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.timeseries.constant.CommonName;
 
 public class TimeSeriesSettings {
 
@@ -245,6 +250,15 @@ public class TimeSeriesSettings {
     // Index setting
     // ======================================
     public static int MAX_UPDATE_RETRY_TIMES = 10_000;
+    public static final Setting<Integer> MAX_CONCURRENT_SDK_INDEX_MAPPING_UPDATES = Setting
+        .intSetting(
+            "plugins.timeseries.max_concurrent_sdk_index_mapping_updates",
+            5,
+            1,
+            50,
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
 
     // max multiple of interval for frequency
     public static final int MAX_FREQUENCY_MULTIPLE = 10_000;
@@ -299,4 +313,209 @@ public class TimeSeriesSettings {
     // Suggest setting
     // ======================================
     public static final float WINDOW_DELAY_RATIO = 1.2f;
+
+    // ======================================
+    // microservice setting
+    // ======================================
+    public static final Setting<TimeValue> CLOUD_MAP_TTL = Setting
+        .positiveTimeSetting(
+            "plugins.timeseries.cloud_map_ttl",
+            TimeValue.timeValueSeconds(30),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    public static final Setting<TimeValue> CLUSTER_MEMBERSHIP_READER_TTL = Setting
+        .positiveTimeSetting(
+            "plugins.timeseries.cluster_membership_reader_ttl",
+            TimeValue.timeValueSeconds(30),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    public static final Setting<Boolean> CLOUDWATCH_HEAP_METRICS_ENABLED = Setting
+        .boolSetting("plugins.timeseries.cloudwatch.heap_metrics.enabled", false, Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<String> CLOUDWATCH_METRICS_NAMESPACE = Setting
+        .simpleString(
+            "plugins.timeseries.cloudwatch.metrics.namespace",
+            "OpenSearch/AnomalyDetection",
+            Setting.Property.NodeScope,
+            Setting.Property.Final
+        );
+
+    public static final Setting<String> CLOUDWATCH_METRICS_CLUSTER_NAME = Setting
+        .simpleString("plugins.timeseries.cloudwatch.metrics.cluster_name", "", Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<String> CLOUDWATCH_METRICS_SERVICE_NAME = Setting
+        .simpleString("plugins.timeseries.cloudwatch.metrics.service_name", "", Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<TimeValue> CLOUDWATCH_HEAP_METRICS_INTERVAL = Setting
+        .positiveTimeSetting(
+            "plugins.timeseries.cloudwatch.heap_metrics.interval",
+            TimeValue.timeValueMinutes(1),
+            Setting.Property.NodeScope,
+            Setting.Property.Final
+        );
+
+    public static final Setting<Boolean> CLOUDWATCH_SQS_METRICS_ENABLED = Setting
+        .boolSetting("plugins.timeseries.cloudwatch.sqs_metrics.enabled", false, Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<TimeValue> CLOUDWATCH_SQS_METRICS_INTERVAL = Setting
+        .positiveTimeSetting(
+            "plugins.timeseries.cloudwatch.sqs_metrics.interval",
+            TimeValue.timeValueMinutes(1),
+            Setting.Property.NodeScope,
+            Setting.Property.Final
+        );
+
+    // Role names
+    public static final String MASTER_ROLE = "master";
+    public static final String COORDINATOR_ROLE = "coordinator";
+    public static final String MODEL_ROLE = "model";
+
+    private static final Set<String> VALID_ROLES = Set.of(MASTER_ROLE, COORDINATOR_ROLE, MODEL_ROLE);
+
+    public static final Setting<List<String>> NODE_ROLE = Setting
+        .listSetting(
+            CommonName.SETTING_PREFIX + "node.roles",
+            List.of(), // Default to empty roles
+            s -> s, // parser
+            roles -> { // validator
+                if (new HashSet<>(roles).size() != roles.size()) {
+                    throw new IllegalArgumentException("Duplicate roles found: " + roles);
+                }
+                for (String role : roles) {
+                    if (!VALID_ROLES.contains(role)) {
+                        throw new IllegalArgumentException("Invalid role: " + role + ". Valid roles are " + VALID_ROLES);
+                    }
+                }
+            },
+            Setting.Property.NodeScope,
+            // cannot change at runtime
+            // should not be dynamic as our threadpool initialization depends on this setting
+            // there is no way to change threadpool at runtime.
+            Setting.Property.Final
+        );
+
+    /** This setting sets the service region */
+    public static final Setting<String> REGION = Setting
+        .simpleString("plugins.timeseries.region", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** Deployment stage (e.g., "development", "beta", "prod") */
+    public static final Setting<String> STAGE = new Setting<>(
+        "plugins.timeseries.stage",
+        "",
+        value -> value == null ? "" : value.trim(),
+        Setting.Property.NodeScope,
+        Setting.Property.Final
+    );
+
+    /** Deployment domain (e.g., "development", "beta", "gamma", "prod") */
+    public static final Setting<String> DOMAIN = new Setting<>(
+        "plugins.timeseries.domain",
+        "",
+        value -> value == null ? "" : value.trim(),
+        Setting.Property.NodeScope,
+        Setting.Property.Final
+    );
+
+    /** Cloud Map namespace (e.g., "prod") */
+    public static final Setting<String> CLOUD_MAP_NAMESPACE = Setting
+        .simpleString("plugins.timeseries.cloud_map_namespace", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** Cloud Map service name (e.g., "metrics-worker") */
+    public static final Setting<String> CLOUD_MAP_SERVICE = Setting
+        .simpleString("plugins.timeseries.cloud_map_service", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** DynamoDB table name (e.g., "TaskDispatch") */
+    public static final Setting<String> CLOUD_MAP_TABLE_NAME = Setting
+        .simpleString("plugins.timeseries.cloud_map_table_name", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /**
+     * Shared secret used to authenticate internal HTTP requests between coordinator/model nodes
+     * for multi-tenant internal APIs.
+     *
+     * This is a static bearer token, so all participating nodes must be configured with the same
+     * value. It provides basic defense in depth by rejecting callers that can reach the endpoint
+     * but do not know the secret. It is not strong authentication: if traffic is intercepted or a
+     * node/task is compromised, the token can be replayed. Use transport security such as TLS/mTLS
+     * to protect these internal calls.
+     */
+    public static final Setting<String> INTERNAL_API_SHARED_SECRET = Setting
+        .simpleString("plugins.timeseries.internal_api_shared_secret", Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<String> DATA_PLANE_ENDPOINT_CONTEXT_KEY = Setting
+        .simpleString("plugins.timeseries.dataplane.endpoint.context_key", "", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /**
+     * Static data-plane endpoint settings used by test/development resolver paths.
+     * <p>
+     * {@link #DATA_PLANE_ENDPOINT} represents the actual customer data-plane endpoint
+     * (for example, {@code https://xyz.us-east-1.aoss.amazonaws.com}). When
+     * {@code StaticDataSourceEndpointResolverFactory} is selected through
+     * {@code plugins.anomaly_detection.data_source_endpoint_resolver_factory_class},
+     * that factory returns this endpoint for every tenant. In production, the
+     * non-static data-source resolver can resolve the same customer endpoint from
+     * tenant/config metadata instead.
+     * <p>
+     * {@link #API_DATA_PLANE_ENDPOINT} is only needed by
+     * {@code StaticApiDataSourceEndpointResolverFactory}, which hardcodes a separate
+     * API-path endpoint. This is a convenience for static integration tests, such as
+     * tests where the API endpoint is a local signing proxy that forwards to the
+     * customer AOSS endpoint. It is not a required runtime concept when the inbound
+     * proxy already passes the customer data-plane endpoint in request context.
+     * <p>
+     * In the intended multi-tenant architecture, API-path calls should use
+     * {@code ThreadContextEndpointResolverFactory}, which reads the customer endpoint
+     * from {@code ThreadContext} via {@link #DATA_PLANE_ENDPOINT_CONTEXT_KEY}. SQS and
+     * other background job paths should use the normal {@code DataSourceEndpointResolver},
+     * which resolves the customer endpoint from config metadata, or from
+     * {@link #DATA_PLANE_ENDPOINT} when running with the static test resolver. Both paths
+     * should ultimately resolve to the same kind of customer AOSS collection endpoint.
+     */
+    public static final Setting<String> DATA_PLANE_ENDPOINT = Setting
+        .simpleString("plugins.timeseries.dataplane.endpoint", "", Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<String> API_DATA_PLANE_ENDPOINT = Setting
+        .simpleString("plugins.timeseries.api_dataplane.endpoint", "", Setting.Property.NodeScope, Setting.Property.Final);
+
+    // max number of rest clients to keep in cache (6000 is too large as it is a big burden for one node to connect to so
+    // many tenants' endpoints, while 10 is too small as it is not enough for most cases)
+    public static final int MAX_REST_CLIENTS = 600;
+
+    public static final Setting<Integer> OPENSEARCH_PORT = Setting
+        .intSetting("plugins.timeseries.opensearch_port", 9200, Setting.Property.NodeScope, Setting.Property.Final);
+
+    // ======================================
+    // SQS account provider settings (shared by AD and forecasting)
+    // ======================================
+
+    /**
+     * Selects which {@code JobQueueAccountIdProvider} implementation is loaded via SPI. While SPI discovers
+     * all available implementations on the classpath, this setting provides a deterministic way to
+     * select a specific implementation when multiple are available. Implementations
+     * opt in by returning their provider name from {@code getType}.
+     */
+    public static final Setting<String> SQS_ACCOUNT_PROVIDER_TYPE = new Setting<>(
+        "plugins.timeseries.sqs.account_provider_type",
+        "plugin_setting",
+        Function.identity(),
+        Setting.Property.NodeScope,
+        Setting.Property.Final
+    );
+
+    /**
+     * Account IDs to poll for EventBridge jobs. Used together with the built-in
+     * {@code plugin_setting} SQS account provider. If the provider type is not
+     * {@code plugin_setting}, this setting is ignored.
+     */
+    public static final Setting<List<String>> SQS_ACCOUNT_IDS = Setting
+        .listSetting(
+            "plugins.timeseries.sqs.account_ids",
+            List.of(),
+            Function.identity(),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
 }

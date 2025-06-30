@@ -21,9 +21,8 @@ import java.util.Optional;
 import org.opensearch.search.aggregations.Aggregation;
 import org.opensearch.search.aggregations.AggregationBuilder;
 import org.opensearch.search.aggregations.Aggregations;
-import org.opensearch.search.aggregations.InternalAggregations;
-import org.opensearch.search.aggregations.bucket.InternalSingleBucketAggregation;
 import org.opensearch.search.aggregations.bucket.MultiBucketsAggregation;
+import org.opensearch.search.aggregations.bucket.SingleBucketAggregation;
 import org.opensearch.search.aggregations.bucket.composite.CompositeAggregationBuilder;
 import org.opensearch.search.aggregations.metrics.InternalTDigestPercentiles;
 import org.opensearch.search.aggregations.metrics.NumericMetricsAggregation.SingleValue;
@@ -63,8 +62,8 @@ public abstract class AbstractRetriever {
             InternalCardinality that is also a SingleValue
         */
 
-        if (aggregationToParse instanceof InternalSingleBucketAggregation) {
-            InternalAggregations bucket = ((InternalSingleBucketAggregation) aggregationToParse).getAggregations();
+        if (aggregationToParse instanceof SingleBucketAggregation) {
+            Aggregations bucket = ((SingleBucketAggregation) aggregationToParse).getAggregations();
             if (bucket != null) {
                 List<Aggregation> aggrs = bucket.asList();
                 if (aggrs.size() == 1) {
@@ -124,8 +123,8 @@ public abstract class AbstractRetriever {
             InternalCardinality that is also a SingleValue
         */
 
-        if (aggregationToParse instanceof InternalSingleBucketAggregation) {
-            InternalSingleBucketAggregation bucket = (InternalSingleBucketAggregation) aggregationToParse;
+        if (aggregationToParse instanceof SingleBucketAggregation) {
+            SingleBucketAggregation bucket = (SingleBucketAggregation) aggregationToParse;
             if (bucket != null) {
                 return bucket.getDocCount();
             }

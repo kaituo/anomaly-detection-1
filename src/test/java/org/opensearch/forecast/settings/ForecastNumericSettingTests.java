@@ -10,6 +10,7 @@ import java.util.Map;
 
 import org.junit.Before;
 import org.opensearch.common.settings.Setting;
+import org.opensearch.common.settings.Settings;
 import org.opensearch.test.OpenSearchTestCase;
 
 public class ForecastNumericSettingTests extends OpenSearchTestCase {
@@ -46,5 +47,9 @@ public class ForecastNumericSettingTests extends OpenSearchTestCase {
         } catch (IllegalArgumentException e) {
             assertEquals("Cannot find setting by key [nonexistent.key]", e.getMessage());
         }
+    }
+
+    public void testMaxHCForecastersDefault() {
+        assertEquals(Integer.valueOf(1000), ForecastSettings.MAX_HC_FORECASTERS.get(Settings.EMPTY));
     }
 }

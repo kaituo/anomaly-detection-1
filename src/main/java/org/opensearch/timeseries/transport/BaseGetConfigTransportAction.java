@@ -5,7 +5,6 @@
 
 package org.opensearch.timeseries.transport;
 
-import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
 import static org.opensearch.timeseries.constant.CommonMessages.FAIL_TO_GET_CONFIG_MSG;
 import static org.opensearch.timeseries.util.ParseUtils.getResourceTypeFromClassName;
 import static org.opensearch.timeseries.util.ParseUtils.resolveUserAndExecute;
@@ -28,32 +27,31 @@ import org.apache.logging.log4j.Logger;
 import org.opensearch.OpenSearchStatusException;
 import org.opensearch.action.ActionRequest;
 import org.opensearch.action.ActionType;
-import org.opensearch.action.get.MultiGetItemResponse;
-import org.opensearch.action.get.MultiGetRequest;
-import org.opensearch.action.get.MultiGetResponse;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.HandledTransportAction;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.CheckedConsumer;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
-import org.opensearch.common.util.concurrent.ThreadContext;
 import org.opensearch.commons.authuser.User;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.core.action.ActionResponse;
 import org.opensearch.core.common.Strings;
 import org.opensearch.core.rest.RestStatus;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
-import org.opensearch.core.xcontent.XContentParser;
 import org.opensearch.tasks.Task;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.EntityProfileRunner;
 import org.opensearch.timeseries.Name;
 import org.opensearch.timeseries.ProfileRunner;
+import org.opensearch.timeseries.StateManager;
 import org.opensearch.timeseries.TaskProfile;
 import org.opensearch.timeseries.TaskProfileRunner;
+import org.opensearch.timeseries.client.DataAccess;
+import org.opensearch.timeseries.client.NodeCommunicator;
+import org.opensearch.timeseries.client.RunContext;
 import org.opensearch.timeseries.constant.CommonMessages;
-import org.opensearch.timeseries.constant.CommonName;
-import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.model.ConfigProfile;
@@ -64,26 +62,24 @@ import org.opensearch.timeseries.model.Job;
 import org.opensearch.timeseries.model.ProfileName;
 import org.opensearch.timeseries.model.TaskType;
 import org.opensearch.timeseries.model.TimeSeriesTask;
-import org.opensearch.timeseries.settings.TimeSeriesSettings;
+import org.opensearch.timeseries.rest.handler.store.DelegatingDataManagement;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.task.TaskManager;
-import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
-import org.opensearch.timeseries.util.ParseUtils;
-import org.opensearch.timeseries.util.RestHandlerUtils;
-import org.opensearch.timeseries.util.SecurityClientUtil;
+import org.opensearch.timeseries.util.DiscoveryNodeSelector;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.TransportService;
-import org.opensearch.transport.client.Client;
 
 import com.google.common.collect.Sets;
 
-public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends ActionResponse, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ConfigType extends Config, EntityProfileActionType extends ActionType<EntityProfileResponse>, EntityProfileRunnerType extends EntityProfileRunner<EntityProfileActionType>, TaskProfileType extends TaskProfile<TaskClass>, ConfigProfileType extends ConfigProfile<TaskClass, TaskProfileType>, ProfileActionType extends ActionType<ProfileResponse>, TaskProfileRunnerType extends TaskProfileRunner<TaskClass, TaskProfileType>, ProfileRunnerType extends ProfileRunner<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType, TaskProfileType, TaskManagerType, ConfigProfileType, ProfileActionType, TaskProfileRunnerType>>
+public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends ActionResponse, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, IndexType extends Enum<IndexType> & TimeSeriesIndex, DataManagementType extends DelegatingDataManagement<IndexType>, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, DataManagementType>, ConfigType extends Config, EntityProfileRunnerType extends EntityProfileRunner, TaskProfileType extends TaskProfile<TaskClass>, ConfigProfileType extends ConfigProfile<TaskClass, TaskProfileType>, ProfileActionType extends ActionType<ProfileResponse>, TaskProfileRunnerType extends TaskProfileRunner<TaskClass, TaskProfileType>, ProfileRunnerType extends ProfileRunner<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, DataManagementType, TaskProfileType, TaskManagerType, ConfigProfileType, ProfileActionType, TaskProfileRunnerType>>
     extends HandledTransportAction<ActionRequest, GetConfigResponseType> {
 
     private static final Logger LOG = LogManager.getLogger(BaseGetConfigTransportAction.class);
 
     protected final ClusterService clusterService;
-    protected final Client client;
-    protected final SecurityClientUtil clientUtil;
+    protected final DataAccess dataAccess;
+    protected final StateManager stateManager;
+    protected final NodeCommunicator nodeCommunicator;
     protected final Set<String> allProfileTypeStrs;
     protected final Set<ProfileName> allProfileTypes;
     protected final Set<ProfileName> defaultDetectorProfileTypes;
@@ -91,12 +87,11 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
     protected final Set<EntityProfileName> allEntityProfileTypes;
     protected final Set<EntityProfileName> defaultEntityProfileTypes;
     protected final NamedXContentRegistry xContentRegistry;
-    protected final DiscoveryNodeFilterer nodeFilter;
+    protected final DiscoveryNodeSelector nodeFilter;
     protected final TransportService transportService;
     protected volatile Boolean filterByEnabled;
     protected final TaskManagerType taskManager;
     private final Class<ConfigType> configTypeClass;
-    private final String configParseFieldName;
     private final List<TaskTypeEnum> allTaskTypes;
     private final String singleStreamRealTimeTaskName;
     private final String hcRealTImeTaskName;
@@ -104,20 +99,23 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
     private final String hcHistoricalTaskName;
     private final TaskProfileRunnerType taskProfileRunner;
     protected final String configIndexName;
+    protected final DataManagementType dataManagement;
+    protected final Settings settings;
+    protected final RunContext runContext;
 
     public BaseGetConfigTransportAction(
         TransportService transportService,
-        DiscoveryNodeFilterer nodeFilter,
+        DiscoveryNodeSelector nodeFilter,
         ActionFilters actionFilters,
         ClusterService clusterService,
-        Client client,
-        SecurityClientUtil clientUtil,
+        DataAccess dataAccess,
+        StateManager stateManager,
+        NodeCommunicator nodeCommunicator,
         Settings settings,
         NamedXContentRegistry xContentRegistry,
         TaskManagerType forecastTaskManager,
         String getConfigAction,
         Class<ConfigType> configTypeClass,
-        String configParseFieldName,
         List<TaskTypeEnum> allTaskTypes,
         String hcRealTImeTaskName,
         String singleStreamRealTimeTaskName,
@@ -125,12 +123,15 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         String singleStreamHistoricalTaskname,
         Setting<Boolean> filterByBackendRoleEnableSetting,
         TaskProfileRunnerType taskProfileRunner,
-        String configIndexName
+        String configIndexName,
+        DataManagementType dataManagement,
+        RunContext runContext
     ) {
         super(getConfigAction, transportService, actionFilters, GetConfigRequest::new);
         this.clusterService = clusterService;
-        this.client = client;
-        this.clientUtil = clientUtil;
+        this.dataAccess = dataAccess;
+        this.stateManager = stateManager;
+        this.nodeCommunicator = nodeCommunicator;
 
         List<ProfileName> allProfiles = Arrays.asList(ProfileName.values());
         this.allProfileTypes = EnumSet.copyOf(allProfiles);
@@ -151,7 +152,6 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         this.transportService = transportService;
         this.taskManager = forecastTaskManager;
         this.configTypeClass = configTypeClass;
-        this.configParseFieldName = configParseFieldName;
         this.allTaskTypes = allTaskTypes;
         this.hcRealTImeTaskName = hcRealTImeTaskName;
         this.singleStreamRealTimeTaskName = singleStreamRealTimeTaskName;
@@ -159,16 +159,26 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         this.singleStreamHistoricalTaskname = singleStreamHistoricalTaskname;
         this.taskProfileRunner = taskProfileRunner;
         this.configIndexName = configIndexName;
+        this.dataManagement = dataManagement;
+        this.settings = settings;
+        this.runContext = runContext;
     }
 
     @Override
     public void doExecute(Task task, ActionRequest request, ActionListener<GetConfigResponseType> actionListener) {
         GetConfigRequest getConfigRequest = GetConfigRequest.fromActionRequest(request);
         String configID = getConfigRequest.getConfigID();
-        User user = ParseUtils.getUserContext(client);
+        User user = runContext.getUser();
         ActionListener<GetConfigResponseType> listener = wrapRestActionListener(actionListener, FAIL_TO_GET_CONFIG_MSG);
 
-        try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
+        try {
+            TenantAwareHelper.validateTenantId(getConfigRequest.getTenantId(), settings, getMultiTenancyEnabledSetting());
+        } catch (Exception e) {
+            listener.onFailure(e);
+            return;
+        }
+
+        runContext.runWithSystemAuth(() -> {
             String resourceType = getResourceTypeFromClassName(configTypeClass.getSimpleName());
             verifyResourceAccessAndProcessRequest(
                 resourceType,
@@ -179,17 +189,17 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
                     filterByEnabled,
                     listener,
                     (config) -> getExecute(getConfigRequest, listener),
-                    client,
-                    clusterService,
                     xContentRegistry,
+                    stateManager,
+                    dataManagement,
+                    getConfigRequest.getTenantId(),
                     configTypeClass
                 )
             );
-
-        } catch (Exception e) {
-            LOG.error(e);
-            listener.onFailure(e);
-        }
+        }, exception -> {
+            LOG.error(exception);
+            listener.onFailure(exception);
+        });
     }
 
     public void getConfigAndJob(
@@ -198,19 +208,55 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         boolean returnTask,
         Optional<TaskClass> realtimeConfigTask,
         Optional<TaskClass> historicalConfigTask,
+        String tenantId,
         ActionListener<GetConfigResponseType> listener
     ) {
-        MultiGetRequest.Item configItem = new MultiGetRequest.Item(configIndexName, configID);
-        MultiGetRequest multiGetRequest = new MultiGetRequest().add(configItem);
-        if (returnJob) {
-            MultiGetRequest.Item adJobItem = new MultiGetRequest.Item(CommonName.JOB_INDEX, configID);
-            multiGetRequest.add(adJobItem);
-        }
-        client
-            .multiGet(
-                multiGetRequest,
-                onMultiGetResponse(listener, returnJob, returnTask, realtimeConfigTask, historicalConfigTask, configID)
-            );
+        AnalysisType context = configIndexName.equals(ADCommonName.CONFIG_INDEX) ? AnalysisType.AD : AnalysisType.FORECAST;
+        // GET config APIs should return persisted configs even when all features are disabled.
+        // Feature-enable validation belongs to execution paths, not simple retrieval.
+        stateManager.getConfig(configID, tenantId, context, configOptional -> {
+            if (configOptional.isEmpty()) {
+                listener.onFailure(new OpenSearchStatusException(CommonMessages.FAIL_TO_FIND_CONFIG_MSG + configID, RestStatus.NOT_FOUND));
+                return;
+            }
+
+            ConfigType config = (ConfigType) configOptional.get();
+            ActionListener<Job> jobListener = ActionListener.wrap(job -> {
+                adjustState(realtimeConfigTask, job);
+                adjustState(historicalConfigTask, job);
+                listener
+                    .onResponse(
+                        createResponse(
+                            config.getVersion() == null ? 0 : config.getVersion(),
+                            config.getId(),
+                            0,
+                            0,
+                            config,
+                            job,
+                            returnJob,
+                            realtimeConfigTask,
+                            historicalConfigTask,
+                            returnTask,
+                            RestStatus.OK,
+                            null,
+                            null,
+                            false
+                        )
+                    );
+            }, listener::onFailure);
+
+            if (returnJob) {
+                stateManager
+                    .getJob(
+                        configID,
+                        tenantId,
+                        false,
+                        ActionListener.wrap(jobOptional -> jobListener.onResponse(jobOptional.orElse(null)), listener::onFailure)
+                    );
+            } else {
+                jobListener.onResponse(null);
+            }
+        }, listener);
     }
 
     public void getExecute(GetConfigRequest request, ActionListener<GetConfigResponseType> listener) {
@@ -227,7 +273,7 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
                 getExecuteProfile(request, entity, typesStr, all, configID, listener);
             } else {
                 if (returnTask) {
-                    taskManager.getAndExecuteOnLatestTasks(configID, null, null, allTaskTypes, (taskList) -> {
+                    taskManager.getAndExecuteOnLatestTasks(configID, null, null, request.getTenantId(), allTaskTypes, (taskList) -> {
                         Optional<TaskClass> realtimeTask = Optional.empty();
                         Optional<TaskClass> historicalTask = Optional.empty();
                         if (taskList != null && taskList.size() > 0) {
@@ -248,7 +294,7 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
                                 tasks.put(task.getTaskType(), task);
                             }
                             if (duplicateTasks.size() > 0) {
-                                taskManager.resetLatestFlagAsFalse(duplicateTasks);
+                                taskManager.resetLatestFlagAsFalse(duplicateTasks, request.getTenantId());
                             }
 
                             if (tasks.containsKey(hcRealTImeTaskName)) {
@@ -266,111 +312,16 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
                                 historicalTask = fillInHistoricalTaskforBwc(tasks);
                             }
                         }
-                        getConfigAndJob(configID, returnJob, returnTask, realtimeTask, historicalTask, listener);
+                        getConfigAndJob(configID, returnJob, returnTask, realtimeTask, historicalTask, request.getTenantId(), listener);
                     }, transportService, false, 2, listener); // false means not reset task state to stopped state
                 } else {
-                    getConfigAndJob(configID, returnJob, returnTask, Optional.empty(), Optional.empty(), listener);
+                    getConfigAndJob(configID, returnJob, returnTask, Optional.empty(), Optional.empty(), request.getTenantId(), listener);
                 }
             }
         } catch (Exception e) {
             LOG.error(e);
             listener.onFailure(e);
         }
-    }
-
-    private ActionListener<MultiGetResponse> onMultiGetResponse(
-        ActionListener<GetConfigResponseType> listener,
-        boolean returnJob,
-        boolean returnTask,
-        Optional<TaskClass> realtimeTask,
-        Optional<TaskClass> historicalTask,
-        String configId
-    ) {
-        return new ActionListener<MultiGetResponse>() {
-            @Override
-            public void onResponse(MultiGetResponse multiGetResponse) {
-                MultiGetItemResponse[] responses = multiGetResponse.getResponses();
-                ConfigType config = null;
-                Job job = null;
-                String id = null;
-                long version = 0;
-                long seqNo = 0;
-                long primaryTerm = 0;
-
-                for (MultiGetItemResponse response : responses) {
-                    if (configIndexName.equals(response.getIndex())) {
-                        if (response.getResponse() == null || !response.getResponse().isExists()) {
-                            listener
-                                .onFailure(
-                                    new OpenSearchStatusException(CommonMessages.FAIL_TO_FIND_CONFIG_MSG + configId, RestStatus.NOT_FOUND)
-                                );
-                            return;
-                        }
-                        id = response.getId();
-                        version = response.getResponse().getVersion();
-                        primaryTerm = response.getResponse().getPrimaryTerm();
-                        seqNo = response.getResponse().getSeqNo();
-                        if (!response.getResponse().isSourceEmpty()) {
-                            try (
-                                XContentParser parser = RestHandlerUtils
-                                    .createXContentParserFromRegistry(xContentRegistry, response.getResponse().getSourceAsBytesRef())
-                            ) {
-                                ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                                config = parser.namedObject(configTypeClass, configParseFieldName, null);
-                            } catch (Exception e) {
-                                String message = "Failed to parse config " + configId;
-                                listener.onFailure(buildInternalServerErrorResponse(e, message));
-                                return;
-                            }
-                        }
-                    } else if (CommonName.JOB_INDEX.equals(response.getIndex())) {
-                        if (response.getResponse() != null
-                            && response.getResponse().isExists()
-                            && !response.getResponse().isSourceEmpty()) {
-                            try (
-                                XContentParser parser = RestHandlerUtils
-                                    .createXContentParserFromRegistry(xContentRegistry, response.getResponse().getSourceAsBytesRef())
-                            ) {
-                                ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.nextToken(), parser);
-                                job = Job.parse(parser);
-                            } catch (Exception e) {
-                                String message = "Failed to parse job " + configId;
-                                listener.onFailure(buildInternalServerErrorResponse(e, message));
-                                return;
-                            }
-                        }
-                    }
-                }
-
-                adjustState(realtimeTask, job);
-                adjustState(historicalTask, job);
-
-                listener
-                    .onResponse(
-                        createResponse(
-                            version,
-                            id,
-                            primaryTerm,
-                            seqNo,
-                            config,
-                            job,
-                            returnJob,
-                            realtimeTask,
-                            historicalTask,
-                            returnTask,
-                            RestStatus.OK,
-                            null,
-                            null,
-                            false
-                        )
-                    );
-            }
-
-            @Override
-            public void onFailure(Exception e) {
-                listener.onFailure(e);
-            }
-        };
     }
 
     protected Optional<TaskClass> fillInHistoricalTaskforBwc(Map<String, TaskClass> tasks) {
@@ -387,13 +338,8 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
     ) {
         if (entity != null) {
             Set<EntityProfileName> entityProfilesToCollect = getEntityProfilesToCollect(typesStr, all);
-            EntityProfileRunnerType profileRunner = createEntityProfileRunner(
-                client,
-                clientUtil,
-                xContentRegistry,
-                TimeSeriesSettings.NUM_MIN_SAMPLES
-            );
-            profileRunner.profile(configId, entity, entityProfilesToCollect, ActionListener.wrap(profile -> {
+            EntityProfileRunnerType profileRunner = createEntityProfileRunner(nodeCommunicator, dataAccess, stateManager, xContentRegistry);
+            profileRunner.profile(configId, request.getTenantId(), entity, entityProfilesToCollect, ActionListener.wrap(profile -> {
                 listener
                     .onResponse(
                         createResponse(
@@ -417,16 +363,15 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
         } else {
             Set<ProfileName> profilesToCollect = getProfilesToCollect(typesStr, all);
             ProfileRunnerType profileRunner = createProfileRunner(
-                client,
-                clientUtil,
+                nodeCommunicator,
+                dataAccess,
                 xContentRegistry,
                 nodeFilter,
-                TimeSeriesSettings.NUM_MIN_SAMPLES,
                 transportService,
                 taskManager,
                 taskProfileRunner
             );
-            profileRunner.profile(configId, getProfileActionListener(listener), profilesToCollect);
+            profileRunner.profile(configId, request.getTenantId(), getProfileActionListener(listener), profilesToCollect);
         }
 
     }
@@ -519,20 +464,25 @@ public abstract class BaseGetConfigTransportAction<GetConfigResponseType extends
     protected abstract void adjustState(Optional<TaskClass> taskOptional, Job job);
 
     protected abstract EntityProfileRunnerType createEntityProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
-        NamedXContentRegistry xContentRegistry,
-        long requiredSamples
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
+        StateManager stateManager,
+        NamedXContentRegistry xContentRegistry
     );
 
     protected abstract ProfileRunnerType createProfileRunner(
-        Client client,
-        SecurityClientUtil clientUtil,
+        NodeCommunicator nodeCommunicator,
+        DataAccess dataAccess,
         NamedXContentRegistry xContentRegistry,
-        DiscoveryNodeFilterer nodeFilter,
-        long requiredSamples,
+        DiscoveryNodeSelector nodeFilter,
         TransportService transportService,
         TaskManagerType taskManager,
         TaskProfileRunnerType taskProfileRunner
     );
+
+    /**
+     * Returns the setting that indicates if multi-tenancy is enabled.
+     * Subclasses must implement this to provide the appropriate setting.
+     */
+    protected abstract Setting<Boolean> getMultiTenancyEnabledSetting();
 }

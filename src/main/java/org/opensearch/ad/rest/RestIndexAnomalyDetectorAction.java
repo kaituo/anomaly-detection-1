@@ -27,6 +27,7 @@ import org.opensearch.action.support.WriteRequest;
 import org.opensearch.ad.constant.ADCommonMessages;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.settings.ADEnabledSetting;
+import org.opensearch.ad.settings.AnomalyDetectorSettings;
 import org.opensearch.ad.transport.IndexAnomalyDetectorAction;
 import org.opensearch.ad.transport.IndexAnomalyDetectorRequest;
 import org.opensearch.ad.transport.IndexAnomalyDetectorResponse;
@@ -42,6 +43,7 @@ import org.opensearch.rest.RestRequest;
 import org.opensearch.rest.RestResponse;
 import org.opensearch.rest.action.RestResponseListener;
 import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
+import org.opensearch.timeseries.util.TenantAwareHelper;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
@@ -53,9 +55,11 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
 
     private static final String INDEX_ANOMALY_DETECTOR_ACTION = "index_anomaly_detector_action";
     private final Logger logger = LogManager.getLogger(RestIndexAnomalyDetectorAction.class);
+    private final Settings settings;
 
     public RestIndexAnomalyDetectorAction(Settings settings, ClusterService clusterService) {
         super(settings, clusterService);
+        this.settings = settings;
     }
 
     @Override
@@ -64,6 +68,7 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
     }
 
     @Override
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required by the OpenSearch REST handler contract.")
     protected RestChannelConsumer prepareRequest(RestRequest request, NodeClient client) throws IOException {
         if (!ADEnabledSetting.isADEnabled()) {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
@@ -89,6 +94,10 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
             detectorId = AnomalyDetector.NO_ID;
         }
 
+        maybePromoteCellIdHeaderToTransient(request, method, client);
+
+        String tenantId = TenantAwareHelper.getTenantID(AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(this.settings), request);
+
         IndexAnomalyDetectorRequest indexAnomalyDetectorRequest = new IndexAnomalyDetectorRequest(
             detectorId,
             seqNo,
@@ -100,7 +109,8 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
             maxSingleEntityDetectors,
             maxMultiEntityDetectors,
             maxAnomalyFeatures,
-            maxCategoricalFields
+            maxCategoricalFields,
+            tenantId
         );
 
         return channel -> client
@@ -131,6 +141,52 @@ public class RestIndexAnomalyDetectorAction extends AbstractAnomalyDetectorActio
                     String.format(Locale.ROOT, "%s/{%s}", TimeSeriesAnalyticsPlugin.LEGACY_OPENDISTRO_AD_BASE_URI, DETECTOR_ID)
                 )
             );
+    }
+
+    /**
+     * Dev/test-only: populate the EventBridge cell-id {@code ThreadContext} transient from the
+    * inbound HTTP header configured by {@link AnomalyDetectorSettings#EVENT_BRIDGE_CELL_ID_HEADER_NAME}
+    * when {@link AnomalyDetectorSettings#EVENT_BRIDGE_CELL_ID_FROM_HEADER} is enabled.
+     *
+     * <p>In production the transient is expected to be stamped by a trusted upstream gateway
+     * using an authoritative source (e.g. the authenticated identity), and the toggle remains
+     * {@code false}. This path exists so {@code ./gradlew run} and integration tests can exercise
+     * the multi-tenant create path without a proxy. The existing transient is never overwritten,
+     * so a trusted upstream always wins.
+     */
+    @org.opensearch.timeseries.annotation.SuppressForbidden(reason = "org.opensearch.transport.client.Client usage: NodeClient parameter is required to access the request thread context in the REST handler.")
+    private void maybePromoteCellIdHeaderToTransient(RestRequest request, RestRequest.Method method, NodeClient client) {
+        if (method != RestRequest.Method.POST) {
+            return;
+        }
+        if (!AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings)) {
+            return;
+        }
+        if (!AnomalyDetectorSettings.EVENT_BRIDGE_CELL_ID_FROM_HEADER.get(settings)) {
+            return;
+        }
+
+        String transientKey = AnomalyDetectorSettings.EVENT_BRIDGE_CELL_ID_HEADER_NAME.get(settings);
+        if (transientKey == null || transientKey.trim().isEmpty()) {
+            return;
+        }
+        transientKey = transientKey.trim();
+
+        org.opensearch.common.util.concurrent.ThreadContext threadContext = client.threadPool().getThreadContext();
+        if (threadContext.getTransient(transientKey) != null) {
+            return;
+        }
+
+        String headerValue = request.header(transientKey);
+        if (headerValue == null) {
+            return;
+        }
+        String trimmed = headerValue.trim();
+        if (trimmed.isEmpty()) {
+            return;
+        }
+
+        threadContext.putTransient(transientKey, trimmed);
     }
 
     private RestResponseListener<IndexAnomalyDetectorResponse> indexAnomalyDetectorResponse(
