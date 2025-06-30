@@ -68,6 +68,9 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
     private Map<String, Map<String, BackPressureRouting>> backpressureMuter;
     private int maxRetryForUnresponsiveNode;
     private TimeValue mutePeriod;
+    private ClusterService clusterService;
+    private Settings settings;
+    private org.opensearch.timeseries.rest.handler.EventBridgeHandler eventBridgeHandler;
 
     /**
      * Constructor
@@ -81,6 +84,7 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
      * @param clusterService Cluster service accessor
      * @param maxRetryForUnresponsiveNodeSetting max retry number for unresponsive node
      * @param backoffMinutesSetting back off minutes setting
+     * @param eventBridgeHandler EventBridge handler for coordinator nodes
      */
     public NodeStateManager(
         Client client,
@@ -91,7 +95,8 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
         Duration stateTtl,
         ClusterService clusterService,
         Setting<Integer> maxRetryForUnresponsiveNodeSetting,
-        Setting<TimeValue> backoffMinutesSetting
+        Setting<TimeValue> backoffMinutesSetting,
+        org.opensearch.timeseries.rest.handler.EventBridgeHandler eventBridgeHandler
     ) {
         this.states = new ConcurrentHashMap<>();
         this.client = client;
@@ -100,6 +105,9 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
         this.clock = clock;
         this.stateTtl = stateTtl;
         this.backpressureMuter = new ConcurrentHashMap<>();
+        this.clusterService = clusterService;
+        this.settings = settings;
+        this.eventBridgeHandler = eventBridgeHandler;
 
         this.maxRetryForUnresponsiveNode = maxRetryForUnresponsiveNodeSetting.get(settings);
         clusterService.getClusterSettings().addSettingsUpdateConsumer(maxRetryForUnresponsiveNodeSetting, it -> {
@@ -138,8 +146,9 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
      *
      * @param configId config ID
      */
+    // TODO: use composite key for multiple tenants
     @Override
-    public void clear(String configId) {
+    public void clear(String tenantId, String configId) {
         Map<String, BackPressureRouting> routingMap = backpressureMuter.get(configId);
         if (routingMap != null) {
             routingMap.clear();
@@ -346,22 +355,7 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
         state.setException(e);
     }
 
-    /**
-     * Get a detector's checkpoint and save a flag if we find any so that next time we don't need to do it again
-     * @param adID  the detector's ID
-     * @param listener listener to handle get request
-     */
-    public void getDetectorCheckpoint(String adID, ActionListener<Boolean> listener) {
-        NodeState state = states.get(adID);
-        if (state != null && state.doesCheckpointExists()) {
-            listener.onResponse(Boolean.TRUE);
-            return;
-        }
-
-        GetRequest request = new GetRequest(ADCommonName.CHECKPOINT_INDEX_NAME, SingleStreamModelIdMapper.getRcfModelId(adID, 0));
-
-        clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetCheckpointResponse(adID, listener));
-    }
+    
 
     private ActionListener<GetResponse> onGetCheckpointResponse(String adID, ActionListener<Boolean> listener) {
         return ActionListener.wrap(response -> {
@@ -409,9 +403,65 @@ public class NodeStateManager implements MaintenanceState, CleanState, Exception
         NodeState state = states.get(configID);
         if (state != null && state.getJob() != null) {
             listener.onResponse(Optional.of(state.getJob()));
-        } else {
-            GetRequest request = new GetRequest(CommonName.JOB_INDEX, configID);
-            clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetJobResponse(configID, listener));
+            return;
+        }
+
+        // Check if this is a coordinator node and EventBridge is configured
+        if (isCoordinatorNode() && eventBridgeHandler != null) {
+            // Try to get tenantId from cached config
+            Config cachedConfig = state != null ? state.getConfigDef() : null;
+            if (cachedConfig != null && cachedConfig.getTenantId() != null) {
+                Optional<Job> jobFromSchedule = eventBridgeHandler.getJobFromSchedule(cachedConfig.getTenantId(), configID);
+                if (jobFromSchedule.isPresent()) {
+                    // Cache the job
+                    NodeState nodeState = states.computeIfAbsent(configID, id -> new NodeState(id, clock));
+                    nodeState.setJob(jobFromSchedule.get());
+                    listener.onResponse(jobFromSchedule);
+                    return;
+                }
+            } else {
+                // Fetch config to get tenantId
+                getConfig(configID, AnalysisType.AD, false, ActionListener.wrap(configOptional -> {
+                    if (configOptional.isPresent() && configOptional.get().getTenantId() != null) {
+                        Optional<Job> jobFromSchedule = eventBridgeHandler.getJobFromSchedule(configOptional.get().getTenantId(), configID);
+                        if (jobFromSchedule.isPresent()) {
+                            // Cache the job
+                            NodeState nodeState = states.computeIfAbsent(configID, id -> new NodeState(id, clock));
+                            nodeState.setJob(jobFromSchedule.get());
+                            listener.onResponse(jobFromSchedule);
+                            return;
+                        }
+                    }
+                    // Fall back to OpenSearch index if EventBridge doesn't have the job
+                    fallbackToOpenSearchJob(configID, listener);
+                }, listener::onFailure));
+                return;
+            }
+        }
+
+        // Fall back to OpenSearch index for non-coordinator nodes or when EventBridge doesn't have the job
+        fallbackToOpenSearchJob(configID, listener);
+    }
+
+    private void fallbackToOpenSearchJob(String configID, ActionListener<Optional<Job>> listener) {
+        GetRequest request = new GetRequest(CommonName.JOB_INDEX, configID);
+        clientUtil.<GetRequest, GetResponse>asyncRequest(request, client::get, onGetJobResponse(configID, listener));
+    }
+
+    public void setEventBridgeHandler(org.opensearch.ad.rest.handler.ADEventBridgeHandler eventBridgeHandler) {
+        this.eventBridgeHandler = eventBridgeHandler;
+    }
+
+    private boolean isCoordinatorNode() {
+        if (clusterService == null || settings == null) {
+            return false;
+        }
+        try {
+            java.util.List<String> nodeRoles = org.opensearch.timeseries.settings.TimeSeriesSettings.NODE_ROLE.get(settings);
+            return nodeRoles.contains(org.opensearch.timeseries.settings.TimeSeriesSettings.COORDINATOR_ROLE);
+        } catch (Exception e) {
+            LOG.debug("Failed to check if node is coordinator", e);
+            return false;
         }
     }
 

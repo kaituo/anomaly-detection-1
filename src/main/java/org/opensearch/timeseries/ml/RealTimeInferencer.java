@@ -62,7 +62,22 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * Since we assume model state's last access time is current time and compare it with incoming data's execution time,
  * this class is only meant to be used by real time analysis.
  */
-public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, CacheType extends TimeSeriesCache<RCFModelType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriterType, ColdStarterType, CacheType, ResultType, RCFResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>>
+public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomCutForest, ResultType extends IndexableResult, RCFResultType extends IntermediateResult<ResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, CheckpointWriterType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, ResultType>, ModelManagerType extends ModelManager<RCFModelType, ResultType, RCFResultType, IndexType, IndexManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<ResultType, RCFResultType>, CacheType extends TimeSeriesCache<RCFModelType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<
+        RCFModelType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        CheckpointWriterType,
+        ColdStarterType,
+        CacheType,
+        ResultType,
+        RCFResultType,
+        ModelManagerType,
+        SaveResultStrategyType,
+        TaskCacheManagerType,
+        TaskTypeEnum,
+        TaskClass,
+        TaskManagerType>>
     implements
         MaintenanceState {
 
@@ -70,7 +85,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
     protected ModelManagerType modelManager;
     protected Stats stats;
     private String modelCorruptionStat;
-    protected CheckpointDaoType checkpointDao;
+    protected CheckpointDaoInterface<RCFModelType> checkpointDao;
     protected ColdStartWorkerType coldStartWorker;
     protected SaveResultStrategyType resultWriteWorker;
     private CacheProvider<RCFModelType, CacheType> cache;
@@ -93,7 +108,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
         ModelManagerType modelManager,
         Stats stats,
         String modelCorruptionStat,
-        CheckpointDaoType checkpointDao,
+        CheckpointDaoInterface<RCFModelType> checkpointDao,
         ColdStartWorkerType coldStartWorker,
         SaveResultStrategyType resultWriteWorker,
         CacheProvider<RCFModelType, CacheType> cache,
@@ -292,7 +307,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
                 if (e.getMessage() != null && e.getMessage().contains("incorrect ordering of time")) {
                     // ignore current timestamp.
                     LOG
-                        .warn(
+                        .info(
                             String
                                 .format(
                                     Locale.ROOT,
@@ -360,10 +375,11 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
             LOG.warn(new ParameterizedMessage("Likely model corruption for [{}]", modelId));
         }
         stats.getStat(modelCorruptionStat).increment();
-        cache.get().removeModel(config.getId(), modelId);
+        cache.get().removeModel(config.getTenantId(), config.getId(), modelId);
         if (null != modelId) {
             checkpointDao
                 .deleteModelCheckpoint(
+                    config,
                     modelId,
                     ActionListener
                         .wrap(
@@ -382,7 +398,8 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
                     modelId,
                     sample.getValueList(),
                     sample.getDataStartTime().toEpochMilli(),
-                    taskId
+                    taskId,
+                    config.getTenantId()
                 )
             );
     }
@@ -528,7 +545,7 @@ public abstract class RealTimeInferencer<RCFModelType extends ThresholdedRandomC
             sampleQueues.entrySet().removeIf(entry -> entry.getValue().isExpired());
         } catch (Exception e) {
             // will be thrown to transport broadcast handler
-            throw new TimeSeriesException("Fail to maintain RealTimeInferencer", e);
+            throw new TimeSeriesException("Failed to maintain RealTimeInferencer", e);
         }
     }
 

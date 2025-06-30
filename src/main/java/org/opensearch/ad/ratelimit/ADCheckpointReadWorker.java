@@ -22,7 +22,7 @@ import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
@@ -39,7 +39,6 @@ import org.opensearch.common.settings.Settings;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.ratelimit.CheckpointReadWorker;
 
@@ -58,7 +57,25 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  *
  */
 public class ADCheckpointReadWorker extends
-    CheckpointReadWorker<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADColdStart, ADModelManager, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker, ADRealTimeInferencer> {
+    CheckpointReadWorker<
+        ThresholdedRandomCutForest,
+        AnomalyResult,
+        ThresholdingResult,
+        ADIndex,
+        ADIndexManagement,
+        ADCheckpointStore,
+        ADCheckpointWriteWorker,
+        ADColdStart,
+        ADModelManager,
+        ADPriorityCache,
+        ADSaveResultStrategy,
+        ADTaskCacheManager,
+        ADTaskType,
+        ADTask,
+        ADTaskManager,
+        ADColdStartWorker,
+        ADRealTimeInferencer
+    > {
     public static final String WORKER_NAME = "ad-checkpoint-read";
 
     public ADCheckpointReadWorker(
@@ -77,7 +94,7 @@ public class ADCheckpointReadWorker extends
         int maintenanceFreqConstant,
         Duration executionTtl,
         ADModelManager modelManager,
-        ADCheckpointDao checkpointDao,
+        ADCheckpointStore checkpointDao,
         ADColdStartWorker entityColdStartQueue,
         NodeStateManager stateManager,
         Provider<ADPriorityCache> cacheProvider,
@@ -94,7 +111,7 @@ public class ADCheckpointReadWorker extends
             random,
             adCircuitBreakerService,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             settings,
             maxQueuedTaskRatio,
             clock,

@@ -90,6 +90,29 @@ plugins {
     id 'java-library'
     id 'org.gradle.test-retry' version '1.6.0'
     id "de.undercouch.download" version "5.6.0"
+    // important to use latest version 1.17
+    // lower versions of io.spring.dependency-management plugin is known to use
+    // the deprecated Gradle API LenientConfiguration.getArtifacts(Spec).
+    // With Gradle 8.10.2 this method logs a deprecation warning and fails the build.
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+// opensearch.build is needed to use the version catalog from OpenSearch’s gradle/libs.versions.toml
+apply plugin: 'opensearch.build'
+apply plugin: 'java'
+apply plugin: 'idea'
+apply plugin: 'opensearch.opensearchplugin'
+apply plugin: 'opensearch.testclusters'
+apply plugin: 'base'
+apply plugin: 'jacoco'
+apply plugin: 'eclipse'
+apply plugin: 'opensearch.pluginzip'
+apply plugin: 'opensearch.java-agent'
+
+dependencyManagement {
+    imports {
+        mavenBom("software.amazon.awssdk:bom:${versions.aws}")
+    }
 }
 
 tasks.withType(JavaCompile) {
@@ -194,17 +217,50 @@ dependencies {
     testImplementation 'org.reflections:reflections:0.10.2'
 
     testImplementation "org.opensearch.test:framework:${opensearch_version}"
-}
 
-apply plugin: 'java'
-apply plugin: 'idea'
-apply plugin: 'opensearch.opensearchplugin'
-apply plugin: 'opensearch.testclusters'
-apply plugin: 'base'
-apply plugin: 'jacoco'
-apply plugin: 'eclipse'
-apply plugin: 'opensearch.pluginzip'
-apply plugin: 'opensearch.java-agent'
+    // Use the AWS SDK BOM so individual modules don't need version numbers
+    implementation 'software.amazon.awssdk:servicediscovery'
+    implementation 'software.amazon.awssdk:dynamodb'
+    implementation 'software.amazon.awssdk:eventbridge'
+    implementation 'software.amazon.awssdk:scheduler'
+    implementation 'software.amazon.awssdk:sqs'
+    implementation 'software.amazon.awssdk:regions'
+    implementation 'software.amazon.awssdk:aws-core'
+    implementation 'software.amazon.awssdk:sdk-core'
+    implementation 'software.amazon.awssdk:url-connection-client'
+    implementation 'software.amazon.awssdk:auth'
+    implementation 'software.amazon.awssdk:http-auth-spi'
+    implementation 'software.amazon.awssdk:http-auth-aws'
+    implementation 'software.amazon.awssdk:http-auth'
+    implementation 'software.amazon.awssdk:utils'
+    implementation 'software.amazon.awssdk:http-client-spi'
+    implementation 'software.amazon.awssdk:identity-spi'
+    implementation 'software.amazon.awssdk:aws-json-protocol'
+    implementation 'software.amazon.awssdk:retries-spi'
+    implementation 'software.amazon.awssdk:retries'
+    implementation 'software.amazon.awssdk:profiles'
+    implementation 'software.amazon.awssdk:endpoints-spi'
+    implementation 'software.amazon.awssdk:json-utils'
+    implementation 'software.amazon.awssdk:third-party-jackson-core'
+    implementation 'software.amazon.awssdk:netty-nio-client'
+    implementation 'software.amazon.awssdk:metrics-spi'
+    implementation 'software.amazon.awssdk:protocol-core'
+    implementation 'software.amazon.awssdk:checksums'
+    implementation 'software.amazon.awssdk:checksums-spi'
+    implementation 'software.amazon.awssdk:s3'
+    implementation "io.netty:netty-transport:${versions.netty}"
+    implementation "io.netty:netty-buffer:${versions.netty}"
+    implementation "io.netty:netty-common:${versions.netty}"
+    implementation "io.netty:netty-resolver:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-classes-macos:${versions.netty}"
+    implementation "io.netty:netty-resolver-dns-native-macos:${versions.netty}"
+    implementation "io.netty:netty-handler:${versions.netty}"
+    implementation "io.netty:netty-codec-http2:${versions.netty}"
+    implementation "io.netty:netty-codec-http:${versions.netty}"
+    implementation "io.netty:netty-codec:${versions.netty}"
+    implementation "io.netty:netty-transport-native-unix-common:${versions.netty}"
+}
 
 ext {
     isSnapshot = "true" == System.getProperty("build.snapshot", "true")
@@ -482,6 +538,12 @@ testClusters.integTest {
     if (_numNodes > 1) numberOfNodes = _numNodes
     configureClusterPlugins(delegate, jobSchedulerFile, securityPluginFile, securityEnabled)
     nodes.each { it.jvmArgs("-Xms1g", "-Xmx1g") }
+
+    // Tell Gradle to forward credentials to the forked OpenSearch node JVM:
+    // this allows us to set the env-vars using export before gradle is run
+    environment 'AWS_ACCESS_KEY_ID', System.getenv().getOrDefault('AWS_ACCESS_KEY_ID', 'integration_test_access_key')
+    environment 'AWS_SECRET_ACCESS_KEY', System.getenv().getOrDefault('AWS_SECRET_ACCESS_KEY', 'integration_test_secret_access_key')
+    environment 'AWS_SESSION_TOKEN', System.getenv().getOrDefault('AWS_SESSION_TOKEN', 'integration_test_session_token')
 }
 
 testClusters {
@@ -1195,5 +1257,242 @@ tasks.withType(AbstractPublishToMaven) {
     }
     onlyIf("Publishing only ZIP distributions") {
         predicate.get()
+    }
+}
+
+// ====== Inputs you can override with -P ======
+def osVersion      = opensearch_version
+def httpPort       = (findProperty('httpPort') ?: '9201').toString()
+def transportPort  = (findProperty('transportPort') ?: '9301').toString()
+
+// Always use the Linux "min" distro; choose arch by host JVM arch
+def hostArch   = System.getProperty('os.arch').toLowerCase()
+def linuxArch  = (hostArch.contains('aarch64') || hostArch.contains('arm64')) ? 'arm64' : 'x64'
+def osPlatform = "linux-${linuxArch}"  // always Linux
+
+// Extra OpenSearch node settings (-E k=v,k=v) and JVM args for the process
+def extraSettings  = (findProperty('extraSettings') ?: '').toString()
+def osJavaOpts     = (findProperty('osJavaOpts') ?: '').toString()
+
+// Where OpenSearch should take its JDK from (CRITICAL on macOS!)
+def osJavaHome = (findProperty('osJavaHome')
+        ?: System.getenv('OPENSEARCH_JAVA_HOME')
+        ?: System.getenv('JAVA_HOME')
+        ?: System.getProperty('java.home')).toString()
+if (!new File(osJavaHome).exists()) {
+    throw new GradleException("OPENSEARCH_JAVA_HOME not found. Set -PosJavaHome=<your JDK> or export JAVA_HOME/OPENSEARCH_JAVA_HOME.")
+}
+
+// Dependent plugins (install first). AD needs Job Scheduler.
+def depPluginsCsv  = (findProperty('depPlugins') ?: 'opensearch-job-scheduler').toString()
+// Optional: override plugin URLs, e.g. CI/BWC
+def depPluginUrls  = (findProperty('depPluginUrls') ?: '').toString()
+// Force reinstall deps too
+def forceReinstallDeps = (findProperty('forceReinstallDeps') ?: 'false').toString().toBoolean()
+
+// AD plugin version scheme: <osVersion>.<patch>[ -SNAPSHOT ]
+def isSnapshot = osVersion.endsWith('-SNAPSHOT')
+def baseVer    = isSnapshot ? osVersion.replace('-SNAPSHOT','') : osVersion
+def patch      = (findProperty('pluginPatch') ?: '0').toString()
+def pluginVer  = isSnapshot ? "${baseVer}.${patch}-SNAPSHOT" : "${baseVer}.${patch}"
+
+// ====== Linux-min distro URLs only ======
+def archiveExt = 'tar.gz'
+def defaultReleaseUrl  = "https://artifacts.opensearch.org/releases/core/opensearch/${osVersion}/opensearch-min-${osVersion}-${osPlatform}.${archiveExt}"
+def defaultSnapshotUrl = "https://artifacts.opensearch.org/snapshots/core/opensearch/${osVersion}/opensearch-min-${osVersion}-${osPlatform}-latest.${archiveExt}"
+
+// Allow explicit override (URL or local file)
+def osDistUrlProp  = (findProperty('osDistUrl')  ?: '').toString()
+def osDistFileProp = (findProperty('osDistFile') ?: '').toString()
+
+// ====== Layout ======
+def cacheDir  = layout.buildDirectory.dir("run/cache").get().asFile
+def tarDest   = new File(cacheDir, "opensearch-dist.${archiveExt}")
+def osRootDir = layout.buildDirectory.dir("run/os").get().asFile
+
+// --- Download Linux-min distro ---
+tasks.register('prepareOpenSearchTar') {
+    outputs.file(tarDest)
+    doLast {
+        cacheDir.mkdirs()
+        if (osDistFileProp) {
+            copy {
+                from file(osDistFileProp)
+                into cacheDir
+                rename { "opensearch-dist.${archiveExt}" }
+            }
+        } else {
+            def url = osDistUrlProp ?: (isSnapshot ? defaultSnapshotUrl : defaultReleaseUrl)
+            println "Downloading OpenSearch (Linux-min) from: ${url}"
+            ant.get(src: url, dest: tarDest, verbose: true, usetimestamp: true)
+        }
+    }
+}
+
+// --- Unpack and ensure scripts are executable ---
+tasks.register('unpackOpenSearch', Copy) {
+    dependsOn 'prepareOpenSearchTar'
+    from { tarTree(resources.gzip(tarDest)) }
+    into osRootDir
+    doLast {
+        def children = osRootDir.listFiles() ?: [] as File[]
+        println "Unpacked into: ${osRootDir}"
+        println "Contents: ${children.collect{it.name}}"
+        // Make sure scripts are executable (macOS sometimes strips exec bits)
+        def root = osRootDir.listFiles().find { it.isDirectory() && it.name.toLowerCase().startsWith("opensearch") }
+        if (root) {
+            ["bin/opensearch", "bin/opensearch-plugin"].each { rel ->
+                def f = new File(root, rel)
+                if (f.exists()) {
+                    f.setExecutable(true, true)
+                }
+            }
+        }
+    }
+}
+
+// --- Helper: locate OpenSearch home (works for min / non-min) ---
+def findOpenSearchHome = {
+    if (!osRootDir.exists()) osRootDir.mkdirs()
+    def cands = osRootDir.listFiles()?.findAll { it.isDirectory() && it.name.toLowerCase().startsWith("opensearch") } ?: []
+    if (cands.isEmpty()) {
+        throw new GradleException("No 'opensearch*' directory under ${osRootDir}. " +
+            "Expected something like 'opensearch-3.x.y'.")
+    }
+    return cands.sort { -it.lastModified() }[0]
+}
+
+// Try explicit override → Maven coords → Maven Central URL → artifacts site → (optional) CI
+def useCiPluginMirror = (findProperty('useCiPluginMirror') ?: 'false').toString().toBoolean()
+
+def pluginUrlFor = { String pluginName ->
+    // 1) explicit per-plugin override: -PdepPluginUrls="name=url,name2=url2"
+    if (depPluginUrls) {
+        def map = depPluginUrls.split(/\s*,\s*/).findResults {
+            def m = it.split(/\s*=\s*/, 2)
+            (m.size() == 2) ? [(m[0]): m[1]] : null
+        }.inject([:]) { acc, m -> acc << m }
+        if (map[pluginName]) return [ map[pluginName] ]
+    }
+
+    def baseVerShort = baseVer.split('\\.')[0..1].join('.') // e.g., 3.2
+    def candidates = []
+
+    // 2) Maven coordinates (opensearch-plugin can fetch from Maven Central)
+    candidates << "org.opensearch.plugin:${pluginName}:${pluginVer}"
+
+    // 3) Direct Maven Central URL (repo1) — what you provided
+    candidates << "https://repo1.maven.org/maven2/org/opensearch/plugin/${pluginName}/${pluginVer}/${pluginName}-${pluginVer}.zip"
+
+    // 4) Official artifacts site (releases or snapshots)
+    if (isSnapshot) {
+        candidates << "https://artifacts.opensearch.org/snapshots/plugins/${pluginName}/${osVersion}/${pluginName}-${pluginVer}.zip"
+    } else {
+        candidates << "https://artifacts.opensearch.org/releases/plugins/${pluginName}/${baseVer}/${pluginName}-${pluginVer}.zip"
+    }
+
+    // 5) Optional CI/BWC mirror (off by default)
+    if (useCiPluginMirror && !isSnapshot) {
+        candidates << "https://ci.opensearch.org/ci/dbc/distribution-build-opensearch/${baseVerShort}/latest/linux/x64/tar/builds/opensearch/plugins/${pluginName}-${pluginVer}.zip"
+    }
+
+    return candidates
+}
+
+// --- Install dependency plugins (Job Scheduler first) ---
+tasks.register('installDepPlugins') {
+    dependsOn 'unpackOpenSearch'
+    mustRunAfter 'clean'
+    doLast {
+        def root = findOpenSearchHome()
+        def depNames = depPluginsCsv.split(/\s*,\s*/).findAll { it }
+
+        depNames.each { pluginName ->
+            if (forceReinstallDeps) {
+                exec {
+                    workingDir root
+                    ignoreExitValue = true
+                    environment "OPENSEARCH_JAVA_HOME", osJavaHome
+                    commandLine "./bin/opensearch-plugin", "remove", pluginName
+                }
+            } else if (new File(root, "plugins/${pluginName}").exists()) {
+                println "Dependency plugin already present: ${pluginName} — skipping."
+                return
+            }
+
+            def installed = false
+            def tried = []
+            pluginUrlFor(pluginName).each { ref ->
+                if (installed) return
+                tried << ref
+                def res = exec {
+                    workingDir root
+                    ignoreExitValue = true
+                    environment "OPENSEARCH_JAVA_HOME", osJavaHome
+                    commandLine "./bin/opensearch-plugin", "install", "--batch", ref
+                }
+                if (res.exitValue == 0) {
+                    println "Installed dependency plugin: ${pluginName} via ${ref}"
+                    installed = true
+                } else {
+                    println "Install attempt failed for ${pluginName} via ${ref} (trying next)"
+                }
+            }
+            if (!installed) throw new GradleException("Failed to install dependency plugin ${pluginName}. Tried: ${tried}")
+        }
+    }
+}
+
+// --- Always reinstall AD (remove if exists, then install fresh ZIP) ---
+tasks.register('installPlugin') {
+    dependsOn 'bundlePlugin', 'installDepPlugins'
+    mustRunAfter 'clean'
+    doLast {
+        def root = findOpenSearchHome()
+        // remove if present
+        exec {
+            workingDir root
+            ignoreExitValue = true
+            environment "OPENSEARCH_JAVA_HOME", osJavaHome
+            commandLine "./bin/opensearch-plugin", "remove", "opensearch-anomaly-detection"
+        }
+        File pluginZip = tasks.named('bundlePlugin').get().archiveFile.get().asFile
+        if (!pluginZip.exists()) throw new GradleException("Plugin zip not found: ${pluginZip}")
+        exec {
+            workingDir root
+            environment "OPENSEARCH_JAVA_HOME", osJavaHome
+            commandLine "./bin/opensearch-plugin", "install", "--batch", "file:${pluginZip.absolutePath}"
+        }
+        println "Installed AD plugin from ${pluginZip.name}"
+    }
+}
+
+// --- Run OpenSearch single-node on explicit ports (Linux/macOS) ---
+tasks.register('runAtPorts', Exec) {
+    group = "opensearch"
+    description = "Run OpenSearch (Linux-min) single-node with this plugin on custom HTTP/transport ports (Linux/macOS)"
+    dependsOn 'bundlePlugin', 'installPlugin'
+    mustRunAfter 'clean'
+    doFirst {
+        def root = findOpenSearchHome()
+        workingDir root
+        def cmd = ["./bin/opensearch",
+            "-E", "discovery.type=single-node",
+            "-E", "http.port=${httpPort}",
+            "-E", "transport.port=${transportPort}"]
+        if (extraSettings) {
+            extraSettings.split(/\s*,\s*/).findAll { it }.each { kv -> cmd += ["-E", kv] }
+        }
+        commandLine cmd
+        // Force use of host JDK (mac must not try to use the Linux JDK inside the tarball)
+        environment "OPENSEARCH_JAVA_HOME", osJavaHome
+        if (osJavaOpts) environment "OPENSEARCH_JAVA_OPTS", osJavaOpts
+
+        println "OpenSearch home       : ${root}"
+        println "HTTP / Transport ports: ${httpPort} / ${transportPort}"
+        println "OPENSEARCH_JAVA_HOME  : ${osJavaHome}"
+        if (extraSettings) println "Extra -E              : ${extraSettings}"
+        if (osJavaOpts)   println "OPENSEARCH_JAVA_OPTS  : ${osJavaOpts}"
+        println "Starting OpenSearch (single-node)... (Ctrl+C to stop)"
     }
 }

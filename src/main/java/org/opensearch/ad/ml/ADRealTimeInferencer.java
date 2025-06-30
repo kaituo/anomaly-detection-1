@@ -5,12 +5,11 @@
 
 package org.opensearch.ad.ml;
 
-import static org.opensearch.timeseries.TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME;
-
 import java.time.Clock;
 
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
@@ -31,12 +30,29 @@ import org.opensearch.timeseries.stats.Stats;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class ADRealTimeInferencer extends
-    RealTimeInferencer<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADColdStart, ADModelManager, ADSaveResultStrategy, ADPriorityCache, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker> {
+    RealTimeInferencer<
+        ThresholdedRandomCutForest,
+        AnomalyResult,
+        ThresholdingResult,
+        ADIndex,
+        ADIndexManagement,
+        ADCheckpointStore,
+        ADCheckpointWriteWorker,
+        ADColdStart,
+        ADModelManager,
+        ADSaveResultStrategy,
+        ADPriorityCache,
+        ADTaskCacheManager,
+        ADTaskType,
+        ADTask,
+        ADTaskManager,
+        ADColdStartWorker
+    > {
 
     public ADRealTimeInferencer(
         ADModelManager modelManager,
         Stats stats,
-        ADCheckpointDao checkpointDao,
+        ADCheckpointStore checkpointDao,
         ADColdStartWorker coldStartWorker,
         ADSaveResultStrategy resultWriteWorker,
         ADCacheProvider cache,
@@ -53,7 +69,7 @@ public class ADRealTimeInferencer extends
             resultWriteWorker,
             cache,
             threadPool,
-            AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             clock,
             searchFeatureDao,
             AnalysisType.AD

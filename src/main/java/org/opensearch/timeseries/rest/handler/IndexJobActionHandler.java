@@ -98,6 +98,19 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
     private final String stateIndex;
     private final ActionType<StopConfigResponse> stopConfigAction;
     protected final NodeStateManager nodeStateManager;
+    // Strategies to start/stop realtime job; default to indexing-based implementation
+    protected final JobStarter jobStarter;
+    protected final JobStopper jobStopper;
+
+    @FunctionalInterface
+    public interface JobStarter {
+        void start(Config config, TransportService transportService, Clock clock, ActionListener<JobResponse> listener);
+    }
+
+    @FunctionalInterface
+    public interface JobStopper {
+        void stop(String configId, TransportService transportService, ActionListener<JobResponse> listener);
+    }
 
     /**
      * Constructor function.
@@ -129,6 +142,49 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
         Settings settings,
         Setting<TimeValue> timeoutSetting
     ) {
+        this(client, indexManagement, xContentRegistry, taskManager, recorder, resultAction, analysisType, stateIndex, stopConfigAction, nodeStateManager, settings, timeoutSetting, null, null);
+    }
+
+    /**
+     * Constructor overload allowing custom job start strategy.
+     */
+    public IndexJobActionHandler(
+        Client client,
+        IndexManagementType indexManagement,
+        NamedXContentRegistry xContentRegistry,
+        TaskManagerType taskManager,
+        ExecuteResultResponseRecorderType recorder,
+        ActionType<? extends ResultResponse<IndexableResultType>> resultAction,
+        AnalysisType analysisType,
+        String stateIndex,
+        ActionType<StopConfigResponse> stopConfigAction,
+        NodeStateManager nodeStateManager,
+        Settings settings,
+        Setting<TimeValue> timeoutSetting,
+        JobStarter jobStarter
+    ) {
+        this(client, indexManagement, xContentRegistry, taskManager, recorder, resultAction, analysisType, stateIndex, stopConfigAction, nodeStateManager, settings, timeoutSetting, jobStarter, null);
+    }
+
+    /**
+     * Constructor overload allowing custom job start/stop strategies.
+     */
+    public IndexJobActionHandler(
+        Client client,
+        IndexManagementType indexManagement,
+        NamedXContentRegistry xContentRegistry,
+        TaskManagerType taskManager,
+        ExecuteResultResponseRecorderType recorder,
+        ActionType<? extends ResultResponse<IndexableResultType>> resultAction,
+        AnalysisType analysisType,
+        String stateIndex,
+        ActionType<StopConfigResponse> stopConfigAction,
+        NodeStateManager nodeStateManager,
+        Settings settings,
+        Setting<TimeValue> timeoutSetting,
+        JobStarter jobStarter,
+        JobStopper jobStopper
+    ) {
         this.client = client;
         this.indexManagement = indexManagement;
         this.xContentRegistry = xContentRegistry;
@@ -140,10 +196,19 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
         this.stopConfigAction = stopConfigAction;
         this.nodeStateManager = nodeStateManager;
         this.requestTimeout = timeoutSetting.get(settings);
+        this.jobStarter = jobStarter != null ? jobStarter : this::defaultStartJob;
+        this.jobStopper = jobStopper != null ? jobStopper : this::defaultStopJob;
     }
 
     /**
-     * Start job.
+     * Start job via injected strategy.
+     */
+    public void startJob(Config config, TransportService transportService, Clock clock, ActionListener<JobResponse> listener) {
+        jobStarter.start(config, transportService, clock, listener);
+    }
+
+    /**
+     * Default implementation backing the start strategy.
      * 1. If job doesn't exist, create new job.
      * 2. If job exists: a). if job enabled, return error message; b). if job disabled, enable job.
      * @param config config accessor
@@ -151,7 +216,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
      * @param clock clock to get current time
      * @param listener Listener to send responses
      */
-    public void startJob(Config config, TransportService transportService, Clock clock, ActionListener<JobResponse> listener) {
+    protected void defaultStartJob(Config config, TransportService transportService, Clock clock, ActionListener<JobResponse> listener) {
         // this start listener is created & injected throughout the job handler so that whenever the job response is received,
         // there's the extra step of trying to index results and update detector state with a 60s delay.
         ActionListener<JobResponse> startListener = ActionListener.wrap(r -> {
@@ -221,6 +286,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                 Instant.now(),
                 duration.getSeconds(),
                 config.getUser(),
+                config.getTenantId(),
                 config.getCustomResultIndexOrAlias(),
                 analysisType
             );
@@ -275,6 +341,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                         Instant.now(),
                         job.getLockDurationSeconds(),
                         job.getUser(),
+                        job.getTenantId(),
                         job.getCustomResultIndexOrAlias(),
                         job.getAnalysisType()
                     );
@@ -400,14 +467,21 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
     }
 
     /**
-     * Stop config job.
+     * Stop job via injected strategy.
+     */
+    public void stopJob(String configId, TransportService transportService, ActionListener<JobResponse> listener) {
+        jobStopper.stop(configId, transportService, listener);
+    }
+
+    /**
+     * Default implementation backing the stop strategy.
      * 1.If job not exists, return error message
      * 2.If job exists: a).if job state is disabled, return error message; b).if job state is enabled, disable job.
      *
      * @param configId config identifier
      * @param listener Listener to send responses
      */
-    public void stopJob(String configId, TransportService transportService, ActionListener<JobResponse> listener) {
+    protected void defaultStopJob(String configId, TransportService transportService, ActionListener<JobResponse> listener) {
         GetRequest getRequest = new GetRequest(CommonName.JOB_INDEX).id(configId);
 
         client.get(getRequest, ActionListener.wrap(response -> {
@@ -428,6 +502,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
                             Instant.now(),
                             job.getLockDurationSeconds(),
                             job.getUser(),
+                            job.getTenantId(),
                             job.getCustomResultIndexOrAlias(),
                             job.getAnalysisType()
                         );
@@ -576,7 +651,7 @@ public abstract class IndexJobActionHandler<IndexType extends Enum<IndexType> & 
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             if (dateRange == null) {
                 // start realtime job
-                startJob(config.get(), transportService, clock, listener);
+                jobStarter.start(config.get(), transportService, clock, listener);
             } else {
                 // start historical analysis task
                 taskManager.startHistorical(config.get(), dateRange, user, transportService, listener);

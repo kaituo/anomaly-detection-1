@@ -21,6 +21,7 @@ public class FeatureRequest extends QueuedRequest {
     protected final String modelId;
     private final Optional<Entity> entity;
     private final String taskId;
+    private final String tenantId;
 
     // used in HC
     public FeatureRequest(
@@ -30,14 +31,16 @@ public class FeatureRequest extends QueuedRequest {
         double[] currentFeature,
         long dataStartTimeMs,
         Entity entity,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
         super(expirationEpochMs, configId, priority);
         this.currentFeature = currentFeature;
         this.dataStartTimeMillis = dataStartTimeMs;
-        this.modelId = entity.getModelId(configId).isEmpty() ? null : entity.getModelId(configId).get();
+        this.modelId = entity.getModelId(tenantId, configId).isEmpty() ? null : entity.getModelId(tenantId, configId).get();
         this.entity = Optional.ofNullable(entity);
         this.taskId = taskId;
+        this.tenantId = tenantId;
     }
 
     // used in single-stream
@@ -48,7 +51,8 @@ public class FeatureRequest extends QueuedRequest {
         String modelId,
         double[] currentFeature,
         long dataStartTimeMs,
-        String taskId
+        String taskId,
+        String tenantId
     ) {
         super(expirationEpochMs, configId, priority);
         this.currentFeature = currentFeature;
@@ -56,6 +60,7 @@ public class FeatureRequest extends QueuedRequest {
         this.modelId = modelId;
         this.entity = Optional.empty();
         this.taskId = taskId;
+        this.tenantId = tenantId;
     }
 
     public double[] getCurrentFeature() {
@@ -80,5 +85,9 @@ public class FeatureRequest extends QueuedRequest {
 
     public boolean isRunOnce() {
         return taskId != null;
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 }

@@ -24,6 +24,7 @@ import org.opensearch.transport.client.node.NodeClient;
 import org.owasp.encoder.Encode;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.commons.lang3.StringUtils;
 
 public class RestDeleteForecasterAction extends BaseRestHandler {
     public static final String DELETE_FORECASTER_ACTION = "delete_forecaster";
@@ -42,10 +43,12 @@ public class RestDeleteForecasterAction extends BaseRestHandler {
         }
 
         try {
-            String forecasterId = request.param(FORECASTER_ID);
-            DeleteConfigRequest deleteForecasterRequest = new DeleteConfigRequest(forecasterId, ForecastIndex.CONFIG.getIndexName());
-            return channel -> client
-                .execute(DeleteForecasterAction.INSTANCE, deleteForecasterRequest, new RestToXContentListener<>(channel));
+            String forecasterId = request.param("forecasterID");
+            if (StringUtils.isEmpty(forecasterId)) {
+                throw new IllegalArgumentException("Request should contain forecasterID");
+            }
+            DeleteConfigRequest deleteForecasterRequest = new DeleteConfigRequest(forecasterId, ForecastIndex.CONFIG.getIndexName(), null);
+            return channel -> client.execute(DeleteForecasterAction.INSTANCE, deleteForecasterRequest, new RestToXContentListener<>(channel));
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException(Encode.forHtml(e.getMessage()));
         }

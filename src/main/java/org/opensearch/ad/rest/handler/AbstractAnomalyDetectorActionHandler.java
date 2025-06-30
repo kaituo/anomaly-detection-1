@@ -251,8 +251,47 @@ public abstract class AbstractAnomalyDetectorActionHandler<T extends ActionRespo
             config.getCustomResultIndexTTL(),
             config.getFlattenResultIndexMapping(),
             breakingUIChange ? Instant.now() : config.getLastBreakingUIChangeTime(),
-            config.getFrequency()
+            config.getFrequency(),
+            config.getTenantId()
         );
+    }
+
+    protected AnomalyDetector createAnomalyDetector(AnomalyDetector detector, User user, String analysisType) {
+        return new AnomalyDetector(
+            detector.getId(),
+            detector.getVersion(),
+            detector.getName(),
+            detector.getDescription(),
+            detector.getTimeField(),
+            detector.getIndices(),
+            detector.getFeatureAttributes(),
+            detector.getFilterQuery(),
+            detector.getInterval(),
+            detector.getWindowDelay(),
+            detector.getShingleSize(),
+            detector.getUiMetadata(),
+            detector.getSchemaVersion(),
+            Instant.now(),
+            detector.getCategoryFields(),
+            user,
+            detector.getCustomResultIndexOrAlias(),
+            detector.getImputationOption(),
+            detector.getRecencyEmphasis(),
+            detector.getSeasonIntervals(),
+            detector.getHistoryIntervals(),
+            detector.getRules(),
+            detector.getCustomResultIndexMinSize(),
+            detector.getCustomResultIndexMinAge(),
+            detector.getCustomResultIndexTTL(),
+            detector.getFlattenResultIndexMapping(),
+            detector.getLastBreakingUIChangeTime(),
+            detector.getFrequency(),
+            detector.getTenantId()
+        );
+    }
+
+    protected String getAnalysisType(RestRequest request) {
+        return request.param("type");
     }
 
     @SuppressWarnings("unchecked")

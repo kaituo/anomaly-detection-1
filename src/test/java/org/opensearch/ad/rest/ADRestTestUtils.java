@@ -383,6 +383,7 @@ public class ADRestTestUtils {
                 null,
                 null,
                 null,
+                null,
                 AnalysisType.AD
             );
             results.put(ANOMALY_DETECTOR_JOB, job);

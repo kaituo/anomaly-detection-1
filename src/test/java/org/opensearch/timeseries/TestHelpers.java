@@ -438,7 +438,8 @@ public class TestHelpers {
             null,
             null,
             lastUpdateTime,
-            new IntervalTimeConfiguration(detectionIntervalInMinutes, ChronoUnit.MINUTES)
+            new IntervalTimeConfiguration(detectionIntervalInMinutes, ChronoUnit.MINUTES),
+            null
         );
     }
 
@@ -495,7 +496,8 @@ public class TestHelpers {
             null,
             null,
             Instant.now(),
-            new IntervalTimeConfiguration(detectionIntervalInMinutes, ChronoUnit.MINUTES)
+            new IntervalTimeConfiguration(detectionIntervalInMinutes, ChronoUnit.MINUTES),
+            null
         );
     }
 
@@ -564,7 +566,8 @@ public class TestHelpers {
             null,
             null,
             Instant.now(),
-            interval
+            interval,
+            null
         );
     }
 
@@ -608,7 +611,8 @@ public class TestHelpers {
             null,
             null,
             Instant.now(),
-            interval
+            interval,
+            null
         );
     }
 
@@ -645,7 +649,8 @@ public class TestHelpers {
             null,
             true,
             Instant.now(),
-            interval
+            interval,
+            null
         );
     }
 
@@ -681,7 +686,8 @@ public class TestHelpers {
             null,
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
-            interval
+            interval,
+            null
         );
     }
 
@@ -723,7 +729,8 @@ public class TestHelpers {
             null,
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
-            interval
+            interval,
+            null
         );
     }
 
@@ -903,7 +910,8 @@ public class TestHelpers {
                 null,
                 null,
                 lastUpdateTime,
-                detectionInterval
+                detectionInterval,
+                null
             );
         }
     }
@@ -942,7 +950,8 @@ public class TestHelpers {
             null,
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
-            interval
+            interval,
+            null
         );
     }
 
@@ -1248,6 +1257,7 @@ public class TestHelpers {
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             60L,
             randomUser(),
+            null,
             null,
             AnalysisType.AD
         );
@@ -2120,7 +2130,8 @@ public class TestHelpers {
                 customResultIndexTTL,
                 flattenResultIndexMapping,
                 lastUpdateTime,
-                forecastInterval
+                forecastInterval,
+                null
             );
         }
     }
@@ -2159,7 +2170,8 @@ public class TestHelpers {
             null,
             null,
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
-            interval
+            interval,
+            null
         );
     }
 
@@ -2264,6 +2276,7 @@ public class TestHelpers {
         private Instant forecastDataStartTime = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         private Instant forecastDataEndTime = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         private Integer horizonIndex = randomIntBetween(1, 10);
+        private String tenantId = randomAlphaOfLength(5);
 
         public ForecastResultBuilder() {
 
@@ -2293,7 +2306,8 @@ public class TestHelpers {
                 upperBound,
                 forecastDataStartTime,
                 forecastDataEndTime,
-                horizonIndex
+                horizonIndex,
+                tenantId
             );
         }
     }
@@ -2308,6 +2322,7 @@ public class TestHelpers {
         private Instant lastUpdateTime = Instant.now().truncatedTo(ChronoUnit.SECONDS);
         private Long lockDurationSeconds = 60L;
         private User user = randomUser();
+        private String tenantId = null;
         private String resultIndex = null;
         private AnalysisType analysisType = AnalysisType.AD;
 
@@ -2364,6 +2379,11 @@ public class TestHelpers {
             return this;
         }
 
+        public JobBuilder tenantId(String tenantId) {
+            this.tenantId = tenantId;
+            return this;
+        }
+
         public JobBuilder resultIndex(String resultIndex) {
             this.resultIndex = resultIndex;
             return this;
@@ -2385,6 +2405,7 @@ public class TestHelpers {
                 lastUpdateTime,
                 lockDurationSeconds,
                 user,
+                tenantId,
                 resultIndex,
                 analysisType
             );
@@ -2421,6 +2442,7 @@ public class TestHelpers {
         Instant forecastDataStartTime = dataEndTime.plusSeconds(random.nextInt(3600));
         Instant forecastDataEndTime = forecastDataStartTime.plusSeconds(random.nextInt(3600));
         Integer horizonIndex = random.nextInt(100);
+        String tenantId = randomAlphaOfLength(10);
 
         return new ForecastResult(
             forecasterId,
@@ -2441,7 +2463,8 @@ public class TestHelpers {
             upperBound,
             forecastDataStartTime,
             forecastDataEndTime,
-            horizonIndex
+            horizonIndex,
+            tenantId
         );
     }
 }

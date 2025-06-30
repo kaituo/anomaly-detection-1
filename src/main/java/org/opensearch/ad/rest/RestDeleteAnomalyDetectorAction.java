@@ -29,6 +29,7 @@ import org.opensearch.timeseries.transport.DeleteConfigRequest;
 import org.opensearch.transport.client.node.NodeClient;
 
 import com.google.common.collect.ImmutableList;
+import org.apache.commons.lang3.StringUtils;
 
 /**
  * This class consists of the REST handler to delete anomaly detector.
@@ -50,8 +51,12 @@ public class RestDeleteAnomalyDetectorAction extends BaseRestHandler {
             throw new IllegalStateException(ADCommonMessages.DISABLED_ERR_MSG);
         }
 
-        String detectorId = request.param(DETECTOR_ID);
-        DeleteConfigRequest deleteAnomalyDetectorRequest = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName());
+        String detectorId = request.param("detectorID");
+
+        if (StringUtils.isEmpty(detectorId)) {
+            throw new IllegalArgumentException("Request should contain detectorID");
+        }
+        DeleteConfigRequest deleteAnomalyDetectorRequest = new DeleteConfigRequest(detectorId, ADIndex.CONFIG.getIndexName(), null);
         return channel -> client
             .execute(DeleteAnomalyDetectorAction.INSTANCE, deleteAnomalyDetectorRequest, new RestToXContentListener<>(channel));
     }

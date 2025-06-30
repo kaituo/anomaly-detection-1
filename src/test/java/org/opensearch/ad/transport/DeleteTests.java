@@ -173,6 +173,17 @@ public class DeleteTests extends AbstractTimeSeriesTest {
         StreamInput streamInput = output.bytes().streamInput();
         DeleteModelRequest readRequest = new DeleteModelRequest(streamInput);
         assertThat(request.getAdID(), equalTo(readRequest.getAdID()));
+        assertThat(readRequest.getTenantId(), is(nullValue()));
+    }
+
+    public void testSerialzationRequestDeleteModelWithTenant() throws IOException {
+        DeleteModelRequest request = new DeleteModelRequest("123", "tenant1");
+        BytesStreamOutput output = new BytesStreamOutput();
+        request.writeTo(output);
+        StreamInput streamInput = output.bytes().streamInput();
+        DeleteModelRequest readRequest = new DeleteModelRequest(streamInput);
+        assertThat(request.getAdID(), equalTo(readRequest.getAdID()));
+        assertThat(request.getTenantId(), equalTo(readRequest.getTenantId()));
     }
 
     public void testSerialzationRequestStopDetector() throws IOException {
@@ -238,7 +249,7 @@ public class DeleteTests extends AbstractTimeSeriesTest {
         DiscoveryNodeFilterer nodeFilter = mock(DiscoveryNodeFilterer.class);
         StopDetectorTransportAction action = new StopDetectorTransportAction(transportService, nodeFilter, actionFilters, client);
 
-        StopConfigRequest request = new StopConfigRequest().adID(detectorID);
+        StopConfigRequest request = new StopConfigRequest().adID(detectorID).tenantId("tenant1");
         PlainActionFuture<StopConfigResponse> listener = new PlainActionFuture<>();
         action.doExecute(task, request, listener);
 

@@ -168,6 +168,7 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
                 }
 
                 Config config = configOptional.get();
+                profileRequest.setTenantId(config.getTenantId());
                 if (config.isLongFrequency()) {
                     log.info("Update latest realtime task for long-interval config {}", configId);
                     updateLatestRealtimeTask(configId, null, 0L, response.getConfigIntervalInMinutes(), response.getError(), clock);
@@ -279,7 +280,7 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
             Instant dataEndTime = executeEndTime.minus(windowDelay.getInterval(), windowDelay.getUnit());
             User user = config.getUser();
 
-            IndexableResultType resultToSave = createErrorResult(configId, dataStartTime, dataEndTime, executeEndTime, errorMessage, user);
+            IndexableResultType resultToSave = createErrorResult(configId, dataStartTime, dataEndTime, executeEndTime, errorMessage, user, config.getTenantId());
             String resultIndexOrAlias = config.getCustomResultIndexOrAlias();
             resultHandler.index(resultToSave, configId, resultIndexOrAlias);
 
@@ -352,7 +353,8 @@ public abstract class ExecuteResultResponseRecorder<IndexType extends Enum<Index
         Instant dataEndTime,
         Instant executeEndTime,
         String errorMessage,
-        User user
+        User user,
+        String tenantId
     );
 
     // protected abstract void updateRealtimeTask(ResultResponseType response, String configId);

@@ -39,7 +39,8 @@ public class ForecastCacheBuffer extends
         ForecastCheckpointWriteWorker checkpointWriteQueue,
         ForecastCheckpointMaintainWorker checkpointMaintainQueue,
         String configId,
-        PriorityTracker priorityTracker
+        PriorityTracker priorityTracker,
+        String tenantId
     ) {
         super(
             minimumCapacity,
@@ -52,7 +53,8 @@ public class ForecastCacheBuffer extends
             checkpointMaintainQueue,
             configId,
             Origin.REAL_TIME_FORECASTER,
-            priorityTracker
+            priorityTracker,
+            tenantId
         );
     }
 }

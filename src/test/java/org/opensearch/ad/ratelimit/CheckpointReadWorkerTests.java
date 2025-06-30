@@ -68,7 +68,6 @@ import org.opensearch.threadpool.ThreadPoolStats;
 import org.opensearch.threadpool.ThreadPoolStats.Stats;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.TestHelpers;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
@@ -603,7 +602,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
     public void testRemoveUnusedQueues() {
         // do nothing when putting a request to keep queues not empty
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
 
         worker = new ADCheckpointReadWorker(
             Integer.MAX_VALUE,
@@ -647,7 +646,7 @@ public class CheckpointReadWorkerTests extends AbstractRateLimitingTest {
     private void maintenanceSetup() {
         // do nothing when putting a request to keep queues not empty
         ExecutorService executorService = mock(ExecutorService.class);
-        when(threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         when(threadPool.stats()).thenReturn(new ThreadPoolStats(new ArrayList<Stats>()));
     }
 

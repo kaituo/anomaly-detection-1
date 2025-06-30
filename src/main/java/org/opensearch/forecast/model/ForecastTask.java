@@ -345,7 +345,8 @@ public class ForecastTask extends TimeSeriesTask {
                 forecaster.getCustomResultIndexTTL(),
                 forecaster.getFlattenResultIndexMapping(),
                 forecaster.getLastBreakingUIChangeTime(),
-                forecaster.getFrequency()
+                forecaster.getFrequency(),
+                forecaster.getTenantId()
             );
         return new Builder()
             .taskId(parsedTaskId)
@@ -408,5 +409,10 @@ public class ForecastTask extends TimeSeriesTask {
 
     public void setDateRange(DateRange dateRange) {
         this.dateRange = dateRange;
+    }
+
+    @Override
+    public String getTenantId() {
+        return forecaster.getTenantId();
     }
 }

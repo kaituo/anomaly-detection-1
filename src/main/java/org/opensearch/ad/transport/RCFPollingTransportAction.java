@@ -41,6 +41,7 @@ import org.opensearch.transport.TransportService;
  * Transport action to get total rcf updates from hosted models or checkpoint
  *
  */
+@Deprecated
 public class RCFPollingTransportAction extends HandledTransportAction<RCFPollingRequest, RCFPollingResponse> {
 
     private static final Logger LOG = LogManager.getLogger(RCFPollingTransportAction.class);
@@ -79,7 +80,7 @@ public class RCFPollingTransportAction extends HandledTransportAction<RCFPolling
 
         String adID = request.getAdID();
 
-        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(adID, 0);
+        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(request.getTenantId(), adID, 0);
 
         Optional<DiscoveryNode> rcfNode = hashRing.getOwningNodeWithSameLocalVersionForRealtime(rcfModelID);
         if (!rcfNode.isPresent()) {

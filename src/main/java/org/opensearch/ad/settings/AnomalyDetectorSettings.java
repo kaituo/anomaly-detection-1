@@ -671,4 +671,70 @@ public final class AnomalyDetectorSettings {
     // The reason we need a max is because user could give an arbitrarly large interval where we don't know even
     // with multiplying the interval down how many intervals will be tried.
     public static final int MAX_TIMES_DECREASING_INTERVAL = 10;
+
+    // ======================================
+    // EventBridge setting
+    // ======================================
+
+    public static final Setting<String> AD_SQS_QUEUE_ARN = Setting
+        .simpleString("plugins.anomaly_detection.sqs_queue_arn", Setting.Property.NodeScope, Setting.Property.Final);
+
+    public static final Setting<String> AD_SCHEDULER_ROLE_ARN = Setting
+        .simpleString("plugins.anomaly_detection.scheduler_role_arn", Setting.Property.NodeScope, Setting.Property.Final);
+
+    // ======================================
+    // SQS Consumer settings
+    // ======================================
+    /** SQS queue URL for job processing */
+    public static final Setting<String> SQS_QUEUE_URL = Setting
+        .simpleString("plugins.anomaly_detection.sqs.queue_url", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** SQS polling interval in seconds */
+    public static final Setting<TimeValue> SQS_POLLING_INTERVAL = Setting
+        .positiveTimeSetting(
+            "plugins.anomaly_detection.sqs.polling_interval",
+            TimeValue.timeValueSeconds(5),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    /** Maximum number of messages to fetch per SQS poll */
+    public static final Setting<Integer> SQS_MAX_MESSAGES = Setting
+        .intSetting("plugins.anomaly_detection.sqs.max_messages", 10, 1, 10, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
+    /** SQS message visibility timeout in seconds */
+    public static final Setting<Integer> SQS_VISIBILITY_TIMEOUT = Setting
+        .intSetting("plugins.anomaly_detection.sqs.visibility_timeout", 300, 0, 3600, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
+    /** SQS wait time for long polling in seconds */
+    public static final Setting<Integer> SQS_WAIT_TIME = Setting
+        .intSetting("plugins.anomaly_detection.sqs.wait_time", 20, 0, 20, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
+    /** Maximum concurrent SQS message processors */
+    public static final Setting<Integer> SQS_MAX_CONCURRENT_PROCESSORS = Setting
+        .intSetting("plugins.anomaly_detection.sqs.max_concurrent_processors", 5, 1, 50, Setting.Property.NodeScope, Setting.Property.Dynamic);
+
+    /** Job processing timeout in seconds */
+    public static final Setting<TimeValue> SQS_JOB_TIMEOUT = Setting
+        .positiveTimeSetting(
+            "plugins.anomaly_detection.sqs.job_timeout",
+            TimeValue.timeValueMinutes(5),
+            Setting.Property.NodeScope,
+            Setting.Property.Dynamic
+        );
+
+    // Role for SQS consumer
+    public static final String SQS_CONSUMER_ROLE = "sqs_consumer";
+
+    // ======================================
+    // S3 Checkpoint settings
+    // ======================================
+    public static final Setting<String> AD_S3_CHECKPOINT_BUCKET = Setting
+        .simpleString("plugins.anomaly_detection.s3_checkpoint_bucket", Setting.Property.NodeScope, Setting.Property.Final);
+
+    // ======================================
+    // Multi-tenancy setting
+    // ======================================
+    public static final Setting<Boolean> AD_MULTI_TENANCY_ENABLED = Setting
+        .boolSetting("plugins.anomaly_detection.multi_tenancy.enabled", false, Setting.Property.NodeScope, Setting.Property.Final);
 }

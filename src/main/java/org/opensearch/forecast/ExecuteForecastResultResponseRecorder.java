@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Optional;
 
 import org.opensearch.commons.authuser.User;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
@@ -22,7 +23,6 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ExecuteResultResponseRecorder;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.ResultResponse;
@@ -50,7 +50,7 @@ public class ExecuteForecastResultResponseRecorder extends
             taskManager,
             nodeFilter,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             client,
             nodeStateManager,
             clock,
@@ -67,7 +67,8 @@ public class ExecuteForecastResultResponseRecorder extends
         Instant dataEndTime,
         Instant executeEndTime,
         String errorMessage,
-        User user
+        User user,
+        String tenantId
     ) {
         return new ForecastResult(
             configId,
@@ -80,7 +81,8 @@ public class ExecuteForecastResultResponseRecorder extends
             errorMessage,
             Optional.empty(), // single-stream forecasters have no entity
             user,
-            indexManagement.getSchemaVersion(resultIndex)
+            indexManagement.getSchemaVersion(resultIndex),
+            tenantId
         );
     }
 

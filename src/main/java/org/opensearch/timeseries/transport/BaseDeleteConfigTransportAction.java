@@ -115,13 +115,13 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
 
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             verifyResourceAccessAndProcessRequest(
-                () -> deleteConfigIfNotRunning(configId, listener),
+                () -> deleteConfigIfNotRunning(request, listener),
                 () -> resolveUserAndExecute(
                     user,
                     configId,
                     filterByEnabled,
                     listener,
-                    (input) -> deleteConfigIfNotRunning(configId, listener),
+                    (input) -> deleteConfigIfNotRunning(request, listener),
                     client,
                     clusterService,
                     xContentRegistry,
@@ -135,11 +135,13 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
         }
     }
 
-    private void deleteConfigIfNotRunning(String configId, ActionListener<DeleteResponse> listener) {
+    private void deleteConfigIfNotRunning(DeleteConfigRequest request, ActionListener<DeleteResponse> listener) {
+        String tenantId = request.getTenantID();
+        String configId = request.getConfigID();
         nodeStateManager.getConfig(configId, analysisType, config -> {
             if (config.isEmpty()) {
                 LOG.info("Can't find config {}", configId);
-                taskManager.deleteTasks(configId, () -> deleteJobDoc(configId, listener), listener);
+                taskManager.deleteTasks(configId, () -> deleteJobDoc(tenantId, configId, listener), listener);
                 return;
             }
 
@@ -150,14 +152,14 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
                         String batchTaskName = configTask.get() instanceof ADTask ? "Historical" : "Run once";
                         listener.onFailure(new OpenSearchStatusException(batchTaskName + " is running", RestStatus.BAD_REQUEST));
                     } else {
-                        taskManager.deleteTasks(configId, () -> deleteJobDoc(configId, listener), listener);
+                        taskManager.deleteTasks(configId, () -> deleteJobDoc(tenantId, configId, listener), listener);
                     }
                 }, transportService, false, listener);
             });
         }, listener);
     }
 
-    private void deleteJobDoc(String configId, ActionListener<DeleteResponse> listener) {
+    protected void deleteJobDoc(String tenantId, String configId, ActionListener<DeleteResponse> listener) {
         LOG.info("Delete job {}", configId);
         DeleteRequest deleteRequest = new DeleteRequest(CommonName.JOB_INDEX, configId)
             .setRefreshPolicy(WriteRequest.RefreshPolicy.IMMEDIATE);
@@ -180,7 +182,7 @@ public abstract class BaseDeleteConfigTransportAction<TaskCacheManagerType exten
         }));
     }
 
-    private void deleteStateDoc(String configId, ActionListener<DeleteResponse> listener) {
+    protected void deleteStateDoc(String configId, ActionListener<DeleteResponse> listener) {
         LOG.info("Delete config state {}", configId);
         DeleteRequest deleteRequest = new DeleteRequest(stateIndex, configId);
         client.delete(deleteRequest, ActionListener.wrap(response -> {

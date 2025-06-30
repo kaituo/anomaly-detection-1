@@ -195,7 +195,8 @@ public final class AnomalyDetectorRunner {
                         Optional.ofNullable(entity),
                         detector.getUser(),
                         CommonValue.NO_SCHEMA_VERSION,
-                        null
+                        null,
+                        detector.getTenantId()
                     );
                     anomalyResults.add(result);
                 }

@@ -38,7 +38,9 @@ import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.unit.TimeValue;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.common.exception.ResourceNotFoundException;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
 import org.opensearch.timeseries.feature.FeatureManager;
@@ -63,7 +65,15 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * A facade managing ML operations and models.
  */
 public class ADModelManager extends
-    ModelManager<ThresholdedRandomCutForest, AnomalyResult, ThresholdingResult, ADIndex, ADIndexManagement, ADCheckpointDao, ADColdStart> {
+    ModelManager<
+        ThresholdedRandomCutForest,
+        AnomalyResult,
+        ThresholdingResult,
+        ADIndex,
+        ADIndexManagement,
+        ADCheckpointStore,
+        ADColdStart
+    > {
     protected static final String ENTITY_SAMPLE = "sp";
     protected static final String ENTITY_RCF = "rcf";
     protected static final String ENTITY_THRESHOLD = "th";
@@ -102,7 +112,7 @@ public class ADModelManager extends
      * @param clusterService Cluster service accessor
      */
     public ADModelManager(
-        ADCheckpointDao checkpointDao,
+        ADCheckpointStore checkpointDao,
         Clock clock,
         int rcfNumTrees,
         int rcfNumSamplesInTree,
@@ -115,9 +125,10 @@ public class ADModelManager extends
         FeatureManager featureManager,
         MemoryTracker memoryTracker,
         Settings settings,
-        ClusterService clusterService
+        ClusterService clusterService,
+        NodeStateManager nodeStateManager
     ) {
-        super(rcfNumTrees, rcfNumSamplesInTree, rcfNumMinSamples, entityColdStarter, memoryTracker, clock, featureManager, checkpointDao);
+        super(rcfNumTrees, rcfNumSamplesInTree, rcfNumMinSamples, entityColdStarter, memoryTracker, clock, featureManager, checkpointDao, nodeStateManager, AnalysisType.AD);
 
         this.thresholdMinPvalue = thresholdMinPvalue;
         this.minPreviewSize = minPreviewSize;

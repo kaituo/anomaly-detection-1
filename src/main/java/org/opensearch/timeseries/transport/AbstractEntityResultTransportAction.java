@@ -24,7 +24,7 @@ import org.opensearch.timeseries.common.exception.LimitExceededException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.IntermediateResult;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -47,8 +47,61 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 /**
  * Shared transport action skeleton for high-cardinality entity workflows.
  */
-public abstract class AbstractEntityResultTransportAction<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ModelColdStartType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>, ModelManagerType extends ModelManager<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, ModelColdStartType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType, ModelColdStartType, CacheType, IndexableResultType, IntermediateResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType, ModelColdStartType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>, HCCheckpointReadWorkerType extends CheckpointReadWorker<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType, ModelColdStartType, ModelManagerType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType>, ColdEntityWorkerType extends ColdEntityWorker<RCFModelType, IndexableResultType, IndexType, IndexManagementType, CheckpointDaoType, IntermediateResultType, ModelManagerType, CheckpointWriteWorkerType, ModelColdStartType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType, HCCheckpointReadWorkerType>>
+public abstract class AbstractEntityResultTransportAction<
+    RCFModelType extends ThresholdedRandomCutForest, 
+    IndexableResultType extends IndexableResult, 
+    IntermediateResultType extends IntermediateResult<IndexableResultType>, 
+    IndexType extends Enum<IndexType> & TimeSeriesIndex, 
+    IndexManagementType extends IndexManagement<IndexType>, 
+    CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, 
+    ModelColdStartType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>, 
+    ModelManagerType extends ModelManager<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, ModelColdStartType>, 
+    CacheType extends TimeSeriesCache<RCFModelType>, 
+    SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>, 
+    TaskCacheManagerType extends TaskCacheManager,
+    TaskTypeEnum extends TaskType,
+    TaskClass extends TimeSeriesTask,
+    TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>,
+    CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>,
+    ColdStartWorkerType extends ColdStartWorker<
+        RCFModelType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        CheckpointWriteWorkerType,
+        ModelColdStartType,
+        CacheType,
+        IndexableResultType,
+        IntermediateResultType,
+        ModelManagerType,
+        SaveResultStrategyType,
+        TaskCacheManagerType,
+        TaskTypeEnum,
+        TaskClass,
+        TaskManagerType
+    >,
+    InferencerType extends RealTimeInferencer<
+        RCFModelType,
+        IndexableResultType,
+        IntermediateResultType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        CheckpointWriteWorkerType,
+        ModelColdStartType,
+        ModelManagerType,
+        SaveResultStrategyType,
+        CacheType,
+        TaskCacheManagerType,
+        TaskTypeEnum,
+        TaskClass,
+        TaskManagerType,
+        ColdStartWorkerType
+    >,
+    HCCheckpointReadWorkerType extends CheckpointReadWorker<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType, ModelColdStartType, ModelManagerType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType>,
+    ColdEntityWorkerType extends ColdEntityWorker<RCFModelType, IndexableResultType, IndexType, IndexManagementType, CheckpointDaoType, IntermediateResultType, ModelManagerType, CheckpointWriteWorkerType, ModelColdStartType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType, HCCheckpointReadWorkerType>>
     extends HandledTransportAction<EntityResultRequest, AcknowledgedResponse> {
+    
     private static final Logger LOG = LogManager.getLogger(AbstractEntityResultTransportAction.class);
 
     private final CircuitBreakerService circuitBreakerService;
@@ -134,7 +187,7 @@ public abstract class AbstractEntityResultTransportAction<RCFModelType extends T
                     intervalDataProcessor.onGetConfig(listener, configId, request, previousException, request.getAnalysisType())
                 );
         } catch (Exception exception) {
-            LOG.error("fail to get entity's analysis result", exception);
+            LOG.error("Failed to get entity's analysis result", exception);
             listener.onFailure(exception);
         }
     }

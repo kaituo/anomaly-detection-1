@@ -390,4 +390,10 @@ public final class ForecastSettings {
     // ML
     // ======================================
     public static final int MINIMUM_SHINGLE_SIZE = 4;
+
+    // ======================================
+    // Multi-tenancy setting
+    // ======================================
+    public static final Setting<Boolean> FORECAST_MULTI_TENANCY_ENABLED = Setting
+        .boolSetting("plugins.forecast.multi_tenancy.enabled", false, Setting.Property.NodeScope, Setting.Property.Final);
 }

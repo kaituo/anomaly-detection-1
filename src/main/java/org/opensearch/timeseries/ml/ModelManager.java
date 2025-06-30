@@ -20,8 +20,11 @@ import java.util.Optional;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
+import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.core.action.ActionListener;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
@@ -33,7 +36,15 @@ import com.amazon.randomcutforest.RandomCutForest;
 import com.amazon.randomcutforest.parkservices.AnomalyDescriptor;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>> {
+public abstract class ModelManager<
+    RCFModelType extends ThresholdedRandomCutForest, 
+    IndexableResultType extends IndexableResult, 
+    IntermediateResultType extends IntermediateResult<IndexableResultType>, 
+    IndexType extends Enum<IndexType> & TimeSeriesIndex, 
+    IndexManagementType extends IndexManagement<IndexType>, 
+    CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>, 
+    ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>
+    > {
 
     private static final Logger LOG = LogManager.getLogger(ModelManager.class);
 
@@ -62,7 +73,9 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
     protected final Clock clock;
     protected FeatureManager featureManager;
     protected final CheckpointDaoType checkpointDao;
-
+    protected final NodeStateManager nodeStateManager;
+    protected final AnalysisType analysisType;
+    
     public ModelManager(
         int rcfNumTrees,
         int rcfNumSamplesInTree,
@@ -71,7 +84,9 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         MemoryTracker memoryTracker,
         Clock clock,
         FeatureManager featureManager,
-        CheckpointDaoType checkpointDao
+        CheckpointDaoType checkpointDao,
+        NodeStateManager nodeStateManager,
+        AnalysisType analysisType
     ) {
         this.rcfNumTrees = rcfNumTrees;
         this.rcfNumSamplesInTree = rcfNumSamplesInTree;
@@ -81,6 +96,8 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         this.clock = clock;
         this.featureManager = featureManager;
         this.checkpointDao = checkpointDao;
+        this.nodeStateManager = nodeStateManager;
+        this.analysisType = analysisType;
     }
 
     public IntermediateResultType getResult(
@@ -116,12 +133,20 @@ public abstract class ModelManager<RCFModelType extends ThresholdedRandomCutFore
         if (idIter.hasNext()) {
             String modelId = idIter.next();
             if (SingleStreamModelIdMapper.getConfigIdForModelId(modelId).equals(detectorId)) {
-                models.remove(modelId);
-                checkpointDao
-                    .deleteModelCheckpoint(
-                        modelId,
-                        ActionListener.wrap(r -> clearModelForIterator(detectorId, models, idIter, listener), listener::onFailure)
-                    );
+                nodeStateManager.getConfig(detectorId, analysisType, false, ActionListener.wrap(config -> {
+                    if (config.isPresent()) {
+                        models.remove(modelId);
+                        checkpointDao
+                            .deleteModelCheckpoint(
+                                config.get(),
+                                modelId,
+                                ActionListener.wrap(r -> clearModelForIterator(detectorId, models, idIter, listener), listener::onFailure)
+                            );
+                    } else {
+                        clearModelForIterator(detectorId, models, idIter, listener);
+                    }
+                }, listener::onFailure));
+                
             } else {
                 clearModelForIterator(detectorId, models, idIter, listener);
             }

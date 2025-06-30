@@ -8,6 +8,7 @@ package org.opensearch.forecast.model;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
 import static org.opensearch.forecast.constant.ForecastCommonName.CUSTOM_RESULT_INDEX_PREFIX;
 import static org.opensearch.index.query.AbstractQueryBuilder.parseInnerQueryBuilder;
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -137,7 +138,8 @@ public class Forecaster extends Config {
         Integer customResultIndexTTL,
         Boolean flattenResultIndexMapping,
         Instant lastBreakingUIChangeTime,
-        TimeConfiguration frequency
+        TimeConfiguration frequency,
+        String tenantId
     ) {
         super(
             forecasterId,
@@ -167,7 +169,8 @@ public class Forecaster extends Config {
             customResultIndexTTL,
             flattenResultIndexMapping,
             lastBreakingUIChangeTime,
-            frequency
+            frequency,
+            tenantId
         );
 
         checkAndThrowValidationErrors(ValidationAspect.FORECASTER);
@@ -319,6 +322,7 @@ public class Forecaster extends Config {
         Instant lastBreakingUIChangeTime = null;
         // by default, frequency is the same as interval when not set
         TimeConfiguration frequency = null;
+        String tenantId = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -467,6 +471,9 @@ public class Forecaster extends Config {
                         throw e;
                     }
                     break;
+                case TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -500,7 +507,8 @@ public class Forecaster extends Config {
             customResultIndexTTL,
             flattenResultIndexMapping,
             lastBreakingUIChangeTime,
-            frequency
+            frequency,
+            tenantId
         );
         return forecaster;
     }

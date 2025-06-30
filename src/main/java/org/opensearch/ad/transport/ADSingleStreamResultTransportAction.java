@@ -9,9 +9,10 @@ import org.opensearch.action.support.ActionFilters;
 import org.opensearch.ad.caching.ADCacheBuffer;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
@@ -32,7 +33,6 @@ import org.opensearch.common.inject.Inject;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
@@ -42,7 +42,32 @@ import org.opensearch.transport.TransportService;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class ADSingleStreamResultTransportAction extends
-    AbstractSingleStreamResultTransportAction<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, ADCheckpointMaintainWorker, ADCacheBuffer, ADPriorityCache, ADCacheProvider, AnomalyResult, ThresholdingResult, ADColdStart, ADModelManager, ADPriorityCache, ADSaveResultStrategy, ADTaskCacheManager, ADTaskType, ADTask, ADTaskManager, ADColdStartWorker, ADRealTimeInferencer, ADCheckpointReadWorker, ADResultWriteRequest, ADColdEntityWorker> {
+    AbstractSingleStreamResultTransportAction<
+        ThresholdedRandomCutForest,
+        ADIndex,
+        ADIndexManagement,
+        ADCheckpointStore,
+        ADCheckpointWriteWorker,
+        ADCheckpointMaintainWorker,
+        ADCacheBuffer,
+        ADPriorityCache,
+        ADCacheProvider,
+        AnomalyResult,
+        ThresholdingResult,
+        ADColdStart,
+        ADModelManager,
+        ADPriorityCache,
+        ADSaveResultStrategy,
+        ADTaskCacheManager,
+        ADTaskType,
+        ADTask,
+        ADTaskManager,
+        ADColdStartWorker,
+        ADRealTimeInferencer,
+        ADCheckpointReadWorker,
+        ADResultWriteRequest,
+        ADColdEntityWorker
+    > {
 
     @Inject
     public ADSingleStreamResultTransportAction(
@@ -67,7 +92,7 @@ public class ADSingleStreamResultTransportAction extends
             AnalysisType.AD,
             inferencer,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             coldEntityQueue
         );
     }

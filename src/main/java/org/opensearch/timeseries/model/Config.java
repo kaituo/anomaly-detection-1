@@ -6,6 +6,7 @@
 package org.opensearch.timeseries.model;
 
 import static org.opensearch.timeseries.constant.CommonMessages.INVALID_CHAR_IN_RESULT_INDEX_NAME;
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -129,6 +130,7 @@ public abstract class Config implements Writeable, ToXContentObject {
     protected Boolean flattenResultIndexMapping;
     protected Instant lastUIBreakingChangeTime;
     protected TimeConfiguration frequency;
+    protected String tenantId;
 
     public static String INVALID_RESULT_INDEX_NAME_SIZE = "Result index name size must contains less than "
         + MAX_RESULT_INDEX_NAME_SIZE
@@ -162,7 +164,8 @@ public abstract class Config implements Writeable, ToXContentObject {
         Integer customResultIndexTTL,
         Boolean flattenResultIndexMapping,
         Instant lastBreakingUIChangeTime,
-        TimeConfiguration frequency
+        TimeConfiguration frequency,
+        String tenantId
     ) {
         if (Strings.isBlank(name)) {
             errorMessage = CommonMessages.EMPTY_NAME;
@@ -357,6 +360,7 @@ public abstract class Config implements Writeable, ToXContentObject {
         this.flattenResultIndexMapping = Strings.trimToNull(resultIndex) == null ? null : flattenResultIndexMapping;
         this.lastUIBreakingChangeTime = lastBreakingUIChangeTime;
         this.frequency = frequency;
+        this.tenantId = tenantId;
     }
 
     /**
@@ -460,6 +464,7 @@ public abstract class Config implements Writeable, ToXContentObject {
         } else {
             this.frequency = null;
         }
+        this.tenantId = input.readOptionalString();
     }
 
     /*
@@ -520,6 +525,7 @@ public abstract class Config implements Writeable, ToXContentObject {
         } else {
             output.writeBoolean(false);
         }
+        output.writeOptionalString(tenantId);
     }
 
     public boolean invalidShingleSizeRange(Integer shingleSizeToTest) {
@@ -578,7 +584,8 @@ public abstract class Config implements Writeable, ToXContentObject {
             && Objects.equal(customResultIndexMinAge, config.customResultIndexMinAge)
             && Objects.equal(customResultIndexTTL, config.customResultIndexTTL)
             && Objects.equal(flattenResultIndexMapping, config.flattenResultIndexMapping)
-            && Objects.equal(frequency, config.frequency);
+            && Objects.equal(frequency, config.frequency)
+            && Objects.equal(tenantId, config.tenantId);
     }
 
     @Generated
@@ -607,7 +614,8 @@ public abstract class Config implements Writeable, ToXContentObject {
                 customResultIndexMinAge,
                 customResultIndexTTL,
                 flattenResultIndexMapping,
-                frequency
+                frequency,
+                tenantId
             );
     }
 
@@ -664,6 +672,10 @@ public abstract class Config implements Writeable, ToXContentObject {
         }
         if (frequency != null) {
             builder.field(FREQUENCY_FIELD, frequency);
+        }
+        System.out.println("tenantId: " + tenantId);
+        if (tenantId != null) {
+            builder.field(TENANT_ID_FIELD, tenantId);
         }
         return builder;
     }
@@ -780,6 +792,14 @@ public abstract class Config implements Writeable, ToXContentObject {
 
     public Duration getInferredFrequencyDuration() {
         return ((IntervalTimeConfiguration) getInferredFrequency()).toDuration();
+    }
+
+    public String getTenantId() {
+        return tenantId;
+    }
+
+    public void setTenantId(String tenantId) {
+        this.tenantId = tenantId;
     }
 
     public void setUser(User user) {
@@ -970,6 +990,7 @@ public abstract class Config implements Writeable, ToXContentObject {
             .append("customResultIndexTTL", customResultIndexTTL)
             .append("flattenResultIndexMapping", flattenResultIndexMapping)
             .append("frequency", frequency)
+            .append("tenantId", tenantId)
             .toString();
     }
 

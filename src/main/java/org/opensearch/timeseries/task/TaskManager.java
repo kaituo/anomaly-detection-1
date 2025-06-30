@@ -1024,11 +1024,11 @@ public abstract class TaskManager<TaskCacheManagerType extends TaskCacheManager,
                 listener.onFailure(new OpenSearchStatusException("Failed to delete all tasks", RestStatus.INTERNAL_SERVER_ERROR));
             }
         }, e -> {
-            logger.info("Failed to delete tasks for " + configId, e);
             if (e instanceof IndexNotFoundException) {
                 deleteResultOfConfig(configId);
                 function.execute();
             } else {
+                logger.error("Failed to delete tasks for " + configId, e);
                 listener.onFailure(e);
             }
         }));

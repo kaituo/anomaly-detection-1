@@ -31,6 +31,7 @@ public class JobRequest extends ActionRequest implements DocRequest {
     private DateRange dateRange;
     private boolean historical;
     private String rawPath;
+    private String tenantId;
 
     public JobRequest(StreamInput in) throws IOException {
         super(in);
@@ -41,10 +42,11 @@ public class JobRequest extends ActionRequest implements DocRequest {
             dateRange = new DateRange(in);
         }
         historical = in.readBoolean();
+        tenantId = in.readOptionalString();
     }
 
     public JobRequest(String detectorID, String configIndex, String rawPath) {
-        this(detectorID, configIndex, null, false, rawPath);
+        this(detectorID, configIndex, null, false, rawPath, null);
     }
 
     /**
@@ -59,14 +61,16 @@ public class JobRequest extends ActionRequest implements DocRequest {
      * @param dateRange analysis date range-
      * @param historical historical analysis or not
      * @param rawPath raw request path
+     * @param tenantId tenant id
      */
-    public JobRequest(String configID, String configIndex, DateRange dateRange, boolean historical, String rawPath) {
+    public JobRequest(String configID, String configIndex, DateRange dateRange, boolean historical, String rawPath, String tenantId) {
         super();
         this.configID = configID;
         this.configIndex = configIndex;
         this.dateRange = dateRange;
         this.historical = historical;
         this.rawPath = rawPath;
+        this.tenantId = tenantId;
     }
 
     public String getConfigID() {
@@ -79,6 +83,10 @@ public class JobRequest extends ActionRequest implements DocRequest {
 
     public String getRawPath() {
         return rawPath;
+    }
+
+    public String getTenantId() {
+        return tenantId;
     }
 
     public boolean isHistorical() {
@@ -98,6 +106,7 @@ public class JobRequest extends ActionRequest implements DocRequest {
             out.writeBoolean(false);
         }
         out.writeBoolean(historical);
+        out.writeOptionalString(tenantId);
     }
 
     @Override

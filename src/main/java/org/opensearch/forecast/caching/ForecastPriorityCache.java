@@ -29,8 +29,10 @@ import org.opensearch.forecast.ml.ForecastCheckpointDao;
 import org.opensearch.forecast.ratelimit.ForecastCheckpointMaintainWorker;
 import org.opensearch.forecast.ratelimit.ForecastCheckpointWriteWorker;
 import org.opensearch.threadpool.ThreadPool;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
 import org.opensearch.timeseries.MemoryTracker.Origin;
+import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.caching.PriorityCache;
 import org.opensearch.timeseries.caching.PriorityTracker;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -60,7 +62,8 @@ public class ForecastPriorityCache extends
         Settings settings,
         Setting<TimeValue> checkpointSavingFreq,
         ForecastCheckpointWriteWorker checkpointWriteQueue,
-        ForecastCheckpointMaintainWorker checkpointMaintainQueue
+        ForecastCheckpointMaintainWorker checkpointMaintainQueue,
+        NodeStateManager nodeStateManager
     ) {
         super(
             checkpointDao,
@@ -79,7 +82,9 @@ public class ForecastPriorityCache extends
             checkpointSavingFreq,
             Origin.REAL_TIME_FORECASTER,
             FORECAST_DEDICATED_CACHE_SIZE,
-            FORECAST_MODEL_MAX_SIZE_PERCENTAGE
+            FORECAST_MODEL_MAX_SIZE_PERCENTAGE,
+            nodeStateManager,
+            AnalysisType.FORECAST
         );
 
         this.checkpointWriteQueue = checkpointWriteQueue;
@@ -98,7 +103,8 @@ public class ForecastPriorityCache extends
             checkpointWriteQueue,
             checkpointMaintainQueue,
             config.getId(),
-            tracker
+            tracker,
+            config.getTenantId()
         );
     }
 

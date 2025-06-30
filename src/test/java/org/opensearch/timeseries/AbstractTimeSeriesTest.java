@@ -312,10 +312,10 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
             name,
             new FixedExecutorBuilder(
                 Settings.EMPTY,
-                TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+                ADCommonName.AD_THREAD_POOL_NAME,
                 1,
                 1000,
-                "opensearch.ad." + TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME
+                "opensearch.ad." + ADCommonName.AD_THREAD_POOL_NAME
             )
         );
     }
@@ -497,7 +497,7 @@ public class AbstractTimeSeriesTest extends OpenSearchTestCase {
     protected void setUpADThreadPool(ThreadPool mockThreadPool) {
         ExecutorService executorService = mock(ExecutorService.class);
 
-        when(mockThreadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)).thenReturn(executorService);
+        when(mockThreadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)).thenReturn(executorService);
         doAnswer(invocation -> {
             Runnable runnable = invocation.getArgument(0);
             runnable.run();

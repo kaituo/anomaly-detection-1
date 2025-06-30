@@ -12,6 +12,7 @@ import org.opensearch.common.inject.Inject;
 import org.opensearch.forecast.caching.ForecastCacheBuffer;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
+import org.opensearch.forecast.constant.ForecastCommonName;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
@@ -33,7 +34,6 @@ import org.opensearch.forecast.task.ForecastTaskManager;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.ratelimit.RequestPriority;
@@ -71,7 +71,7 @@ public class ForecastSingleStreamResultTransportAction extends
             AnalysisType.FORECAST,
             inferencer,
             threadPool,
-            TimeSeriesAnalyticsPlugin.FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             coldEntityWorker
         );
     }

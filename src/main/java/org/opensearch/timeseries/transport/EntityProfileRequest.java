@@ -36,6 +36,7 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
     // changed from String to Entity since 1.1
     private Entity entityValue;
     private Set<EntityProfileName> profilesToCollect;
+    private String tenantId;
 
     public EntityProfileRequest(StreamInput in) throws IOException {
         super(in);
@@ -49,13 +50,15 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
                 profilesToCollect.add(in.readEnum(EntityProfileName.class));
             }
         }
+        tenantId = in.readOptionalString();
     }
 
-    public EntityProfileRequest(String adID, Entity entityValue, Set<EntityProfileName> profilesToCollect) {
+    public EntityProfileRequest(String adID, Entity entityValue, Set<EntityProfileName> profilesToCollect, String tenantId) {
         super();
         this.configID = adID;
         this.entityValue = entityValue;
         this.profilesToCollect = profilesToCollect;
+        this.tenantId = tenantId;
     }
 
     public String getConfigID() {
@@ -70,6 +73,10 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
         return profilesToCollect;
     }
 
+    public String getTenantId() {
+        return tenantId;
+    }
+
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
@@ -80,6 +87,7 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
         for (EntityProfileName profile : profilesToCollect) {
             out.writeEnum(profile);
         }
+        out.writeOptionalString(tenantId);
     }
 
     @Override
@@ -94,6 +102,7 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
         if (profilesToCollect == null || profilesToCollect.isEmpty()) {
             validationException = addValidationError(CommonMessages.EMPTY_PROFILES_COLLECT, validationException);
         }
+        // tenantId is optional
         return validationException;
     }
 
@@ -103,6 +112,7 @@ public class EntityProfileRequest extends ActionRequest implements ToXContentObj
         builder.field(CommonName.CONFIG_ID_KEY, configID);
         builder.field(ENTITY, entityValue);
         builder.field(PROFILES, profilesToCollect);
+        builder.field(CommonName.TENANT_ID_FIELD, tenantId);
         builder.endObject();
         return builder;
     }

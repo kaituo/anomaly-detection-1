@@ -179,7 +179,8 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             null,
             null,
-            interval
+            interval,
+            null
         );
 
         TestHelpers
@@ -442,7 +443,8 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             false,
             detector.getLastBreakingUIChangeTime(),
-            detector.getFrequency()
+            detector.getFrequency(),
+            null
         );
         Response updateResponse = TestHelpers
             .makeRequest(
@@ -510,7 +512,8 @@ public class AnomalyDetectorRestApiIT extends AnomalyDetectorRestTestCase {
             null,
             true,
             detector.getLastBreakingUIChangeTime(),
-            detector.getFrequency()
+            detector.getFrequency(),
+            null
         );
 
         if (isResourceSharingFeatureEnabled()) {

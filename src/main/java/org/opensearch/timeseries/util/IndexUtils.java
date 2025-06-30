@@ -24,6 +24,10 @@ import org.opensearch.cluster.metadata.IndexMetadata;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.inject.Inject;
+import org.opensearch.core.common.Strings;
+import org.opensearch.timeseries.ml.ModelState;
+import org.opensearch.timeseries.model.Config;
+import org.opensearch.timeseries.util.StringUtil;
 
 public class IndexUtils {
     /**
@@ -36,6 +40,13 @@ public class IndexUtils {
      */
     public static final String ALIAS_EXISTS_NO_INDICES_STATUS = "alias exists, but does not point to any indices";
     public static final String ALIAS_POINTS_TO_MULTIPLE_INDICES_STATUS = "alias exists, but does not point to any " + "indices";
+
+    /**
+     * Constants for entity model key generation
+     */
+    public static final String ENTITY_MODEL_ID_INFIX = "_entity_";
+    public static final int ENTITY_KEY_SEGMENT_LENGTH = 2;
+    public static final int ENTITY_KEY_SEGMENT_DEPTH = 3;
 
     private static final Logger logger = LogManager.getLogger(IndexUtils.class);
 
@@ -110,4 +121,85 @@ public class IndexUtils {
 
         return state.blocks().indicesBlockedException(level, concreteIndices) != null;
     }
+
+    /**
+     * Resolve the dynamic index name that will eventually be used as the S3 key prefix.
+     * S3CheckpointDao concatenates this value with the request id to form the final object key.
+     * <p>
+     * S3 parallelization best practice recommends creating many prefixes to spread traffic across partitions.
+     * We therefore build a hierarchy of {@code <sanitized-tenant>/<config-id>/<detector-id>/<entity-chunks...>} so that
+     * workload is distributed across both detectors and entities. Detector ids and entity ids are auto-generated
+     * base64 strings, which already ensure good character distribution for the S3 prefix space.
+     *
+     * @param tenantId tenant id
+     * @param configId config id
+     * @param modelId model id whose id provides the entity-level prefixes
+     * @param defaultIndexName fallback index name when tenant/config info is not available
+     * @return prefix that will be combined with the request id to produce the S3 object key
+     */
+    public static <RCFModelType> String resolveIndexName(String tenantId, String configId, String modelId, String defaultIndexName) {
+        // single-tenant: use checkpoint index name as is
+        // multi-tenant: repurpose checkpoint index name as s3 key prefix
+        if (Strings.isEmpty(tenantId) || Strings.isEmpty(configId)) {
+            return defaultIndexName;
+        }
+
+        String basePrefix = StringUtil.sanitizeId(tenantId) + "/" + configId;
+        String entityId = extractEntityIdentifier(modelId);
+
+        if (Strings.isEmpty(entityId)) {
+            // Single-stream detector: no entity suffix, so use tenant/config prefix as the full key.
+            return basePrefix;
+        }
+
+        return buildEntityModelKey(basePrefix, entityId);
+    }
+
+    /**
+     * Append short chunks of the entity identifier to the base prefix to finish building the S3 object key.
+     * Example (detector id {@code ZoNYVJsq5ry6e-SWXmAt1Q}, entity id {@code _cLQbZUBxkwQb14jsXV9}):
+     * {@code .../ZoNYVJsq5ry6e-SWXmAt1Q/_c/LQ/bZ/UBxkwQb14jsXV9}.
+     * Splitting the entity id into fixed-length segments creates multiple sub-prefixes so that S3 can route
+     * each prefix independently, avoiding hot-spotting within a single detector prefix.
+     *
+     * @param basePrefix hierarchy that already includes tenant, config, and detector prefixes
+     * @param entityId full entity identifier, usually a base64 hash
+     * @return S3 object key prefix with entity sub-prefixes appended
+     */
+    public static String buildEntityModelKey(String basePrefix, String entityId) {
+        StringBuilder keyBuilder = new StringBuilder(basePrefix);
+
+        int index = 0;
+        int segmentCount = 0;
+        while (segmentCount < ENTITY_KEY_SEGMENT_DEPTH && (index + ENTITY_KEY_SEGMENT_LENGTH) < entityId.length()) {
+            // Break the entity id into short prefixes to distribute objects across partitions.
+            keyBuilder.append("/").append(entityId, index, index + ENTITY_KEY_SEGMENT_LENGTH);
+            index += ENTITY_KEY_SEGMENT_LENGTH;
+            segmentCount++;
+        }
+
+        if (index < entityId.length()) {
+            keyBuilder.append("/").append(entityId.substring(index));
+        }
+
+        return keyBuilder.toString();
+    }
+
+    /**
+     * Extract entity identifier from model ID.
+     * @param modelId the model ID containing entity information
+     * @return entity identifier or empty string if not found
+     */
+    public static String extractEntityIdentifier(String modelId) {
+        if (Strings.isEmpty(modelId)) {
+            return "";
+        }
+        int entityInfixIndex = modelId.indexOf(ENTITY_MODEL_ID_INFIX);
+        if (entityInfixIndex < 0) {
+            return "";
+        }
+        int entityStartIndex = entityInfixIndex + ENTITY_MODEL_ID_INFIX.length();
+        return entityStartIndex < modelId.length() ? modelId.substring(entityStartIndex) : "";
+    }
+
 }

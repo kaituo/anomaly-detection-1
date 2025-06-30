@@ -56,9 +56,10 @@ public class StopDetectorTransportAction extends HandledTransportAction<ActionRe
     protected void doExecute(Task task, ActionRequest actionRequest, ActionListener<StopConfigResponse> listener) {
         StopConfigRequest request = StopConfigRequest.fromActionRequest(actionRequest);
         String adID = request.getConfigID();
+        String tenantId = request.getTenantId();
         try {
             DiscoveryNode[] dataNodes = nodeFilter.getEligibleDataNodes();
-            DeleteModelRequest modelDeleteRequest = new DeleteModelRequest(adID, dataNodes);
+            DeleteModelRequest modelDeleteRequest = new DeleteModelRequest(adID, tenantId, dataNodes);
             client.execute(DeleteADModelAction.INSTANCE, modelDeleteRequest, ActionListener.wrap(response -> {
                 if (response.hasFailures()) {
                     LOG.warn("Cannot delete all models of detector {}", adID);

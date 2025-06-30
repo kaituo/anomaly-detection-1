@@ -33,6 +33,8 @@ import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.rest.handler.IndexJobActionHandler;
+import org.opensearch.timeseries.rest.handler.IndexJobActionHandler.JobStarter;
+import org.opensearch.timeseries.rest.handler.IndexJobActionHandler.JobStopper;
 import org.opensearch.timeseries.transport.JobResponse;
 import org.opensearch.timeseries.transport.ResultRequest;
 import org.opensearch.transport.TransportService;
@@ -63,6 +65,38 @@ public class ADIndexJobActionHandler extends
             nodeStateManager,
             settings,
             AD_REQUEST_TIMEOUT
+        );
+    }
+
+    /**
+     * Optional constructor to supply custom job start/stop strategies (e.g., EventBridge).
+     */
+    public ADIndexJobActionHandler(
+        Client client,
+        ADIndexManagement indexManagement,
+        NamedXContentRegistry xContentRegistry,
+        ADTaskManager adTaskManager,
+        ExecuteADResultResponseRecorder recorder,
+        NodeStateManager nodeStateManager,
+        Settings settings,
+        JobStarter jobStarter,
+        JobStopper jobStopper
+    ) {
+        super(
+            client,
+            indexManagement,
+            xContentRegistry,
+            adTaskManager,
+            recorder,
+            AnomalyResultAction.INSTANCE,
+            AnalysisType.AD,
+            DETECTION_STATE_INDEX,
+            StopDetectorAction.INSTANCE,
+            nodeStateManager,
+            settings,
+            AD_REQUEST_TIMEOUT,
+            jobStarter,
+            jobStopper
         );
     }
 

@@ -103,13 +103,13 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
 
         try (ThreadContext.StoredContext context = client.threadPool().getThreadContext().stashContext()) {
             verifyResourceAccessAndProcessRequest(
-                () -> indexDetector(user, detectorId, method, listener, detector -> adExecute(request, user, detector, context, listener)),
+                () -> indexDetector(user, detectorId, method, listener, detector -> adExecute(request, user, detector, context, request.getTenantId(), listener)),
                 () -> resolveUserAndExecute(
                     user,
                     detectorId,
                     method,
                     listener,
-                    (detector) -> adExecute(request, user, detector, context, listener)
+                    (detector) -> adExecute(request, user, detector, context, request.getTenantId(), listener)
                 )
             );
 
@@ -179,6 +179,7 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
         User user,
         AnomalyDetector currentDetector,
         ThreadContext.StoredContext storedContext,
+        String tenantId,
         ActionListener<IndexAnomalyDetectorResponse> listener
     ) {
         anomalyDetectionIndices.update();
@@ -187,6 +188,8 @@ public class IndexAnomalyDetectorTransportAction extends HandledTransportAction<
         long primaryTerm = request.getPrimaryTerm();
         WriteRequest.RefreshPolicy refreshPolicy = request.getRefreshPolicy();
         AnomalyDetector detector = request.getDetector();
+        // tenant id is not part of the detector object and is part of http headers, so we need to set it separately
+        detector.setTenantId(tenantId);
         RestRequest.Method method = request.getMethod();
         TimeValue requestTimeout = request.getRequestTimeout();
         Integer maxSingleEntityAnomalyDetectors = request.getMaxSingleEntityAnomalyDetectors();

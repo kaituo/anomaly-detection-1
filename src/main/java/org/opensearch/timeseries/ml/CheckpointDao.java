@@ -11,20 +11,10 @@
 
 package org.opensearch.timeseries.ml;
 
-import java.io.IOException;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.AbstractMap.SimpleImmutableEntry;
-import java.util.ArrayDeque;
-import java.util.Deque;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Queue;
 
-import org.apache.commons.pool2.impl.GenericObjectPool;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.ExceptionsHelper;
@@ -35,8 +25,6 @@ import org.opensearch.action.bulk.BulkRequest;
 import org.opensearch.action.bulk.BulkResponse;
 import org.opensearch.action.delete.DeleteRequest;
 import org.opensearch.action.delete.DeleteResponse;
-import org.opensearch.action.get.GetAction;
-import org.opensearch.action.get.GetRequest;
 import org.opensearch.action.get.GetResponse;
 import org.opensearch.action.get.MultiGetAction;
 import org.opensearch.action.get.MultiGetRequest;
@@ -50,23 +38,27 @@ import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.DeleteByQueryRequest;
 import org.opensearch.index.reindex.ScrollableHitSource;
 import org.opensearch.timeseries.common.exception.TimeSeriesException;
-import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
+import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.transport.client.Client;
 
-import com.google.gson.Gson;
 
-import io.protostuff.LinkedBuffer;
-
-public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>> {
+public abstract class CheckpointDao<
+    RCFModelType, 
+    IndexType extends Enum<IndexType> & TimeSeriesIndex, 
+    IndexManagementType extends IndexManagement<IndexType>,
+    CheckpointCodecType extends CheckpointCodec<RCFModelType>
+> 
+implements CheckpointDaoInterface<RCFModelType> {
     private static final Logger logger = LogManager.getLogger(CheckpointDao.class);
     public static final String TIMEOUT_LOG_MSG = "Timeout while deleting checkpoints of";
     public static final String BULK_FAILURE_LOG_MSG = "Bulk failure while deleting checkpoints of";
     public static final String SEARCH_FAILURE_LOG_MSG = "Search failure while deleting checkpoints of";
     public static final String DOC_GOT_DELETED_LOG_MSG = "checkpoints docs get deleted";
     public static final String INDEX_DELETED_LOG_MSG = "Checkpoint index has been deleted.  Has nothing to do:";
+    public static final String NOT_ABLE_TO_DELETE_CHECKPOINT_MSG = "Cannot delete all checkpoints of detector";
 
     // dependencies
     protected final Client client;
@@ -75,38 +67,21 @@ public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexTy
     // configuration
     protected final String indexName;
 
-    protected Gson gson;
-
-    // we won't read/write a checkpoint larger than a threshold
-    protected final int maxCheckpointBytes;
-
-    protected final GenericObjectPool<LinkedBuffer> serializeRCFBufferPool;
-    protected final int serializeRCFBufferSize;
-
     protected final IndexManagement<IndexType> indexUtil;
-    protected final Clock clock;
-    public static final String NOT_ABLE_TO_DELETE_CHECKPOINT_MSG = "Cannot delete all checkpoints of detector";
+    protected final CheckpointCodecType checkpointCodec;
 
     public CheckpointDao(
         Client client,
         ClientUtil clientUtil,
         String indexName,
-        Gson gson,
-        int maxCheckpointBytes,
-        GenericObjectPool<LinkedBuffer> serializeRCFBufferPool,
-        int serializeRCFBufferSize,
         IndexManagementType indexUtil,
-        Clock clock
+        CheckpointCodecType checkpointCodec
     ) {
         this.client = client;
         this.clientUtil = clientUtil;
         this.indexName = indexName;
-        this.gson = gson;
-        this.maxCheckpointBytes = maxCheckpointBytes;
-        this.serializeRCFBufferPool = serializeRCFBufferPool;
-        this.serializeRCFBufferSize = serializeRCFBufferSize;
         this.indexUtil = indexUtil;
-        this.clock = clock;
+        this.checkpointCodec = checkpointCodec;
     }
 
     protected void putModelCheckpoint(String modelId, Map<String, Object> source, ActionListener<Void> listener) {
@@ -159,28 +134,17 @@ public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexTy
         }));
     }
 
-    protected Map.Entry<LinkedBuffer, Boolean> checkoutOrNewBuffer() {
-        LinkedBuffer buffer = null;
-        boolean isCheckout = true;
-        try {
-            buffer = serializeRCFBufferPool.borrowObject();
-        } catch (Exception e) {
-            logger.warn("Failed to borrow a buffer from pool", e);
-        }
-        if (buffer == null) {
-            buffer = LinkedBuffer.allocate(serializeRCFBufferSize);
-            isCheckout = false;
-        }
-        return new SimpleImmutableEntry<LinkedBuffer, Boolean>(buffer, isCheckout);
-    }
+    
 
     /**
      * Deletes the model checkpoint for the model.
      *
+     * @param config config of the model
      * @param modelId id of the model
      * @param listener onReponse is called with null when the operation is completed
      */
-    public void deleteModelCheckpoint(String modelId, ActionListener<Void> listener) {
+    @Override
+    public void deleteModelCheckpoint(Config config, String modelId, ActionListener<Void> listener) {
         clientUtil
             .<DeleteRequest, DeleteResponse>asyncRequest(
                 new DeleteRequest(indexName, modelId),
@@ -205,33 +169,7 @@ public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexTy
         }
     }
 
-    /**
-     * Determines whether to save the checkpoint based on various conditions.
-     *
-     * @param modelState The current state of the model, which includes the last checkpoint time.
-     * @param forceWrite Indicates if the checkpoint should be saved regardless of other conditions.
-     * @param checkpointInterval The interval at which checkpoints should be saved.
-     * @param clock The clock used to determine the current time (usually in UTC).
-     *
-     * @return true if both of the following conditions are met:
-     *         1. The model state is valid (the model is non-null or it has non-empty samples), and
-     *         2. Either forceWrite is true, or the last checkpoint time is not the minimum instant and the current time exceeds the last checkpoint time by at least the checkpoint interval.
-     *         Returns false otherwise.
-     */
-    public boolean shouldSave(ModelState<RCFModelType> modelState, boolean forceWrite, Duration checkpointInterval, Clock clock) {
-        if (modelState == null) {
-            return false;
-        }
-
-        Instant lastCheckpointTime = modelState.getLastCheckpointTime();
-        boolean isTimeForCheckpoint = lastCheckpointTime != null
-            && !lastCheckpointTime.equals(Instant.MIN)
-            && lastCheckpointTime.plus(checkpointInterval).isBefore(clock.instant());
-        boolean hasValidSamples = modelState.getSamples() != null && !modelState.getSamples().isEmpty();
-        boolean isModelStateValid = modelState.getModel().isPresent() || hasValidSamples;
-        return isModelStateValid && (isTimeForCheckpoint || forceWrite);
-    }
-
+    @Override
     public void batchWrite(BulkRequest request, ActionListener<BulkResponse> listener) {
         if (indexUtil.doesCheckpointIndexExist()) {
             clientUtil.<BulkRequest, BulkResponse>execute(BulkAction.INSTANCE, request, listener);
@@ -255,31 +193,17 @@ public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexTy
         }
     }
 
-    /**
-     * Serialized samples
-     * @param samples input samples
-     * @return serialized object
-     */
-    protected Optional<Sample[]> toCheckpoint(Queue<Sample> samples) {
-        if (samples == null || samples.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(samples.toArray(new Sample[0]));
-    }
-
+    @Override
     public void batchRead(MultiGetRequest request, ActionListener<MultiGetResponse> listener) {
         clientUtil.<MultiGetRequest, MultiGetResponse>execute(MultiGetAction.INSTANCE, request, listener);
-    }
-
-    public void read(GetRequest request, ActionListener<GetResponse> listener) {
-        clientUtil.<GetRequest, GetResponse>execute(GetAction.INSTANCE, request, listener);
     }
 
     /**
      * Delete checkpoints associated with a config.  Used in multi-entity detector.
      * @param configId Config Id
      */
-    public void deleteModelCheckpointByConfigId(String configId) {
+    @Override
+    public void deleteModelCheckpointByConfigId(String tenantId, String configId) {
         // A bulk delete request is performed for each batch of matching documents. If a
         // search or bulk request is rejected, the requests are retried up to 10 times,
         // with exponential back off. If the maximum retry limit is reached, processing
@@ -306,7 +230,7 @@ public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexTy
         }));
     }
 
-    protected Optional<Map<String, Object>> processRawCheckpoint(GetResponse response) {
+    public Optional<Map<String, Object>> processRawCheckpoint(GetResponse response) {
         try {
             return Optional.ofNullable(response).filter(GetResponse::isExists).map(GetResponse::getSource);
         } catch (Exception e) {
@@ -322,6 +246,7 @@ public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexTy
      * @param modelId  Model Id
      * @return a pair of entity model and its last checkpoint time
      */
+    @Override
     public ModelState<RCFModelType> processHCGetResponse(GetResponse response, String modelId, String configId) {
         Optional<Map<String, Object>> checkpointString = processRawCheckpoint(response);
         if (checkpointString.isPresent()) {
@@ -331,53 +256,16 @@ public abstract class CheckpointDao<RCFModelType, IndexType extends Enum<IndexTy
         }
     }
 
-    /**
-     * Process a checkpoint GetResponse and return the EntityModel object
-     * @param response Checkpoint Index GetResponse
-     * @param modelId  Model Id
-     * @return a pair of entity model and its last checkpoint time
-     */
-    public ModelState<RCFModelType> processSingleStreamGetResponse(GetResponse response, String modelId, String configId) {
-        Optional<Map<String, Object>> checkpointString = processRawCheckpoint(response);
-        if (checkpointString.isPresent()) {
-            return fromSingleStreamModelCheckpoint(checkpointString.get(), modelId, configId);
-        } else {
-            return null;
-        }
+    @Override
+    public CheckpointCodec<RCFModelType> getCodec() {
+        return checkpointCodec;
     }
 
-    protected abstract ModelState<RCFModelType> fromEntityModelCheckpoint(Map<String, Object> checkpoint, String modelId, String configId);
+    protected ModelState<RCFModelType> fromEntityModelCheckpoint(Map<String, Object> checkpoint,
+            String modelId, String configId) {
+        return checkpointCodec.fromEntityModelCheckpoint(checkpoint, modelId, configId);
+    }
 
-    protected abstract ModelState<RCFModelType> fromSingleStreamModelCheckpoint(
-        Map<String, Object> checkpoint,
-        String modelId,
-        String configId
-    );
-
-    public abstract Map<String, Object> toIndexSource(ModelState<RCFModelType> modelState) throws IOException;
 
     protected abstract DeleteByQueryRequest createDeleteCheckpointRequest(String configId);
-
-    protected Deque<Sample> loadSampleQueue(Map<String, Object> checkpoint, String modelId) {
-        Deque<Sample> sampleQueue = new ArrayDeque<>();
-        // Even though we we save sample_queue using array, after ser/der, we need to read it as List
-        // we start using SAMPLE_QUEUE after forecasting refactoring. Previously in AD, we use CommonName.ENTITY_SAMPLE
-        // to store samples. The refactoring moves samples out of EntityModel and makes it a first-level field.
-        List<Map<String, Object>> samples = (List<Map<String, Object>>) checkpoint.get(CommonName.SAMPLE_QUEUE);
-        if (samples != null) {
-            samples.forEach(sampleMap -> {
-                try {
-                    Sample sample = Sample.extractSample(sampleMap);
-                    if (sample != null) {
-                        sampleQueue.add(sample);
-                    }
-                } catch (Exception e) {
-                    logger.warn("Exception while deserializing samples for " + modelId, e);
-                }
-            });
-        }
-        // can be null when checkpoint corrupted (e.g., a checkpoint not recognized by current code
-        // due to bugs). Better redo training.
-        return sampleQueue;
-    }
 }

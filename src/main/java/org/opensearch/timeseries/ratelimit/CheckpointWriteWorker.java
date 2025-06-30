@@ -31,12 +31,13 @@ import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.model.Config;
 import org.opensearch.timeseries.util.ExceptionUtil;
+import org.opensearch.timeseries.util.IndexUtils;
 
-public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>>
+public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>>
     extends BatchWorker<CheckpointWriteRequest, BulkRequest, BulkResponse> {
     private static final Logger LOG = LogManager.getLogger(CheckpointWriteWorker.class);
 
@@ -102,6 +103,7 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
     protected void executeBatchRequest(BulkRequest request, ActionListener<BulkResponse> listener) {
         checkpoint.batchWrite(request, listener);
     }
+
 
     @Override
     protected BulkRequest toBatchRequest(List<CheckpointWriteRequest> toProcess) {
@@ -184,6 +186,7 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
                 }
 
                 modelState.setLastCheckpointTime(clock.instant());
+                String targetIndex = IndexUtils.resolveIndexName(config.getTenantId(), config.getId(), modelId, indexName);
                 CheckpointWriteRequest request = new CheckpointWriteRequest(
                     System.currentTimeMillis() + config.getInferredFrequencyInMilliseconds(),
                     configId,
@@ -191,7 +194,7 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
                     // If the document does not already exist, the contents of the upsert element
                     // are inserted as a new document.
                     // If the document exists, update fields in the map
-                    new UpdateRequest(indexName, modelId).docAsUpsert(true).doc(source)
+                    new UpdateRequest(targetIndex, modelId).docAsUpsert(true).doc(source)
                 );
 
                 put(request);
@@ -234,6 +237,7 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
                     }
 
                     state.setLastCheckpointTime(clock.instant());
+                    String targetIndex = IndexUtils.resolveIndexName(config.getTenantId(), config.getId(), modelId, indexName);
                     allRequests
                         .add(
                             new CheckpointWriteRequest(
@@ -243,7 +247,7 @@ public abstract class CheckpointWriteWorker<RCFModelType, IndexType extends Enum
                                 // If the document does not already exist, the contents of the upsert element
                                 // are inserted as a new document.
                                 // If the document exists, update fields in the map
-                                new UpdateRequest(indexName, modelId).docAsUpsert(true).doc(source)
+                                new UpdateRequest(targetIndex, modelId).docAsUpsert(true).doc(source)
                             )
                         );
                 }

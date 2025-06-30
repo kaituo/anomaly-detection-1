@@ -19,6 +19,7 @@ import org.opensearch.action.FailedNodeException;
 import org.opensearch.action.support.ActionFilters;
 import org.opensearch.action.support.nodes.TransportNodesAction;
 import org.opensearch.ad.caching.ADCacheProvider;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
 import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.service.ClusterService;
@@ -28,7 +29,6 @@ import org.opensearch.core.common.io.stream.StreamInput;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.ml.ModelState;
 import org.opensearch.timeseries.ml.Sample;
@@ -94,7 +94,7 @@ public class ADHCImputeTransportAction extends
             actionFilters,
             ADHCImputeRequest::new,
             ADHCImputeNodeRequest::new,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             ADHCImputeNodeResponse.class
         );
         this.cache = priorityCache;
@@ -135,7 +135,7 @@ public class ADHCImputeTransportAction extends
             long dataStartMillis = nodeRequest.getRequest().getDataStartMillis();
             String taskId = nodeRequest.getRequest().getTaskId();
 
-            List<ModelState<ThresholdedRandomCutForest>> allModels = cache.get().getAllModels(configId);
+            List<ModelState<ThresholdedRandomCutForest>> allModels = cache.get().getAllModels(config.getTenantId(), configId);
             processImputeIteration(
                 allModels.iterator(),
                 config,
@@ -144,7 +144,7 @@ public class ADHCImputeTransportAction extends
                 dataStartMillis,
                 taskId
             );
-        }, e -> nodeStateManager.setException(configId, e), threadPool.executor(TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME)));
+        }, e -> nodeStateManager.setException(configId, e), threadPool.executor(ADCommonName.AD_THREAD_POOL_NAME)));
 
         Optional<Exception> previousException = nodeStateManager.fetchExceptionAndClear(configId);
 

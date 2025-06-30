@@ -23,7 +23,6 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.opensearch.action.DocWriteResponse.Result.UPDATED;
-import static org.opensearch.ad.ml.ADCheckpointDao.FIELD_MODELV2;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -285,9 +284,9 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         assertEquals(ADCommonName.CHECKPOINT_INDEX_NAME, updateRequest.index());
         assertEquals(modelId, updateRequest.id());
         IndexRequest indexRequest = updateRequest.doc();
-        Set<String> expectedSourceKeys = new HashSet<String>(Arrays.asList(FIELD_MODELV2, CommonName.TIMESTAMP));
+        Set<String> expectedSourceKeys = new HashSet<String>(Arrays.asList(CommonName.FIELD_MODELV2, CommonName.TIMESTAMP));
         assertEquals(expectedSourceKeys, indexRequest.sourceAsMap().keySet());
-        assertTrue(!((String) (indexRequest.sourceAsMap().get(FIELD_MODELV2))).isEmpty());
+        assertTrue(!((String) (indexRequest.sourceAsMap().get(CommonName.FIELD_MODELV2))).isEmpty());
         assertNotNull(indexRequest.sourceAsMap().get(CommonName.TIMESTAMP));
 
         ArgumentCaptor<Void> responseCaptor = ArgumentCaptor.forClass(Void.class);
@@ -741,7 +740,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         ModelState<ThresholdedRandomCutForest> state = MLUtil
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(1).build());
         String json = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
-        assertEquals(null, JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
+        assertEquals(null, JsonDeserializer.getChildNode(json, ADCommonName.ENTITY_TRCF));
     }
 
     public void testEmptySample() throws IOException {
@@ -749,7 +748,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
         assertEquals(null, JsonDeserializer.getChildNode(json, CommonName.ENTITY_SAMPLE));
-        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCommonName.ENTITY_TRCF));
     }
 
     public void testToCheckpointErcfCheckoutFail() throws Exception {
@@ -759,7 +758,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
                 .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
 
-        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCommonName.ENTITY_TRCF));
     }
 
     @SuppressWarnings("unchecked")
@@ -792,7 +791,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
 
-        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCommonName.ENTITY_TRCF));
     }
 
     public void testToCheckpointTrcfFailNewBuffer() throws Exception {
@@ -804,7 +803,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
 
-        assertNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
+        assertNull(JsonDeserializer.getChildNode(json, ADCommonName.ENTITY_TRCF));
     }
 
     public void testToCheckpointTrcfCheckoutBufferInvalidateFail() throws Exception {
@@ -816,7 +815,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
             .randomModelState(new RandomModelStateConfig.Builder().fullModel(true).sampleSize(0).build());
         String json = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
 
-        assertNotNull(JsonDeserializer.getChildNode(json, ADCheckpointDao.ENTITY_TRCF));
+        assertNotNull(JsonDeserializer.getChildNode(json, ADCommonName.ENTITY_TRCF));
     }
 
     public void testFromEntityModelCheckpointWithTrcf() throws Exception {
@@ -825,15 +824,15 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         String model = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
 
         Map<String, Object> source = new HashMap<>();
-        source.put(ADCheckpointDao.DETECTOR_ID, state.getConfigId());
-        source.put(FIELD_MODELV2, model);
+        source.put(ADCommonName.DETECTOR_ID, state.getConfigId());
+        source.put(CommonName.FIELD_MODELV2, model);
         source.put(CommonName.TIMESTAMP, Instant.now().toString());
 
         when(getResponse.isExists()).thenReturn(true);
         when(getResponse.getSource()).thenReturn(source);
 
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
 
         assertTrue(result != null);
         assertTrue(result.getModel().isPresent());
@@ -847,14 +846,14 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         String model = checkpointDao.toCheckpoint(state.getModel().get(), modelId).get();
 
         Map<String, Object> source = new HashMap<>();
-        source.put(FIELD_MODELV2, model);
+        source.put(CommonName.FIELD_MODELV2, model);
         source.put(CommonName.TIMESTAMP, Instant.now().toString());
 
         when(getResponse.isExists()).thenReturn(true);
         when(getResponse.getSource()).thenReturn(source);
 
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
 
         assertTrue(result != null);
         assertTrue(result.getModel().isEmpty());
@@ -889,7 +888,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         when(getResponse.getSource()).thenReturn(modelPair.getLeft());
 
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
         assertTrue(result != null);
         assertEquals(now, result.getLastCheckpointTime());
 
@@ -936,7 +935,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         when(getResponse.isExists()).thenReturn(true);
         when(getResponse.getSource()).thenReturn(modelPair.getLeft());
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
         // checkpoint is only configured to take in 1 MB checkpoint at most. But the checkpoint here is of 1408047 bytes.
         assertTrue(result == null);
     }
@@ -944,13 +943,13 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
     // test no model is present in checkpoint
     public void testFromEntityModelCheckpointEmptyModel() throws FileNotFoundException, IOException, URISyntaxException {
         Map<String, Object> entity = new HashMap<>();
-        entity.put(ADCheckpointDao.DETECTOR_ID, ADCheckpointDao.DETECTOR_ID);
+        entity.put(ADCommonName.DETECTOR_ID, ADCommonName.DETECTOR_ID);
         entity.put(CommonName.TIMESTAMP, Instant.now().toString());
         when(getResponse.isExists()).thenReturn(true);
         when(getResponse.getSource()).thenReturn(entity);
 
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
         assertTrue(result == null);
     }
 
@@ -959,7 +958,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         when(getResponse.isExists()).thenReturn(true);
         when(getResponse.getSource()).thenReturn(modelPair.getLeft());
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
         assertTrue(result != null);
         Deque<Sample> samples = result.getSamples();
         assertEquals(0, samples.size());
@@ -970,7 +969,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         when(getResponse.isExists()).thenReturn(true);
         when(getResponse.getSource()).thenReturn(modelPair.getLeft());
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
         assertTrue(result != null);
         assertTrue(result.getModel().isEmpty());
     }
@@ -980,7 +979,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         when(getResponse.isExists()).thenReturn(true);
         when(getResponse.getSource()).thenReturn(modelPair.getLeft());
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(getResponse, this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(getResponse, this.modelId, ADCommonName.DETECTOR_ID);
         assertTrue(result != null);
 
         ThresholdedRandomCutForest trcf = result.getModel().get();
@@ -998,7 +997,7 @@ public class CheckpointDaoTests extends OpenSearchTestCase {
         content.put(CommonName.TIMESTAMP, "2021-09-23T05:00:37.93195Z");
 
         ModelState<ThresholdedRandomCutForest> result = checkpointDao
-            .processHCGetResponse(TestHelpers.createGetResponse(content, modelId, "blah"), this.modelId, ADCheckpointDao.DETECTOR_ID);
+            .processHCGetResponse(TestHelpers.createGetResponse(content, modelId, "blah"), this.modelId, ADCommonName.DETECTOR_ID);
 
         assertTrue(result != null);
         assertTrue(result.getEntity().isPresent());

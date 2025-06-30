@@ -211,7 +211,8 @@ public class ForecastResultResponse extends ResultResponse<ForecastResult> {
                 forecastsValues,
                 forecastsUppers,
                 forecastsLowers,
-                taskId // real time results have no task id
+                taskId, // real time results have no task id
+                config.getTenantId()
             );
     }
 

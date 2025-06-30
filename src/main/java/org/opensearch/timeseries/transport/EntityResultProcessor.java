@@ -30,7 +30,7 @@ import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.IntermediateResult;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -61,7 +61,105 @@ import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
  * (e.g., EntityForecastResultTransportAction)
  *
  */
-public class EntityResultProcessor<RCFModelType extends ThresholdedRandomCutForest, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ModelColdStartType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>, ModelManagerType extends ModelManager<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, ModelColdStartType>, CacheType extends TimeSeriesCache<RCFModelType>, SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>, ColdStartWorkerType extends ColdStartWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType, ModelColdStartType, CacheType, IndexableResultType, IntermediateResultType, ModelManagerType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType>, InferencerType extends RealTimeInferencer<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType, ModelColdStartType, ModelManagerType, SaveResultStrategyType, CacheType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType>, HCCheckpointReadWorkerType extends CheckpointReadWorker<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, CheckpointWriteWorkerType, ModelColdStartType, ModelManagerType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType>, ColdEntityWorkerType extends ColdEntityWorker<RCFModelType, IndexableResultType, IndexType, IndexManagementType, CheckpointDaoType, IntermediateResultType, ModelManagerType, CheckpointWriteWorkerType, ModelColdStartType, CacheType, SaveResultStrategyType, TaskCacheManagerType, TaskTypeEnum, TaskClass, TaskManagerType, ColdStartWorkerType, InferencerType, HCCheckpointReadWorkerType>> {
+public class EntityResultProcessor<
+    RCFModelType extends ThresholdedRandomCutForest,
+    IndexableResultType extends IndexableResult,
+    IntermediateResultType extends IntermediateResult<IndexableResultType>,
+    IndexType extends Enum<IndexType> & TimeSeriesIndex,
+    IndexManagementType extends IndexManagement<IndexType>,
+    CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>,
+    CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>,
+    ModelColdStartType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>,
+    ModelManagerType extends ModelManager<
+        RCFModelType,
+        IndexableResultType,
+        IntermediateResultType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        ModelColdStartType
+    >,
+    CacheType extends TimeSeriesCache<RCFModelType>,
+    SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>,
+    TaskCacheManagerType extends TaskCacheManager,
+    TaskTypeEnum extends TaskType,
+    TaskClass extends TimeSeriesTask,
+    TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>,
+    ColdStartWorkerType extends ColdStartWorker<
+        RCFModelType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        CheckpointWriteWorkerType,
+        ModelColdStartType,
+        CacheType,
+        IndexableResultType,
+        IntermediateResultType,
+        ModelManagerType,
+        SaveResultStrategyType,
+        TaskCacheManagerType,
+        TaskTypeEnum,
+        TaskClass,
+        TaskManagerType
+    >,
+    InferencerType extends RealTimeInferencer<
+        RCFModelType,
+        IndexableResultType,
+        IntermediateResultType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        CheckpointWriteWorkerType,
+        ModelColdStartType,
+        ModelManagerType,
+        SaveResultStrategyType,
+        CacheType,
+        TaskCacheManagerType,
+        TaskTypeEnum,
+        TaskClass,
+        TaskManagerType,
+        ColdStartWorkerType
+    >,
+    HCCheckpointReadWorkerType extends CheckpointReadWorker<
+        RCFModelType,
+        IndexableResultType,
+        IntermediateResultType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        CheckpointWriteWorkerType,
+        ModelColdStartType,
+        ModelManagerType,
+        CacheType,
+        SaveResultStrategyType,
+        TaskCacheManagerType,
+        TaskTypeEnum,
+        TaskClass,
+        TaskManagerType,
+        ColdStartWorkerType,
+        InferencerType
+    >,
+    ColdEntityWorkerType extends ColdEntityWorker<
+        RCFModelType,
+        IndexableResultType,
+        IndexType,
+        IndexManagementType,
+        CheckpointDaoType,
+        IntermediateResultType,
+        ModelManagerType,
+        CheckpointWriteWorkerType,
+        ModelColdStartType,
+        CacheType,
+        SaveResultStrategyType,
+        TaskCacheManagerType,
+        TaskTypeEnum,
+        TaskClass,
+        TaskManagerType,
+        ColdStartWorkerType,
+        InferencerType,
+        HCCheckpointReadWorkerType
+    >
+> {
 
     private static final Logger LOG = LogManager.getLogger(EntityResultProcessor.class);
 
@@ -107,7 +205,7 @@ public class EntityResultProcessor<RCFModelType extends ThresholdedRandomCutFore
             Config config = configOptional.get();
 
             if (request.getEntities() == null) {
-                listener.onFailure(new EndRunException(configId, "Fail to get any entities from request.", false));
+                listener.onFailure(new EndRunException(configId, "Failed to get any entities from request.", false));
                 return;
             }
 
@@ -204,7 +302,7 @@ public class EntityResultProcessor<RCFModelType extends ThresholdedRandomCutFore
         // capture effectively final variables
         final Entity finalEntity = entity;
 
-        Optional<String> modelIdOptional = entity.getModelId(configId);
+        Optional<String> modelIdOptional = entity.getModelId(config.getTenantId(), configId);
         if (modelIdOptional.isEmpty()) {
             listener.onResponse(null);
             return;
@@ -271,7 +369,8 @@ public class EntityResultProcessor<RCFModelType extends ThresholdedRandomCutFore
                             hotEntityValue,
                             request.getStart(),
                             hotEntity,
-                            request.getTaskId()
+                            request.getTaskId(),
+                            config.getTenantId()
                         )
                     );
             }
@@ -293,7 +392,8 @@ public class EntityResultProcessor<RCFModelType extends ThresholdedRandomCutFore
                             coldEntityValue,
                             request.getStart(),
                             coldEntity,
-                            request.getTaskId()
+                            request.getTaskId(),
+                            config.getTenantId()
                         )
                     );
             }
@@ -314,12 +414,12 @@ public class EntityResultProcessor<RCFModelType extends ThresholdedRandomCutFore
     }
 
     /**
-     * Whether the received entity comes from an node that doesn't support multi-category fields.
+     * Whether the received entity comes from a node that doesn't support multi-category fields.
      * This can happen during rolling-upgrade or blue/green deployment.
      *
      * Specifically, when receiving an EntityResultRequest from an incompatible node,
-     * EntityResultRequest(StreamInput in) gets an String that represents an entity.
-     * But Entity class requires both an category field name and value. Since we
+     * EntityResultRequest(StreamInput in) gets a String that represents an entity.
+     * But Entity class requires both a category field name and value. Since we
      * don't have access to detector config in EntityResultRequest(StreamInput in),
      * we put CommonName.EMPTY_FIELD as the placeholder.  In this method,
      * we use the same CommonName.EMPTY_FIELD to check if the deserialized entity
@@ -327,7 +427,7 @@ public class EntityResultProcessor<RCFModelType extends ThresholdedRandomCutFore
      * as EntityResultTranportAction has access to the detector config object.
      *
      * @param categoricalValues deserialized Entity from inbound message.
-     * @return Whether the received entity comes from an node that doesn't support multi-category fields.
+     * @return Whether the received entity comes from a node that doesn't support multi-category fields.
      */
     private boolean isEntityFromOldNodeMsg(Entity categoricalValues) {
         Map<String, String> attrValues = categoricalValues.getAttributes();

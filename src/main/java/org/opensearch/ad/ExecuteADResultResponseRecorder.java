@@ -18,6 +18,7 @@ import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.model.ADTask;
@@ -31,7 +32,6 @@ import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.ExecuteResultResponseRecorder;
 import org.opensearch.timeseries.NodeStateManager;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.model.FeatureData;
 import org.opensearch.timeseries.transport.ResultResponse;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
@@ -60,7 +60,7 @@ public class ExecuteADResultResponseRecorder extends
             taskManager,
             nodeFilter,
             threadPool,
-            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
+            ADCommonName.AD_THREAD_POOL_NAME,
             client,
             nodeStateManager,
             clock,
@@ -77,7 +77,8 @@ public class ExecuteADResultResponseRecorder extends
         Instant dataEndTime,
         Instant executeEndTime,
         String errorMessage,
-        User user
+        User user,
+        String tenantId
     ) {
         return new AnomalyResult(
             configId,
@@ -91,7 +92,8 @@ public class ExecuteADResultResponseRecorder extends
             Optional.empty(), // single-stream detectors have no entity
             user,
             indexManagement.getSchemaVersion(resultIndex),
-            null // no model id
+            null, // no model id
+            tenantId
         );
     }
 

@@ -126,14 +126,41 @@ public abstract class JobProcessor<IndexType extends Enum<IndexType> & TimeSerie
         this.clock = clock;
     }
 
-    public void process(Job jobParameter, JobExecutionContext context) {
+    /**
+     * Process a job within multi-tenant.
+     *
+     * @param jobParameter the job parameter
+     * @param context the job execution context
+     * @param tenantId the tenant ID
+     */
+    public void process(Job jobParameter, JobExecutionContext context, String tenantId) {
+        process(jobParameter, context, context.getExpectedExecutionTime(), tenantId);
+    }
+
+    /**
+     * Process a job within single tenant.
+     *
+     * @param jobParameter the job parameter
+     * @param context the job execution context
+     * @param executionEndTime the execution end time
+     */
+    public void process(Job jobParameter, JobExecutionContext context, Instant executionEndTime) {
+        process(jobParameter, context, executionEndTime, null);
+    }
+
+    /**
+     * Process a job (generalized to suit both single and multi-tenant).
+     * @param jobParameter the job parameter
+     * @param context the job execution context
+     * @param executionEndTime the execution end time
+     * @param tenantId the tenant ID
+     */
+    public void process(Job jobParameter, JobExecutionContext context, Instant executionEndTime, String tenantId) {
         String configId = jobParameter.getName();
 
         log.info("Start to run {} job {}", analysisType, configId);
 
         taskManager.refreshRealtimeJobRunTime(configId);
-
-        Instant executionEndTime = Instant.now();
 
         final LockService lockService = context.getLockService();
 

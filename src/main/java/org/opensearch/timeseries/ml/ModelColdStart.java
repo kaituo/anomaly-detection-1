@@ -50,6 +50,7 @@ import org.opensearch.timeseries.model.IntervalTimeConfiguration;
 import org.opensearch.timeseries.ratelimit.FeatureRequest;
 import org.opensearch.timeseries.settings.TimeSeriesSettings;
 import org.opensearch.timeseries.util.ExceptionUtil;
+import org.opensearch.timeseries.util.StringUtil;
 
 import com.amazon.randomcutforest.config.ImputationMethod;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
@@ -152,8 +153,8 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
     }
 
     @Override
-    public void clear(String id) {
-        doorKeepers.remove(id);
+    public void clear(String tenantId, String configId) {
+        doorKeepers.remove(StringUtil.getCompositeKey(tenantId, configId));
     }
 
     /**
@@ -241,7 +242,7 @@ public abstract class ModelColdStart<RCFModelType extends ThresholdedRandomCutFo
                 // Won't retry real-time cold start within 60 intervals for an entity
                 // coldStartRequest.getTaskId() == null in real-time cold start
 
-                DoorKeeper doorKeeper = doorKeepers.computeIfAbsent(configId, id -> {
+                DoorKeeper doorKeeper = doorKeepers.computeIfAbsent(StringUtil.getCompositeKey(config.getTenantId(), configId), id -> {
                     // reset every 60 intervals
                     return new DoorKeeper(
                         TimeSeriesSettings.DOOR_KEEPER_FOR_COLD_STARTER_MAX_INSERTION,

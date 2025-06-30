@@ -56,9 +56,10 @@ public class StopForecasterTransportAction extends HandledTransportAction<Action
     protected void doExecute(Task task, ActionRequest actionRequest, ActionListener<StopConfigResponse> listener) {
         StopConfigRequest request = StopConfigRequest.fromActionRequest(actionRequest);
         String configId = request.getConfigID();
+        String tenantId = request.getTenantId();
         try {
             DiscoveryNode[] dataNodes = nodeFilter.getEligibleDataNodes();
-            DeleteModelRequest modelDeleteRequest = new DeleteModelRequest(configId, dataNodes);
+            DeleteModelRequest modelDeleteRequest = new DeleteModelRequest(configId, tenantId, dataNodes);
             client.execute(DeleteForecastModelAction.INSTANCE, modelDeleteRequest, ActionListener.wrap(response -> {
                 if (response.hasFailures()) {
                     LOG.warn("Cannot delete all models of forecaster {}", configId);

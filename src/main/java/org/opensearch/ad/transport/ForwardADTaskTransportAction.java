@@ -250,7 +250,7 @@ public class ForwardADTaskTransportAction extends HandledTransportAction<Forward
                     adTaskCacheManager.removeRealtimeTaskCache(detectorId);
                     // If hash ring changed like new node added when scale out, the realtime job coordinating node may
                     // change, then we should clean up cache on old coordinating node.
-                    stateManager.clear(detectorId);
+                    stateManager.clear(detector.getTenantId(), detectorId);
                 }
                 listener.onResponse(new JobResponse(detector.getId()));
                 break;

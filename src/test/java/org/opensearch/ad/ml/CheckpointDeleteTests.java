@@ -35,7 +35,7 @@ import org.opensearch.index.reindex.BulkByScrollResponse;
 import org.opensearch.index.reindex.DeleteByQueryAction;
 import org.opensearch.index.reindex.ScrollableHitSource;
 import org.opensearch.timeseries.AbstractTimeSeriesTest;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.transport.client.Client;
 

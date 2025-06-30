@@ -16,7 +16,9 @@ import java.time.Clock;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.model.ForecastResult;
+import org.opensearch.timeseries.AnalysisType;
 import org.opensearch.timeseries.MemoryTracker;
+import org.opensearch.timeseries.NodeStateManager;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.ml.ModelManager;
 import org.opensearch.timeseries.model.Config;
@@ -38,9 +40,10 @@ public class ForecastModelManager extends
         int rcfNumMinSamples,
         ForecastColdStart entityColdStarter,
         MemoryTracker memoryTracker,
-        FeatureManager featureManager
+        FeatureManager featureManager,
+        NodeStateManager nodeStateManager
     ) {
-        super(rcfNumTrees, rcfNumSamplesInTree, rcfNumMinSamples, entityColdStarter, memoryTracker, clock, featureManager, checkpointDao);
+        super(rcfNumTrees, rcfNumSamplesInTree, rcfNumMinSamples, entityColdStarter, memoryTracker, clock, featureManager, checkpointDao, nodeStateManager, AnalysisType.FORECAST);
     }
 
     @Override

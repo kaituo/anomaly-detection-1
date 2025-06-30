@@ -82,16 +82,18 @@ public class ClusterManagerEventListenerTests extends AbstractTimeSeriesTest {
         ignoredAttributes.put(CommonName.BOX_TYPE_KEY, CommonName.WARM_BOX_TYPE);
         nodeFilter = new DiscoveryNodeFilterer(clusterService);
 
-        clusterManagerService = new ClusterManagerEventListener(
+        clusterManagerService = new ClusterManagerEventListener();
+        clusterManagerService.init(
             clusterService,
             threadPool,
             client,
             clock,
             clientUtil,
             nodeFilter,
-            AnomalyDetectorSettings.AD_CHECKPOINT_TTL,
-            ForecastSettings.FORECAST_CHECKPOINT_TTL,
-            Settings.EMPTY
+            Settings.builder()
+            .put(AnomalyDetectorSettings.AD_CHECKPOINT_TTL.getKey(), TimeValue.timeValueHours(24))
+            .put(ForecastSettings.FORECAST_CHECKPOINT_TTL.getKey(), TimeValue.timeValueHours(24))
+            .build()
         );
     }
 

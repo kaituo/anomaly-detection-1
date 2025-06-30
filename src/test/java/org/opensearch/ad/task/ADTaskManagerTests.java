@@ -1224,12 +1224,13 @@ public class ADTaskManagerTests extends AbstractTimeSeriesTest {
                                 Instant.now().minusSeconds(60),
                                 Instant.now(),
                                 Instant.now(),
-                                60L,
-                                TestHelpers.randomUser(),
-                                null,
-                                AnalysisType.AD
-                            ).toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS)
-                        ),
+                            60L,
+                            TestHelpers.randomUser(),
+                            null,
+                            null,
+                            AnalysisType.AD
+                        ).toXContent(TestHelpers.builder(), ToXContent.EMPTY_PARAMS)
+                    ),
                     Collections.emptyMap(),
                     Collections.emptyMap()
                 )

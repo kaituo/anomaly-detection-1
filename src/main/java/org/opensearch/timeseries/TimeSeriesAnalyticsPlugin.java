@@ -42,6 +42,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.SpecialPermission;
 import org.opensearch.action.ActionRequest;
+import org.opensearch.action.delete.DeleteResponse;
+import org.opensearch.action.support.HandledTransportAction;
 import org.opensearch.ad.ADJobProcessor;
 import org.opensearch.ad.ADTaskProfileRunner;
 import org.opensearch.ad.AnomalyDetectorRunner;
@@ -49,12 +51,17 @@ import org.opensearch.ad.ExecuteADResultResponseRecorder;
 import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.constant.ADCommonName;
+import org.opensearch.ad.executor.ADCoordinatorContributor;
+import org.opensearch.ad.executor.ADModelContributor;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
 import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
+import org.opensearch.ad.ml.ADS3CheckpointDao;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.ml.ADRealTimeInferencer;
+import org.opensearch.ad.ml.DelegatingADCheckpointStore;
 import org.opensearch.ad.ml.HybridThresholdingModel;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.ad.model.AnomalyResult;
@@ -81,6 +88,7 @@ import org.opensearch.ad.rest.RestSearchAnomalyResultAction;
 import org.opensearch.ad.rest.RestSearchTopAnomalyResultAction;
 import org.opensearch.ad.rest.RestStatsAnomalyDetectorAction;
 import org.opensearch.ad.rest.RestValidateAnomalyDetectorAction;
+import org.opensearch.ad.rest.handler.ADEventBridgeHandler;
 import org.opensearch.ad.rest.handler.ADIndexJobActionHandler;
 import org.opensearch.ad.settings.ADEnabledSetting;
 import org.opensearch.ad.settings.ADNumericSetting;
@@ -119,6 +127,7 @@ import org.opensearch.ad.transport.AnomalyResultTransportAction;
 import org.opensearch.ad.transport.DeleteADModelAction;
 import org.opensearch.ad.transport.DeleteADModelTransportAction;
 import org.opensearch.ad.transport.DeleteAnomalyDetectorAction;
+import org.opensearch.ad.transport.DeleteAnomalyDetectorMutliTenantTransportAction;
 import org.opensearch.ad.transport.DeleteAnomalyDetectorTransportAction;
 import org.opensearch.ad.transport.DeleteAnomalyResultsAction;
 import org.opensearch.ad.transport.DeleteAnomalyResultsTransportAction;
@@ -159,6 +168,7 @@ import org.opensearch.ad.transport.ValidateAnomalyDetectorTransportAction;
 import org.opensearch.ad.transport.handler.ADIndexMemoryPressureAwareResultHandler;
 import org.opensearch.ad.transport.handler.ADSearchHandler;
 import org.opensearch.cluster.metadata.IndexNameExpressionResolver;
+import org.opensearch.cluster.node.DiscoveryNode;
 import org.opensearch.cluster.node.DiscoveryNodes;
 import org.opensearch.cluster.service.ClusterService;
 import org.opensearch.common.settings.ClusterSettings;
@@ -166,9 +176,8 @@ import org.opensearch.common.settings.IndexScopedSettings;
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.settings.Settings;
 import org.opensearch.common.settings.SettingsFilter;
-import org.opensearch.common.unit.TimeValue;
-import org.opensearch.common.util.concurrent.OpenSearchExecutors;
 import org.opensearch.core.action.ActionResponse;
+import org.opensearch.core.common.Strings;
 import org.opensearch.core.common.io.stream.NamedWriteableRegistry;
 import org.opensearch.core.xcontent.NamedXContentRegistry;
 import org.opensearch.core.xcontent.XContentParser;
@@ -181,6 +190,7 @@ import org.opensearch.forecast.ForecastTaskProfileRunner;
 import org.opensearch.forecast.caching.ForecastCacheProvider;
 import org.opensearch.forecast.caching.ForecastPriorityCache;
 import org.opensearch.forecast.constant.ForecastCommonName;
+import org.opensearch.forecast.executor.ForecastModelContributor;
 import org.opensearch.forecast.indices.ForecastIndex;
 import org.opensearch.forecast.indices.ForecastIndexManagement;
 import org.opensearch.forecast.ml.ForecastCheckpointDao;
@@ -279,16 +289,18 @@ import org.opensearch.rest.RestController;
 import org.opensearch.rest.RestHandler;
 import org.opensearch.script.ScriptService;
 import org.opensearch.threadpool.ExecutorBuilder;
-import org.opensearch.threadpool.ScalingExecutorBuilder;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.breaker.CircuitBreakerService;
 import org.opensearch.timeseries.cluster.ADDataMigrator;
 import org.opensearch.timeseries.cluster.ClusterEventListener;
-import org.opensearch.timeseries.cluster.ClusterManagerEventListener;
+import org.opensearch.timeseries.cluster.ClusterManagerTaskRegistry;
 import org.opensearch.timeseries.cluster.HashRing;
 import org.opensearch.timeseries.constant.CommonName;
 import org.opensearch.timeseries.dataprocessor.Imputer;
 import org.opensearch.timeseries.dataprocessor.LinearUniformImputer;
+import org.opensearch.timeseries.executor.CloudMapWatcherContributor;
+import org.opensearch.timeseries.executor.SQSConsumerContributor;
+import org.opensearch.timeseries.executor.ExecutorBuilderContributor;
 import org.opensearch.timeseries.feature.FeatureManager;
 import org.opensearch.timeseries.feature.SearchFeatureDao;
 import org.opensearch.timeseries.function.ThrowingSupplierWrapper;
@@ -304,6 +316,7 @@ import org.opensearch.timeseries.stats.suppliers.SettableSupplier;
 import org.opensearch.timeseries.task.TaskCacheManager;
 import org.opensearch.timeseries.transport.CronAction;
 import org.opensearch.timeseries.transport.CronTransportAction;
+import org.opensearch.timeseries.transport.DeleteConfigRequest;
 import org.opensearch.timeseries.transport.handler.ResultBulkIndexingHandler;
 import org.opensearch.timeseries.util.ClientUtil;
 import org.opensearch.timeseries.util.DiscoveryNodeFilterer;
@@ -348,16 +361,9 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
     public static final String LEGACY_OPENDISTRO_AD_BASE_URI = LEGACY_AD_BASE + "/detectors";
     public static final String AD_BASE_URI = "/_plugins/_anomaly_detection";
     public static final String AD_BASE_DETECTORS_URI = AD_BASE_URI + "/detectors";
-    public static final String AD_THREAD_POOL_PREFIX = "opensearch.ad.";
-    public static final String AD_THREAD_POOL_NAME = "ad-threadpool";
-    public static final String AD_BATCH_TASK_THREAD_POOL_NAME = "ad-batch-task-threadpool";
-
     // forecasting constants
     public static final String FORECAST_BASE_URI = "/_plugins/_forecast";
     public static final String FORECAST_FORECASTERS_URI = FORECAST_BASE_URI + "/forecasters";
-    public static final String FORECAST_THREAD_POOL_PREFIX = "opensearch.forecast.";
-    public static final String FORECAST_THREAD_POOL_NAME = "forecast-threadpool";
-
     public static final String TIME_SERIES_JOB_TYPE = "opensearch_time_series_analytics";
 
     private static Gson gson;
@@ -365,6 +371,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
     private ForecastIndexManagement forecastIndices;
     private AnomalyDetectorRunner anomalyDetectorRunner;
     private Client client;
+    private Settings pluginSettings = Settings.EMPTY;
     private ClusterService clusterService;
     private ThreadPool threadPool;
     private ADStats adStats;
@@ -518,6 +525,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
         this.pluginClient = new PluginClient(client);
         this.threadPool = threadPool;
         Settings settings = environment.settings();
+        this.pluginSettings = settings;
         this.clientUtil = new ClientUtil(client);
         this.indexUtils = new IndexUtils(clusterService, indexNameExpressionResolver);
         this.nodeFilter = new DiscoveryNodeFilterer(clusterService);
@@ -557,6 +565,12 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
         serializeRCFBufferPool.setBlockWhenExhausted(false);
         serializeRCFBufferPool.setTimeBetweenEvictionRuns(TimeSeriesSettings.HOURLY_MAINTENANCE);
 
+        java.util.List<String> nodeRoles = org.opensearch.timeseries.settings.TimeSeriesSettings.NODE_ROLE.get(settings);
+        ADEventBridgeHandler eventBridgeHandler = null;
+        if (nodeRoles.contains(org.opensearch.timeseries.settings.TimeSeriesSettings.COORDINATOR_ROLE)) {
+            eventBridgeHandler = new ADEventBridgeHandler(settings, getClock());
+        }
+
         stateManager = new NodeStateManager(
             client,
             xContentRegistry,
@@ -566,7 +580,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             clusterService,
             TimeSeriesSettings.MAX_RETRY_FOR_UNRESPONSIVE_NODE,
-            TimeSeriesSettings.BACKOFF_MINUTES
+            TimeSeriesSettings.BACKOFF_MINUTES,
+            eventBridgeHandler
         );
         securityClientUtil = new SecurityClientUtil(stateManager, settings);
 
@@ -617,30 +632,59 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
 
         MemoryTracker adMemoryTracker = new MemoryTracker(jvmService, adModelMaxSizePercent, clusterService, circuitBreakerService);
 
-        ADCheckpointDao adCheckpoint = new ADCheckpointDao(
+        ThresholdedRandomCutForestMapper trcfMapper = new ThresholdedRandomCutForestMapper();
+        Schema<ThresholdedRandomCutForestState> trcfSchema = AccessController
+            .doPrivileged((PrivilegedAction<Schema<ThresholdedRandomCutForestState>>) () -> RuntimeSchema.getSchema(ThresholdedRandomCutForestState.class));
+
+        double anomalyRate = 1 - TimeSeriesSettings.THRESHOLD_MIN_PVALUE;
+
+        ADCheckpointDao indexCheckpointStore = new ADCheckpointDao(
             client,
             clientUtil,
             gson,
             rcfMapper,
             converter,
-            new ThresholdedRandomCutForestMapper(),
-            AccessController
-                .doPrivileged(
-                    (PrivilegedAction<Schema<ThresholdedRandomCutForestState>>) () -> RuntimeSchema
-                        .getSchema(ThresholdedRandomCutForestState.class)
-                ),
+            trcfMapper,
+            trcfSchema,
             HybridThresholdingModel.class,
             anomalyDetectionIndices,
             TimeSeriesSettings.MAX_CHECKPOINT_BYTES,
             serializeRCFBufferPool,
             TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES,
-            1 - TimeSeriesSettings.THRESHOLD_MIN_PVALUE,
+            anomalyRate,
             getClock()
         );
 
+        ADS3CheckpointDao s3CheckpointStore = null;
+        if (AnomalyDetectorSettings.AD_MULTI_TENANCY_ENABLED.get(settings)) {
+            try {
+                s3CheckpointStore = new ADS3CheckpointDao(
+                    settings,
+                    TimeSeriesSettings.MAX_CHECKPOINT_BYTES,
+                    trcfSchema,
+                    trcfMapper,
+                    converter,
+                    gson,
+                    rcfMapper,
+                    HybridThresholdingModel.class,
+                    anomalyRate,
+                    getClock(),
+                    serializeRCFBufferPool,
+                    TimeSeriesSettings.SERIALIZATION_BUFFER_BYTES,
+                    anomalyDetectionIndices
+                );
+            } catch (Exception e) {
+                LOG.warn("Failed to initialise S3-backed checkpoint store; falling back to index-backed checkpoints.", e);
+            }
+        } else if (LOG.isDebugEnabled()) {
+            LOG.debug("S3 checkpoint store not configured; using index-backed checkpoints");
+        }
+
+        ADCheckpointStore adCheckpoint = new DelegatingADCheckpointStore(indexCheckpointStore, s3CheckpointStore, clusterService);
+
         ADCacheProvider adCacheProvider = new ADCacheProvider();
 
-        CheckPointMaintainRequestAdapter<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointDao, ADPriorityCache> adAdapter =
+        CheckPointMaintainRequestAdapter<ThresholdedRandomCutForest, ADIndex, ADIndexManagement, ADCheckpointStore, ADPriorityCache> adAdapter =
             new CheckPointMaintainRequestAdapter<>(
                 adCheckpoint,
                 ADCommonName.CHECKPOINT_INDEX_NAME,
@@ -708,7 +752,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             settings,
             AnomalyDetectorSettings.AD_CHECKPOINT_SAVING_FREQ,
             adCheckpointWriteQueue,
-            adCheckpointMaintainQueue
+            adCheckpointMaintainQueue,
+            stateManager
         );
 
         // cache provider allows us to break circular dependency among PriorityCache, CacheBuffer,
@@ -747,7 +792,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             featureManager,
             adMemoryTracker,
             settings,
-            clusterService
+            clusterService,
+            stateManager
         );
 
         ADIndexMemoryPressureAwareResultHandler adIndexMemoryPressureAwareResultHandler = new ADIndexMemoryPressureAwareResultHandler(
@@ -998,15 +1044,31 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             TimeSeriesSettings.NUM_MIN_SAMPLES
         );
 
-        adIndexJobActionHandler = new ADIndexJobActionHandler(
-            client,
-            anomalyDetectionIndices,
-            xContentRegistry,
-            adTaskManager,
-            adResultResponseRecorder,
-            stateManager,
-            settings
-        );
+        // Use EventBridge for starting jobs on coordinator nodes; otherwise default indexing-based starter
+        
+        if (nodeRoles.contains(org.opensearch.timeseries.settings.TimeSeriesSettings.COORDINATOR_ROLE)) {
+            adIndexJobActionHandler = new ADIndexJobActionHandler(
+                client,
+                anomalyDetectionIndices,
+                xContentRegistry,
+                adTaskManager,
+                adResultResponseRecorder,
+                stateManager,
+                settings,
+                eventBridgeHandler::startJob,
+                eventBridgeHandler::stopJob
+            );
+        } else {
+            adIndexJobActionHandler = new ADIndexJobActionHandler(
+                client,
+                anomalyDetectionIndices,
+                xContentRegistry,
+                adTaskManager,
+                adResultResponseRecorder,
+                stateManager,
+                settings
+            );
+        }
 
         // =====================
         // forecast components
@@ -1116,12 +1178,13 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             clusterService,
             TimeSeriesSettings.HOURLY_MAINTENANCE,
             threadPool,
-            FORECAST_THREAD_POOL_NAME,
+            ForecastCommonName.FORECAST_THREAD_POOL_NAME,
             TimeSeriesSettings.MAINTENANCE_FREQ_CONSTANT,
             settings,
             ForecastSettings.FORECAST_CHECKPOINT_SAVING_FREQ,
             forecastCheckpointWriteQueue,
-            forecastCheckpointMaintainQueue
+            forecastCheckpointMaintainQueue,
+            stateManager
         );
 
         // cache provider allows us to break circular dependency among PriorityCache, CacheBuffer,
@@ -1154,7 +1217,8 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             TimeSeriesSettings.NUM_MIN_SAMPLES,
             forecastColdStarter,
             forecastMemoryTracker,
-            featureManager
+            featureManager,
+            stateManager
         );
 
         ForecastIndexMemoryPressureAwareResultHandler forecastIndexMemoryPressureAwareResultHandler =
@@ -1358,77 +1422,30 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
             settings
         );
 
-        // return objects used by Guice to inject dependencies for e.g.,
-        // transport action handler constructors
-        return ImmutableList
-            .of(
+        List<Object> components = new ArrayList<>(ImmutableList.of(
+                // return objects used by Guice to inject dependencies for e.g.,
+                // transport action handler constructors
                 // common components
-                searchFeatureDao,
-                imputer,
-                gson,
-                jvmService,
-                hashRing,
-                featureManager,
-                stateManager,
-                new ClusterEventListener(clusterService, hashRing),
-                circuitBreakerService,
-                new ClusterManagerEventListener(
-                    clusterService,
-                    threadPool,
-                    client,
-                    getClock(),
-                    clientUtil,
-                    nodeFilter,
-                    AnomalyDetectorSettings.AD_CHECKPOINT_TTL,
-                    ForecastSettings.FORECAST_CHECKPOINT_TTL,
-                    settings
-                ),
+                searchFeatureDao, imputer, gson, jvmService, hashRing, featureManager, stateManager,
+                new ClusterEventListener(clusterService, hashRing), circuitBreakerService,
+                new ClusterManagerTaskRegistry(clusterService, threadPool, client, getClock(), clientUtil, nodeFilter,
+                        settings, hashRing, stateManager),
                 nodeFilter,
                 // AD components
-                anomalyDetectionIndices,
-                anomalyDetectorRunner,
-                adModelManager,
-                adStats,
-                adIndexMemoryPressureAwareResultHandler,
-                adCheckpoint,
-                adCacheProvider,
-                adTaskManager,
-                adBatchTaskRunner,
-                adSearchHandler,
-                adColdstartQueue,
-                adResultWriteQueue,
-                adCheckpointReadQueue,
-                adCheckpointWriteQueue,
-                adColdEntityQueue,
-                adEntityColdStarter,
-                adTaskCacheManager,
-                adResultResponseRecorder,
-                adIndexJobActionHandler,
-                adSaveResultStrategy,
-                new ADTaskProfileRunner(hashRing, client),
-                adInferencer,
+                anomalyDetectionIndices, anomalyDetectorRunner, adModelManager, adStats,
+                adIndexMemoryPressureAwareResultHandler, adCheckpoint, adCacheProvider, adTaskManager,
+                adBatchTaskRunner, adSearchHandler, adColdstartQueue, adResultWriteQueue, adCheckpointReadQueue,
+                adCheckpointWriteQueue, adColdEntityQueue, adEntityColdStarter, adTaskCacheManager,
+                adResultResponseRecorder, adIndexJobActionHandler, adSaveResultStrategy,
+                new ADTaskProfileRunner(hashRing, client), adInferencer,
                 // forecast components
-                forecastIndices,
-                forecastStats,
-                forecastModelManager,
-                forecastIndexMemoryPressureAwareResultHandler,
-                forecastCheckpoint,
-                forecastCacheProvider,
-                forecastColdstartQueue,
-                forecastResultWriteQueue,
-                forecastCheckpointReadQueue,
-                forecastCheckpointWriteQueue,
-                forecastColdEntityQueue,
-                forecastColdStarter,
-                forecastTaskManager,
-                forecastSearchHandler,
-                forecastIndexJobActionHandler,
-                forecastTaskCacheManager,
-                forecastSaveResultStrategy,
-                new ForecastTaskProfileRunner(),
-                forecastInferencer,
-                pluginClient
-            );
+                forecastIndices, forecastStats, forecastModelManager, forecastIndexMemoryPressureAwareResultHandler,
+                forecastCheckpoint, forecastCacheProvider, forecastColdstartQueue, forecastResultWriteQueue,
+                forecastCheckpointReadQueue, forecastCheckpointWriteQueue, forecastColdEntityQueue, forecastColdStarter,
+                forecastTaskManager, forecastSearchHandler, forecastIndexJobActionHandler, forecastTaskCacheManager,
+                forecastSaveResultStrategy, new ForecastTaskProfileRunner(), forecastInferencer, pluginClient));
+
+        return components;
     }
 
     /**
@@ -1442,35 +1459,11 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
 
     @Override
     public List<ExecutorBuilder<?>> getExecutorBuilders(Settings settings) {
-        return ImmutableList
-            .of(
-                new ScalingExecutorBuilder(
-                    AD_THREAD_POOL_NAME,
-                    1,
-                    // HCAD can be heavy after supporting 1 million entities.
-                    // Limit to use at most half of the processors.
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 2),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_THREAD_POOL_NAME
-                ),
-                new ScalingExecutorBuilder(
-                    AD_BATCH_TASK_THREAD_POOL_NAME,
-                    1,
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) / 8),
-                    TimeValue.timeValueMinutes(10),
-                    AD_THREAD_POOL_PREFIX + AD_BATCH_TASK_THREAD_POOL_NAME
-                ),
-                new ScalingExecutorBuilder(
-                    FORECAST_THREAD_POOL_NAME,
-                    1,
-                    // this pool is used by both real time and run once.
-                    // HCAD can be heavy after supporting 1 million entities.
-                    // Limit to use at most 3/4 of the processors.
-                    Math.max(1, OpenSearchExecutors.allocatedProcessors(settings) * 3 / 4),
-                    TimeValue.timeValueMinutes(10),
-                    FORECAST_THREAD_POOL_PREFIX + FORECAST_THREAD_POOL_NAME
-                )
-            );
+        List<ExecutorBuilderContributor> contributors = List
+            .of(new CloudMapWatcherContributor(), new SQSConsumerContributor(), new ADCoordinatorContributor(), new ADModelContributor(), new ForecastModelContributor());
+        List<ExecutorBuilder<?>> builders = new ArrayList<>();
+        contributors.forEach(c -> c.contribute(settings, builders));
+        return List.copyOf(builders);
     }
 
     @Override
@@ -1570,10 +1563,22 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 AnomalyDetectorSettings.MAX_ENTITIES_FOR_PREVIEW,
                 AnomalyDetectorSettings.MAX_CONCURRENT_PREVIEW,
                 AnomalyDetectorSettings.AD_PAGE_SIZE,
+                AnomalyDetectorSettings.AD_SQS_QUEUE_ARN,
+                AnomalyDetectorSettings.AD_SCHEDULER_ROLE_ARN,
+                TimeSeriesSettings.REGION,
+                TimeSeriesSettings.CLOUD_MAP_NAMESPACE,
+                TimeSeriesSettings.CLOUD_MAP_SERVICE,
+                TimeSeriesSettings.CLOUD_MAP_TABLE_NAME,
                 // clean resource
                 AnomalyDetectorSettings.DELETE_AD_RESULT_WHEN_DELETE_DETECTOR,
                 // stats/profile API
                 AnomalyDetectorSettings.AD_MAX_MODEL_SIZE_PER_NODE,
+                AnomalyDetectorSettings.SQS_QUEUE_URL,
+                AnomalyDetectorSettings.SQS_POLLING_INTERVAL,
+                AnomalyDetectorSettings.SQS_MAX_MESSAGES,
+                AnomalyDetectorSettings.SQS_VISIBILITY_TIMEOUT,
+                AnomalyDetectorSettings.SQS_WAIT_TIME,
+                AnomalyDetectorSettings.SQS_MAX_CONCURRENT_PROCESSORS,
                 // ======================================
                 // Forecast settings
                 // ======================================
@@ -1592,15 +1597,13 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 ForecastSettings.FORECAST_RESULT_HISTORY_ROLLOVER_PERIOD,
                 // resource usage control
                 ForecastSettings.FORECAST_MODEL_MAX_SIZE_PERCENTAGE,
-                // TODO: add validation code
-                // ForecastSettings.FORECAST_MAX_SINGLE_STREAM_FORECASTERS,
-                // ForecastSettings.FORECAST_MAX_HC_FORECASTERS,
                 ForecastSettings.FORECAST_INDEX_PRESSURE_SOFT_LIMIT,
                 ForecastSettings.FORECAST_INDEX_PRESSURE_HARD_LIMIT,
                 ForecastSettings.FORECAST_MAX_PRIMARY_SHARDS,
                 // restful apis
                 ForecastSettings.FORECAST_REQUEST_TIMEOUT,
                 // resource constraint
+                // added validation code in AbstractTimeSeriesActionHandler.onSearchTotalConfigResponse
                 ForecastSettings.MAX_SINGLE_STREAM_FORECASTERS,
                 ForecastSettings.MAX_HC_FORECASTERS,
                 // Security
@@ -1640,7 +1643,13 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 TimeSeriesSettings.BACKOFF_MINUTES,
                 TimeSeriesSettings.COOLDOWN_MINUTES,
                 // tasks
-                TimeSeriesSettings.MAX_CACHED_DELETED_TASKS
+                TimeSeriesSettings.MAX_CACHED_DELETED_TASKS,
+                // node role
+                TimeSeriesSettings.NODE_ROLE,
+                // cluster membership reader ttl
+                TimeSeriesSettings.CLUSTER_MEMBERSHIP_READER_TTL,
+                // cloud map ttl
+                TimeSeriesSettings.CLOUD_MAP_TTL
             );
         return unmodifiableList(
             Stream
@@ -1675,6 +1684,12 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
      */
     @Override
     public List<ActionHandler<? extends ActionRequest, ? extends ActionResponse>> getActions() {
+        List<String> nodeRoles = TimeSeriesSettings.NODE_ROLE.get(pluginSettings);
+        boolean coordinatorNode = nodeRoles.contains(TimeSeriesSettings.COORDINATOR_ROLE);
+        Class<? extends HandledTransportAction<DeleteConfigRequest, DeleteResponse>> deleteAnomalyDetectorTransportClass = coordinatorNode
+            ? DeleteAnomalyDetectorMutliTenantTransportAction.class
+            : DeleteAnomalyDetectorTransportAction.class;
+
         return Arrays
             .asList(
                 // AD
@@ -1691,7 +1706,7 @@ public class TimeSeriesAnalyticsPlugin extends Plugin
                 new ActionHandler<>(SearchAnomalyResultAction.INSTANCE, SearchAnomalyResultTransportAction.class),
                 new ActionHandler<>(SearchADTasksAction.INSTANCE, SearchADTasksTransportAction.class),
                 new ActionHandler<>(StatsAnomalyDetectorAction.INSTANCE, StatsAnomalyDetectorTransportAction.class),
-                new ActionHandler<>(DeleteAnomalyDetectorAction.INSTANCE, DeleteAnomalyDetectorTransportAction.class),
+                new ActionHandler<>(DeleteAnomalyDetectorAction.INSTANCE, deleteAnomalyDetectorTransportClass),
                 new ActionHandler<>(GetAnomalyDetectorAction.INSTANCE, GetAnomalyDetectorTransportAction.class),
                 new ActionHandler<>(IndexAnomalyDetectorAction.INSTANCE, IndexAnomalyDetectorTransportAction.class),
                 new ActionHandler<>(AnomalyDetectorJobAction.INSTANCE, AnomalyDetectorJobTransportAction.class),

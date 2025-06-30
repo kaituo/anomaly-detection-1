@@ -101,6 +101,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             60L,
             randomUser(),
+            detector.getTenantId(),
             null,
             AnalysisType.AD
         );
@@ -137,6 +138,7 @@ public class DeleteAnomalyDetectorTransportActionTests extends HistoricalAnalysi
             Instant.now().truncatedTo(ChronoUnit.SECONDS),
             60L,
             randomUser(),
+            detector.getTenantId(),
             null,
             AnalysisType.AD
         );

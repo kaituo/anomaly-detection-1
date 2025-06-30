@@ -262,7 +262,8 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
             config.getCustomResultIndexTTL(),
             config.getFlattenResultIndexMapping(),
             breakingUIChange ? Instant.now() : config.getLastBreakingUIChangeTime(),
-            config.getFrequency()
+            config.getFrequency(),
+            config.getTenantId()
         );
     }
 
@@ -306,5 +307,39 @@ public abstract class AbstractForecasterActionHandler<T extends ActionResponse> 
             user
         );
         modelValidationActionHandler.start();
+    }
+
+    protected Forecaster createForecaster(Forecaster forecaster, User user) {
+        return new Forecaster(
+            forecaster.getId(),
+            forecaster.getVersion(),
+            forecaster.getName(),
+            forecaster.getDescription(),
+            forecaster.getTimeField(),
+            forecaster.getIndices(),
+            forecaster.getFeatureAttributes(),
+            forecaster.getFilterQuery(),
+            forecaster.getInterval(),
+            forecaster.getWindowDelay(),
+            forecaster.getShingleSize(),
+            forecaster.getUiMetadata(),
+            forecaster.getSchemaVersion(),
+            Instant.now(),
+            forecaster.getCategoryFields(),
+            user,
+            forecaster.getCustomResultIndexOrAlias(),
+            forecaster.getHorizon(),
+            forecaster.getImputationOption(),
+            forecaster.getRecencyEmphasis(),
+            forecaster.getSeasonIntervals(),
+            forecaster.getHistoryIntervals(),
+            forecaster.getCustomResultIndexMinSize(),
+            forecaster.getCustomResultIndexMinAge(),
+            forecaster.getCustomResultIndexTTL(),
+            forecaster.getFlattenResultIndexMapping(),
+            forecaster.getLastBreakingUIChangeTime(),
+            forecaster.getFrequency(),
+            forecaster.getTenantId()
+        );
     }
 }

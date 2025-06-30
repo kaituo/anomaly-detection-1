@@ -6,9 +6,13 @@
 package org.opensearch.timeseries.settings;
 
 import java.time.Duration;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
 
 import org.opensearch.common.settings.Setting;
 import org.opensearch.common.unit.TimeValue;
+import org.opensearch.timeseries.constant.CommonName;
 
 public class TimeSeriesSettings {
 
@@ -299,4 +303,68 @@ public class TimeSeriesSettings {
     // Suggest setting
     // ======================================
     public static final float WINDOW_DELAY_RATIO = 1.2f;
+
+    // ======================================
+    // microservice setting
+    // ======================================
+    public static final Setting<TimeValue> CLOUD_MAP_TTL = Setting
+    .positiveTimeSetting(
+        "plugins.timeseries.cloud_map_ttl",
+        TimeValue.timeValueSeconds(30),
+        Setting.Property.NodeScope,
+        Setting.Property.Dynamic
+    );
+
+    public static final Setting<TimeValue> CLUSTER_MEMBERSHIP_READER_TTL = Setting
+    .positiveTimeSetting(
+        "plugins.timeseries.cluster_membership_reader_ttl",
+        TimeValue.timeValueSeconds(30),
+        Setting.Property.NodeScope,
+        Setting.Property.Dynamic
+    );
+
+    // Role names
+    public static final String CLOUDMAP_WATCHER_ROLE = "cloudmap_watcher";
+    public static final String COORDINATOR_ROLE = "coordinator";
+    public static final String MODEL_ROLE = "model";
+
+    private static final Set<String> VALID_ROLES = Set.of(CLOUDMAP_WATCHER_ROLE, COORDINATOR_ROLE, MODEL_ROLE);
+    
+    public static final Setting<List<String>> NODE_ROLE= Setting
+    .listSetting(
+        CommonName.SETTING_PREFIX + "node.roles",
+        List.of(), // Default to empty roles
+        s -> s, // parser
+        roles -> { // validator
+            if (new HashSet<>(roles).size() != roles.size()) {
+                throw new IllegalArgumentException("Duplicate roles found: " + roles);
+            }
+            for (String role : roles) {
+                if (!VALID_ROLES.contains(role)) {
+                    throw new IllegalArgumentException("Invalid role: " + role + ". Valid roles are " + VALID_ROLES);
+                }
+            }
+        },
+        Setting.Property.NodeScope,
+        // cannot change at runtime
+        // should not be dynamic as our threadpool initialization depends on this setting
+        // there is no way to change threadpool at runtime.
+        Setting.Property.Final
+    );
+
+    /** This setting sets the service region */
+    public static final Setting<String> REGION = Setting
+        .simpleString("plugins.timeseries.region", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** Cloud Map namespace (e.g., "prod") */
+    public static final Setting<String> CLOUD_MAP_NAMESPACE = Setting
+        .simpleString("plugins.timeseries.cloud_map_namespace", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** Cloud Map service name (e.g., "metrics-worker") */
+    public static final Setting<String> CLOUD_MAP_SERVICE = Setting
+        .simpleString("plugins.timeseries.cloud_map_service", Setting.Property.NodeScope, Setting.Property.Final);
+
+    /** DynamoDB table name (e.g., "TaskDispatch") */
+    public static final Setting<String> CLOUD_MAP_TABLE_NAME = Setting
+        .simpleString("plugins.timeseries.cloud_map_table_name", Setting.Property.NodeScope, Setting.Property.Final);
 }

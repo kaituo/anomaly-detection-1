@@ -566,7 +566,7 @@ public abstract class ResultProcessor<TransportResultRequestType extends ResultR
         // HC logic ends and single entity logic starts here
         // We are going to use only 1 model partition for a single stream detector.
         // That's why we use 0 here.
-        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(configID, 0);
+        String rcfModelID = SingleStreamModelIdMapper.getRcfModelId(config.getTenantId(), configID, 0);
         Optional<DiscoveryNode> asRCFNode = hashRing.getOwningNodeWithSameLocalVersionForRealtime(rcfModelID);
         if (asRCFNode.isEmpty()) {
             listener.onFailure(new InternalFailure(configID, "RCF model node is not available."));

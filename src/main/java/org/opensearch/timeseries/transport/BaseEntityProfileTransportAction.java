@@ -90,7 +90,7 @@ public class BaseEntityProfileTransportAction<RCFModelType extends ThresholdedRa
 
         String adID = request.getConfigID();
         Entity entityValue = request.getEntityValue();
-        Optional<String> modelIdOptional = entityValue.getModelId(adID);
+        Optional<String> modelIdOptional = entityValue.getModelId(request.getTenantId(), adID);
         if (false == modelIdOptional.isPresent()) {
             listener.onFailure(new TimeSeriesException(adID, NO_MODEL_ID_FOUND_MSG));
             return;
@@ -110,14 +110,14 @@ public class BaseEntityProfileTransportAction<RCFModelType extends ThresholdedRa
             Set<EntityProfileName> profilesToCollect = request.getProfilesToCollect();
             EntityProfileResponse.Builder builder = new EntityProfileResponse.Builder();
             if (profilesToCollect.contains(EntityProfileName.ENTITY_INFO)) {
-                builder.setActive(cache.isActive(adID, modelId));
-                builder.setLastActiveMs(cache.getLastActiveTime(adID, modelId));
+                builder.setActive(cache.isActive(request.getTenantId(), adID, modelId));
+                builder.setLastActiveMs(cache.getLastActiveTime(request.getTenantId(), adID, modelId));
             }
             if (profilesToCollect.contains(EntityProfileName.INIT_PROGRESS) || profilesToCollect.contains(EntityProfileName.STATE)) {
-                builder.setTotalUpdates(cache.getTotalUpdates(adID, modelId));
+                builder.setTotalUpdates(cache.getTotalUpdates(request.getTenantId(), adID, modelId));
             }
             if (profilesToCollect.contains(EntityProfileName.MODELS)) {
-                Optional<ModelProfile> modleProfile = cache.getModelProfile(adID, modelId);
+                Optional<ModelProfile> modleProfile = cache.getModelProfile(request.getTenantId(), adID, modelId);
                 if (modleProfile.isPresent()) {
                     builder.setModelProfile(new ModelProfileOnNode(nodeId, modleProfile.get()));
                 }

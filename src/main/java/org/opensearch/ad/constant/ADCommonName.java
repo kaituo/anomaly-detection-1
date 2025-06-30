@@ -66,10 +66,23 @@ public class ADCommonName {
     // ======================================
     // detector validation aspect
     public static final String DETECTOR_ASPECT = "detector";
+
     // ======================================
     // Used for custom AD result index
     // ======================================
     public static final String DUMMY_AD_RESULT_ID = "dummy_ad_result_id";
     public static final String DUMMY_DETECTOR_ID = "dummy_detector_id";
     public static final String CUSTOM_RESULT_INDEX_PREFIX = "opensearch-ad-plugin-result-";
+    public static final String AD_COORDINATOR_THREAD_POOL_NAME = "ad-coordinator-threadpool";
+    public static final String AD_THREAD_POOL_PREFIX = "opensearch.ad.";
+    public static final String AD_THREAD_POOL_NAME = "ad-threadpool";
+    public static final String AD_BATCH_TASK_THREAD_POOL_NAME = "ad-batch-task-threadpool";
+
+    // ======================================
+    // Model serialization/deserialization
+    // ======================================
+    public static final String ENTITY_RCF = "rcf";
+    public static final String ENTITY_TRCF = "trcf";
+    public static final String ENTITY_THRESHOLD = "th";
+    public static final String DETECTOR_ID = "detectorId";
 }

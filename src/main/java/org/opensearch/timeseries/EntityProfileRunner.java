@@ -230,7 +230,7 @@ public class EntityProfileRunner<EntityProfileActionType extends ActionType<Enti
         Config config,
         String categoryField
     ) {
-        EntityProfileRequest request = new EntityProfileRequest(detectorId, entityValue, profilesToCollect);
+        EntityProfileRequest request = new EntityProfileRequest(detectorId, entityValue, profilesToCollect, config.getTenantId());
 
         client
             .execute(

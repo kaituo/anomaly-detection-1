@@ -36,7 +36,7 @@ import org.opensearch.timeseries.caching.TimeSeriesCache;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.indices.IndexManagement;
 import org.opensearch.timeseries.indices.TimeSeriesIndex;
-import org.opensearch.timeseries.ml.CheckpointDao;
+import org.opensearch.timeseries.ml.CheckpointDaoInterface;
 import org.opensearch.timeseries.ml.IntermediateResult;
 import org.opensearch.timeseries.ml.ModelColdStart;
 import org.opensearch.timeseries.ml.ModelManager;
@@ -53,7 +53,13 @@ import org.opensearch.timeseries.util.ExceptionUtil;
 
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
-public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutForest, IndexType extends Enum<IndexType> & TimeSeriesIndex, IndexManagementType extends IndexManagement<IndexType>, CheckpointDaoType extends CheckpointDao<RCFModelType, IndexType, IndexManagementType>, CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>, ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>, CacheType extends TimeSeriesCache<RCFModelType>, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, ModelManagerType extends ModelManager<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>>
+public abstract class ColdStartWorker<
+    RCFModelType extends ThresholdedRandomCutForest, 
+    IndexType extends Enum<IndexType> & TimeSeriesIndex, 
+    IndexManagementType extends IndexManagement<IndexType>, 
+    CheckpointDaoType extends CheckpointDaoInterface<RCFModelType>,
+    CheckpointWriteWorkerType extends CheckpointWriteWorker<RCFModelType, IndexType, IndexManagementType, CheckpointDaoType>,
+    ColdStarterType extends ModelColdStart<RCFModelType, IndexType, IndexManagementType, IndexableResultType>, CacheType extends TimeSeriesCache<RCFModelType>, IndexableResultType extends IndexableResult, IntermediateResultType extends IntermediateResult<IndexableResultType>, ModelManagerType extends ModelManager<RCFModelType, IndexableResultType, IntermediateResultType, IndexType, IndexManagementType, CheckpointDaoType, ColdStarterType>, SaveResultStrategyType extends SaveResultStrategy<IndexableResultType, IntermediateResultType>, TaskCacheManagerType extends TaskCacheManager, TaskTypeEnum extends TaskType, TaskClass extends TimeSeriesTask, TaskManagerType extends TaskManager<TaskCacheManagerType, TaskTypeEnum, TaskClass, IndexType, IndexManagementType>>
     extends SingleRequestWorker<FeatureRequest> {
     private static final Logger LOG = LogManager.getLogger(ColdStartWorker.class);
 
@@ -128,7 +134,7 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
 
         String modelId = coldStartRequest.getModelId();
         if (null == modelId) {
-            String error = String.format(Locale.ROOT, "Fail to get model id for request %s", coldStartRequest);
+            String error = String.format(Locale.ROOT, "Failed to get model id for request %s", coldStartRequest);
             LOG.warn(error);
             listener.onFailure(new RuntimeException(error));
             return;
@@ -143,7 +149,7 @@ public abstract class ColdStartWorker<RCFModelType extends ThresholdedRandomCutF
                         LOG
                             .error(
                                 new ParameterizedMessage(
-                                    "fail to load trained model [{}] to cache due to the config not being found.",
+                                    "failed to load trained model [{}] to cache due to the config not being found.",
                                     modelState.getModelId()
                                 )
                             );

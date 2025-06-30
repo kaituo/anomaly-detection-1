@@ -16,6 +16,7 @@ import static org.opensearch.ad.model.AnomalyDetectorType.MULTI_ENTITY;
 import static org.opensearch.ad.model.AnomalyDetectorType.SINGLE_ENTITY;
 import static org.opensearch.core.xcontent.XContentParserUtils.ensureExpectedToken;
 import static org.opensearch.index.query.AbstractQueryBuilder.parseInnerQueryBuilder;
+import static org.opensearch.timeseries.constant.CommonName.TENANT_ID_FIELD;
 
 import java.io.IOException;
 import java.time.Instant;
@@ -156,6 +157,7 @@ public class AnomalyDetector extends Config {
      * @param lastBreakingUIChangeTime last update time to configuration that can break UI and we have
      *  to display updates from the changed time
      * @param frequency frequency of the detector
+     * @param tenantId tenant id
      */
     public AnomalyDetector(
         String detectorId,
@@ -185,7 +187,8 @@ public class AnomalyDetector extends Config {
         Integer customResultIndexTTL,
         Boolean flattenResultIndexMapping,
         Instant lastBreakingUIChangeTime,
-        TimeConfiguration frequency
+        TimeConfiguration frequency,
+        String tenantId
     ) {
         super(
             detectorId,
@@ -215,7 +218,8 @@ public class AnomalyDetector extends Config {
             customResultIndexTTL,
             flattenResultIndexMapping,
             lastBreakingUIChangeTime,
-            frequency
+            frequency,
+            tenantId
         );
 
         checkAndThrowValidationErrors(ValidationAspect.DETECTOR);
@@ -301,6 +305,7 @@ public class AnomalyDetector extends Config {
         } else {
             this.frequency = null;
         }
+        this.tenantId = input.readOptionalString();
     }
 
     public XContentBuilder toXContent(XContentBuilder builder) throws IOException {
@@ -374,6 +379,7 @@ public class AnomalyDetector extends Config {
         } else {
             output.writeBoolean(false);
         }
+        output.writeOptionalString(tenantId);
     }
 
     @Override
@@ -474,6 +480,7 @@ public class AnomalyDetector extends Config {
         Instant lastBreakingUIChangeTime = null;
         // by default, frequency is the same as interval when not set
         TimeConfiguration frequency = null;
+        String tenantId = null;
 
         ensureExpectedToken(XContentParser.Token.START_OBJECT, parser.currentToken(), parser);
         while (parser.nextToken() != XContentParser.Token.END_OBJECT) {
@@ -628,6 +635,9 @@ public class AnomalyDetector extends Config {
                         throw e;
                     }
                     break;
+                case TENANT_ID_FIELD:
+                    tenantId = parser.text();
+                    break;
                 default:
                     parser.skipChildren();
                     break;
@@ -662,7 +672,8 @@ public class AnomalyDetector extends Config {
             customResultIndexTTL,
             flattenResultIndexMapping,
             lastBreakingUIChangeTime,
-            frequency
+            frequency,
+            tenantId
         );
         detector.setDetectionDateRange(detectionDateRange);
         return detector;

@@ -18,7 +18,7 @@ import org.opensearch.ad.caching.ADCacheProvider;
 import org.opensearch.ad.caching.ADPriorityCache;
 import org.opensearch.ad.indices.ADIndex;
 import org.opensearch.ad.indices.ADIndexManagement;
-import org.opensearch.ad.ml.ADCheckpointDao;
+import org.opensearch.ad.ml.ADCheckpointStore;
 import org.opensearch.ad.ml.ADColdStart;
 import org.opensearch.ad.ml.ADModelManager;
 import org.opensearch.ad.model.AnomalyResult;
@@ -37,7 +37,18 @@ import org.opensearch.transport.TransportService;
 import com.amazon.randomcutforest.parkservices.ThresholdedRandomCutForest;
 
 public class DeleteADModelTransportAction extends
-    BaseDeleteModelTransportAction<ThresholdedRandomCutForest, ADPriorityCache, ADCacheProvider, ADTaskCacheManager, ADIndex, ADIndexManagement, ADCheckpointDao, ADCheckpointWriteWorker, AnomalyResult, ADColdStart> {
+    BaseDeleteModelTransportAction<
+        ThresholdedRandomCutForest,
+        ADPriorityCache,
+        ADCacheProvider,
+        ADTaskCacheManager,
+        ADIndex,
+        ADIndexManagement,
+        ADCheckpointStore,
+        ADCheckpointWriteWorker,
+        AnomalyResult,
+        ADColdStart
+    > {
     private static final Logger LOG = LogManager.getLogger(DeleteADModelTransportAction.class);
     private ADModelManager modelManager;
 

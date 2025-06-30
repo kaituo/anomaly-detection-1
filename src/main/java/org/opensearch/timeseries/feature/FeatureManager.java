@@ -34,11 +34,11 @@ import java.util.stream.Stream;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.opensearch.action.support.ThreadedActionListener;
+import org.opensearch.ad.constant.ADCommonName;
 import org.opensearch.ad.model.AnomalyDetector;
 import org.opensearch.core.action.ActionListener;
 import org.opensearch.threadpool.ThreadPool;
 import org.opensearch.timeseries.AnalysisType;
-import org.opensearch.timeseries.TimeSeriesAnalyticsPlugin;
 import org.opensearch.timeseries.common.exception.EndRunException;
 import org.opensearch.timeseries.constant.CommonMessages;
 import org.opensearch.timeseries.dataprocessor.Imputer;
@@ -148,7 +148,7 @@ public class FeatureManager {
                 detector,
                 Optional.empty(),
                 AnalysisType.AD,
-                new ThreadedActionListener<>(logger, threadPool, TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME, latestTimeListener, false)
+                new ThreadedActionListener<>(logger, threadPool, ADCommonName.AD_THREAD_POOL_NAME, latestTimeListener, false)
             );
     }
 
@@ -170,13 +170,7 @@ public class FeatureManager {
                         sampleRanges,
                         context,
                         false,
-                        new ThreadedActionListener<>(
-                            logger,
-                            threadPool,
-                            TimeSeriesAnalyticsPlugin.AD_THREAD_POOL_NAME,
-                            getFeaturesListener,
-                            false
-                        )
+                        new ThreadedActionListener<>(logger, threadPool, ADCommonName.AD_THREAD_POOL_NAME, getFeaturesListener, false)
                     );
             } catch (IOException e) {
                 listener.onFailure(new EndRunException(config.getId(), CommonMessages.INVALID_SEARCH_QUERY_MSG, e, true));
