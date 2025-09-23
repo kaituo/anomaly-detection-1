@@ -101,7 +101,7 @@ public class IntervalCalculation {
 
     public void findInterval(ActionListener<IntervalTimeConfiguration> listener) {
         ActionListener<IntervalTimeConfiguration> minimumIntervalListener = ActionListener.wrap(minInterval -> {
-            logger.debug("minimum interval found: {}", minInterval);
+            logger.info("minimum interval found: {}", minInterval);
             if (minInterval == null) {
                 logger.debug("Fail to find minimum interval");
                 listener.onResponse(null);
@@ -120,7 +120,7 @@ public class IntervalCalculation {
             LongBounds timeStampBounds = aggregationPrep.getTimeRangeBounds(minimumInterval, endMillis, lookBackWindows);
             SearchRequest searchRequest = aggregationPrep.createSearchRequest(minimumInterval, timeStampBounds, topEntity, 0);
             ActionListener<IntervalTimeConfiguration> intervalListener = ActionListener
-                .wrap(interval -> listener.onResponse(interval), exception -> {
+                .wrap(interval -> {System.out.println("interval: " + interval); listener.onResponse(interval);}, exception -> {
                     listener.onFailure(exception);
                     logger.error("Failed to get interval recommendation", exception);
                 });
@@ -184,7 +184,7 @@ public class IntervalCalculation {
                 }
 
                 if (++attempts > 10) {                                    // retry budget exhausted
-                    logger.debug("number of attempts: {}", attempts);
+                    logger.info("number of attempts: {}", attempts);
                     intervalListener.onResponse(null);
                     return;
                 }
@@ -205,7 +205,7 @@ public class IntervalCalculation {
 
                 int nextMin = nextNiceInterval((int) currentIntervalToTry.getInterval());
                 if (nextMin <= currentIntervalToTry.getInterval()) {           // cannot grow further
-                    logger.debug("Cannot grow interval further: next={}, current={}", nextMin, currentIntervalToTry.getInterval());
+                    logger.info("Cannot grow interval further: next={}, current={}", nextMin, currentIntervalToTry.getInterval());
                     intervalListener.onResponse(null);
                     return;
                 }
