@@ -120,13 +120,20 @@ jobs:
         run: |
           ./gradlew build -x spotlessJava
       # coverage.gradle is only applied in single local node test
-      - name: Upload Coverage Report
+      - name: Upload Combined Coverage Report
         uses: codecov/codecov-action@v5
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           file: ./build/reports/jacoco/test/jacocoTestReport.xml
           flags: plugin
+      - name: Upload integTest Coverage Report
+        uses: codecov/codecov-action@v5
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+        with:
+          file: ./build/reports/jacoco/integTest/jacocoIntegTestReport.xml
+          flags: plugin_integtest
       - name: Publish to Maven Local
         run: |
           ./gradlew publishToMavenLocal

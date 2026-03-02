@@ -21,3 +21,5 @@ comment:
 flags:
   plugin:
     carryforward: true
+  plugin_integtest:
+    carryforward: true
